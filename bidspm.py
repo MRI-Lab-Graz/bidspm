@@ -135,18 +135,18 @@ def detect_platform_and_suggest_container():
     system = platform.system().lower()
     
     if system == "darwin":  # macOS
-        return "docker", "Consider using Docker on macOS. Apptainer is not supported."
+        return "docker", "Docker recommended for macOS (Apptainer not supported)."
     elif system == "linux":
-        # Check if apptainer is available
+        # Prefer Docker if available (for consistency)
         try:
-            subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
-            return "apptainer", "Apptainer detected on Linux - recommended for HPC environments."
+            subprocess.run(["docker", "--version"], capture_output=True, check=True)
+            return "docker", "Docker detected on Linux - using for consistency with macOS."
         except (subprocess.CalledProcessError, FileNotFoundError):
             try:
-                subprocess.run(["docker", "--version"], capture_output=True, check=True)
-                return "docker", "Docker detected on Linux."
+                subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
+                return "apptainer", "Apptainer detected on Linux."
             except (subprocess.CalledProcessError, FileNotFoundError):
-                return None, "Neither Apptainer nor Docker found on Linux system."
+                return None, "Neither Docker nor Apptainer found on Linux system."
     else:
         return "docker", f"Unknown platform ({system}), Docker recommended."
 
