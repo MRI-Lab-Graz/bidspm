@@ -34,8 +34,8 @@ class Config:
     MODELS_FILE: str
     TASKS: List[str]
     DATASET: bool
-    SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
     FMRIPREP_DIR: Path
+    SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
 
 
 @dataclass
@@ -52,18 +52,51 @@ def load_config(config_file: str) -> Config:
     with open(config_file) as f:
         data = json.load(f)
 
+    # --- Validation ---
+    required_fields = ["WD", "BIDS_DIR", "SPACE", "FWHM", "SMOOTH", "STATS", "DATASET", "TASKS", "FMRIPREP_DIR"]
+    for field in required_fields:
+        if field not in data:
+            log_error(f"Missing required field in config: '{field}'")
+
+    # MODELS_FILE is optional if -m is used, but warn if beides fehlt
+    if "MODELS_FILE" not in data:
+        print("⚠️  No MODELS_FILE in config. You must provide -m on the command line!")
+
+    # Check types and values
+    if not isinstance(data["TASKS"], list) or not data["TASKS"]:
+        log_error("'TASKS' must be a non-empty list!")
+    if "SUBJECTS" in data and data["SUBJECTS"] is not None:
+        if not isinstance(data["SUBJECTS"], list):
+            log_error("'SUBJECTS' must be a list or omitted/null!")
+        if len(data["SUBJECTS"]) == 0:
+            print("⚠️  'SUBJECTS' is an empty list. No subjects will be processed!")
+
+    # Path checks
+    wd = Path(data["WD"])
+    bids_dir = Path(data["BIDS_DIR"])
+    fmriprep_dir = Path(data["FMRIPREP_DIR"])
+    for p, name in [(wd, "WD"), (bids_dir, "BIDS_DIR"), (fmriprep_dir, "FMRIPREP_DIR")]:
+        if not p.exists() or not p.is_dir():
+            log_error(f"{name} '{p}' does not exist or is not a directory!")
+
+    # Log config summary
+    print("--- Loaded configuration ---")
+    for k, v in data.items():
+        print(f"{k}: {v}")
+    print("---------------------------")
+
     return Config(
-        WD=Path(data["WD"]),
-        BIDS_DIR=Path(data["BIDS_DIR"]),
+        WD=wd,
+        BIDS_DIR=bids_dir,
         SPACE=data["SPACE"],
         FWHM=data["FWHM"],
         SMOOTH=data["SMOOTH"],
         STATS=data["STATS"],
-        MODELS_FILE=data["MODELS_FILE"],
+        MODELS_FILE=data.get("MODELS_FILE", None),
         TASKS=data["TASKS"],
         DATASET=data["DATASET"],
-        SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
-        FMRIPREP_DIR=Path(data["FMRIPREP_DIR"])
+        FMRIPREP_DIR=fmriprep_dir,
+        SUBJECTS=data.get("SUBJECTS")  # Optional field, defaults to None
     )
 
 
@@ -308,25 +341,32 @@ def main():
     # Use specified config files or look for defaults
     config_file = args.settings if args.settings else CONFIG_FILE
     container_config_file = args.container if args.container else CONTAINER_CONFIG_FILE
-    
+
     # Check if configuration files exist, show help if not
-    if not Path(config_file).exists() or not Path(container_config_file).exists():
+    missing_files = []
+    if not Path(config_file).exists():
+        missing_files.append(config_file)
+    if not Path(container_config_file).exists():
+        missing_files.append(container_config_file)
+    if missing_files:
         print("❌ Configuration files not found!")
-        if not Path(config_file).exists():
-            print(f"   Missing: {config_file}")
-        if not Path(container_config_file).exists():
-            print(f"   Missing: {container_config_file}")
+        for f in missing_files:
+            print(f"   Missing: {f}")
         print("\nPlease specify configuration files using -s and -c options, or ensure default files exist.")
         print("\n" + "="*60)
         show_help()
         sys.exit(1)
-    
+
     # Dependency Checks
     check_command("python3")
 
     # Load configurations
     config = load_config(config_file)
     container_config = load_container_config(container_config_file)
+
+    # Validate MODELS_FILE or -m
+    if not args.model and not config.MODELS_FILE:
+        log_error("No model file specified! Please provide MODELS_FILE in config or use -m.")
     
     # Determine model file path - command line argument overrides config
     if args.model:
