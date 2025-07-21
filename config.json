@@ -1,13 +1,14 @@
 {
-  "WD": "/data/local/107_JM01",
-  "BIDS_DIR": "/data/local/107_JM01/rawdata",
+  "WD": "/Volumes/Thunder/138",
+  "BIDS_DIR": "/Volumes/Thunder/138/rawdata",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": true,
   "STATS": false,
-  "DATASET": true,
-  "MODELS_FILE": "model_pa_ses-2.json",
-  "TASKS": ["pa"],
-  "SUBJECTS": ["01", "02", "03"],
-  "FMRIPREP_DIR": "/data/local/107_JM01/derivatives/fmriprep"
+  "DATASET": false,
+  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d2.json",
+  "TASKS": ["symbol"],
+  "SUBJECTS": ["138014"],
+  "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
+  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep"
 }

@@ -20,6 +20,56 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 🌍 **SPACE Validation**: Validates spatial reference spaces exist in fMRIPrep data
 - 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
 
+## 🌍 Multi-Platform Support
+
+The tool automatically detects your platform and selects the appropriate container runtime:
+
+### 🖥️ **macOS (Development/Piloting)**
+- **Auto-detected**: Docker (Apptainer not supported on macOS)
+- **Container**: `container.json` (Docker configuration)
+- **Usage**: Perfect for testing and piloting analyses
+
+### 🐧 **Linux (Production/HPC)**
+- **Auto-detected**: Apptainer (preferred) or Docker
+- **Container**: `container_production.json` (Apptainer) or `container.json` (Docker)
+- **Usage**: Production runs on high-performance computing systems
+
+### 🚀 **Quick Platform Setup**
+
+```bash
+# Run platform-specific setup
+./setup_platform.sh
+
+# Or let the tool auto-detect
+python bidspm.py --pilot  # Automatically selects the right container
+```
+
+### 📁 **Container Configuration Files**
+
+The tool supports multiple container configurations:
+
+- `container.json` - Docker for macOS/development
+- `container_production.json` - Apptainer for Linux/HPC
+- `container_apptainer.json` - Alternative Apptainer config
+
+**Example Docker config (macOS):**
+```json
+{
+  "container_type": "docker",
+  "docker_image": "cpplab/bidspm:latest",
+  "apptainer_image": ""
+}
+```
+
+**Example Apptainer config (Linux):**
+```json
+{
+  "container_type": "apptainer", 
+  "docker_image": "",
+  "apptainer_image": "/path/to/bidspm.sif"
+}
+```
+
 ## Prerequisites
 
 - Python 3.8 or higher

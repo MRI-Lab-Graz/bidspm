@@ -7,6 +7,7 @@ import shutil
 import argparse
 import random
 import re
+import platform
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -127,6 +128,55 @@ def load_container_config(config_file: str) -> ContainerConfig:
         docker_image=data.get("docker_image", ""),
         apptainer_image=data.get("apptainer_image", "")
     )
+
+
+def detect_platform_and_suggest_container():
+    """Detect platform and suggest appropriate container configuration."""
+    system = platform.system().lower()
+    
+    if system == "darwin":  # macOS
+        return "docker", "Consider using Docker on macOS. Apptainer is not supported."
+    elif system == "linux":
+        # Check if apptainer is available
+        try:
+            subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
+            return "apptainer", "Apptainer detected on Linux - recommended for HPC environments."
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            try:
+                subprocess.run(["docker", "--version"], capture_output=True, check=True)
+                return "docker", "Docker detected on Linux."
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return None, "Neither Apptainer nor Docker found on Linux system."
+    else:
+        return "docker", f"Unknown platform ({system}), Docker recommended."
+
+
+def auto_select_container_config():
+    """Automatically select container configuration based on platform."""
+    detected_type, message = detect_platform_and_suggest_container()
+    
+    print(f"🔍 Platform detection: {message}")
+    
+    # Try to find appropriate container config
+    config_candidates = []
+    
+    if detected_type == "docker":
+        config_candidates = ["container.json", "container_docker.json", "container_dev.json"]
+    elif detected_type == "apptainer":
+        config_candidates = ["container_production.json", "container_apptainer.json", "container.json"]
+    
+    for candidate in config_candidates:
+        if Path(candidate).exists():
+            try:
+                with open(candidate, 'r') as f:
+                    config = json.load(f)
+                if config.get("container_type") == detected_type:
+                    print(f"✅ Auto-selected container config: {candidate}")
+                    return candidate
+            except Exception:
+                continue
+    
+    return None
 
 
 # ------------------------------
@@ -514,7 +564,13 @@ def main():
     
     # Use specified config files or look for defaults
     config_file = args.settings if args.settings else CONFIG_FILE
-    container_config_file = args.container if args.container else CONTAINER_CONFIG_FILE
+    
+    # Auto-select container config if not specified
+    if args.container:
+        container_config_file = args.container
+    else:
+        auto_selected = auto_select_container_config()
+        container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
 
     # Check if configuration files exist, show help if not
     missing_files = []

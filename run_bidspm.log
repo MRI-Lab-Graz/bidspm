@@ -209,3 +209,6 @@
 2025-07-21 14:43:07 [ERROR] Command failed: Command '['docker', 'run', '--rm', '-v', '/Volumes/Thunder/138:/data', 'cpplab/bidspm:arm64', '/data/rawdata', '/data/derivatives', 'dataset', 'stats', '--preproc_dir', '/data/derivatives/bidspm-preproc', '--model_file', '/data/derivatives/models/model_d1.json', '--task', 'nonsymbol', '--space', 'MNI152NLin6Asym', '--fwhm', '8', '--verbosity', '0']' returned non-zero exit status 125.
 2025-07-21 16:00:31 [ERROR] WD '/data/local/107_JM01' does not exist or is not a directory!
 2025-07-21 17:47:08 [ERROR] Missing required field in config: 'DERIVATIVES_DIR'
+2025-07-21 17:56:33 [ERROR] Missing required field in config: 'DERIVATIVES_DIR'
+2025-07-21 17:57:04 [ERROR] 'SUBJECTS' must be a list or omitted/null!
+2025-07-21 17:57:21 [ERROR] WD '/Volumes/Thunder/138 ' does not exist or is not a directory!
