@@ -220,6 +220,22 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
             model_container_path = "/models/smdl.json"
         
+        # Add additional bind mounts for writable directories to solve "Read-only file system" issues
+        atlas_dir = config.WD / "atlas"
+        cpp_roi_atlas_dir = config.WD / "cpp_roi_atlas"
+        error_logs_dir = config.WD / "error_logs"
+        
+        # Create directories if they don't exist
+        atlas_dir.mkdir(exist_ok=True)
+        cpp_roi_atlas_dir.mkdir(exist_ok=True)
+        error_logs_dir.mkdir(exist_ok=True)
+        
+        cmd.extend([
+            "--bind", f"{atlas_dir}:/opt/spm12/atlas",
+            "--bind", f"{cpp_roi_atlas_dir}:/home/neuro/bidspm/lib/CPP_ROI/atlas",
+            "--bind", f"{error_logs_dir}:/home/neuro/bidspm/error_logs"
+        ])
+        
         cmd.append(container_config.apptainer_image)
         cmd.extend(args)
         return cmd
