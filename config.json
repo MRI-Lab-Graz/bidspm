@@ -1,0 +1,11 @@
+{
+  "WD": "/Volumes/Thunder/138",
+  "BIDS_DIR": "/Volumes/Thunder/138/rawdata",
+  "SPACE": "MNI152NLin6Asym",
+  "FWHM": 8,
+  "SMOOTH": false,
+  "STATS": false,
+  "DATASET": true,
+  "MODELS_FILE": "model_d1.json",
+  "TASKS": ["nonsymbol", "symbol"]
+}

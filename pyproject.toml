@@ -1,0 +1,12 @@
+# pyproject.toml
+[project]
+name = "bidspm-runner"
+version = "0.1.0"
+description = "Run BIDS-StatsModel pipelines via Docker"
+requires-python = ">=3.8"
+
+dependencies = [
+  "requests",
+  "jsonschema"
+]
+
