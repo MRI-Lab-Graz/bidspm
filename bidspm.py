@@ -500,10 +500,11 @@ def main():
                 continue
             log_debug(f"Processing subject: {subject_label}, task: {task}")
 
+
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
                 smooth_args = [
-                    "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
+                    "/data/derivatives/fmriprep", "/data/derivatives", "subject", "smooth",
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
@@ -511,15 +512,14 @@ def main():
                     "--verbosity", "0"
                 ]
                 cmd = build_container_command(container_config, config, smooth_args, model_file_path)
-                # Debug: Show the exact command being executed
                 log_debug(f"Full container command: {' '.join(cmd)}")
                 run_command(cmd)
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
                 stats_args = [
-                    "/raw", "/derivatives", "subject", "stats",
-                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                    "/data/rawdata", "/data/derivatives", "subject", "stats",
+                    "--preproc_dir", "/data/derivatives/bidspm-preproc",
                     "--model_file", "/models/smdl.json",
                     "--participant_label", subject_label,
                     "--task", task,
@@ -533,8 +533,8 @@ def main():
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
             dataset_args = [
-                "/raw", "/derivatives", "dataset", "stats",
-                "--preproc_dir", "/derivatives/bidspm-preproc",
+                "/data/rawdata", "/data/derivatives", "dataset", "stats",
+                "--preproc_dir", "/data/derivatives/bidspm-preproc",
                 "--model_file", "/models/smdl.json",
                 "--task", task,
                 "--space", config.SPACE,
