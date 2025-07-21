@@ -14,6 +14,7 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 📝 **Logging**: Detailed logging of all processing steps
 - ✅ **Validation**: Automatic validation of BIDS-StatsModel files
 - 🚀 **Batch Processing**: Processing of multiple subjects and tasks
+- 🧪 **Pilot Mode**: Test configuration with one random subject
 
 ## Prerequisites
 
@@ -75,7 +76,8 @@ Create a `config.json` file with your specific settings:
   "STATS": true,
   "DATASET": true,
   "MODELS_FILE": "model_d1.json",
-  "TASKS": ["nonsymbol", "symbol"]
+  "TASKS": ["nonsymbol", "symbol"],
+  "SUBJECTS": ["01", "02", "03"]
 }
 ```
 
@@ -90,6 +92,7 @@ Create a `config.json` file with your specific settings:
 - `DATASET`: Boolean - whether to perform dataset-level analyses
 - `MODELS_FILE`: Name of the BIDS-StatsModel JSON file
 - `TASKS`: List of fMRI tasks to process
+- `SUBJECTS`: List of specific subjects to process (optional - if omitted, all subjects found will be processed)
 
 ### 2. Container configuration (`container.json`)
 
@@ -152,6 +155,7 @@ python bidspm.py -h
 - `-s, --settings, --config`: Path to main configuration file (default: config.json)
 - `-c, --container`: Path to container configuration file (default: container.json)
 - `-m, --model, --model-file`: Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
+- `--pilot`: Pilot mode - process only one random subject for testing
 
 **Logging:**
 
@@ -205,7 +209,25 @@ python bidspm.py -m /path/to/custom_model.json
 python bidspm.py -s study_config.json -c docker_config.json -m models/task_analysis.json
 ```
 
-#### Example 4: Multi-subject batch processing
+#### Example 4: Pilot mode for testing
+
+```bash
+# Test your configuration with one random subject
+python bidspm.py -s config.json -c container.json --pilot
+
+# Pilot mode can be combined with other options
+python bidspm.py -s test_config.json -c container.json -m pilot_model.json --pilot
+```
+
+**Note:** Pilot mode is particularly useful for:
+
+- Testing your configuration before running the full dataset
+- Quick validation of container setup and model files
+- Debugging analysis parameters with faster execution
+- If `SUBJECTS` is specified in config, pilot mode selects randomly from that list
+- If no `SUBJECTS` specified, pilot mode selects randomly from all discovered subjects
+
+#### Example 5: Multi-subject batch processing
 
 The tool automatically processes all subjects in the fMRIPrep output directory:
 

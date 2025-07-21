@@ -7,5 +7,6 @@
   "STATS": false,
   "DATASET": true,
   "MODELS_FILE": "model_pa_ses-2.json",
-  "TASKS": ["pa"]
+  "TASKS": ["pa"],
+  "SUBJECTS": ["01", "02", "03"]
 }

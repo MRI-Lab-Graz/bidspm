@@ -6,10 +6,11 @@ import sys
 import os
 import shutil
 import argparse
+import random
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 # ------------------------------
@@ -33,6 +34,7 @@ class Config:
     MODELS_FILE: str
     TASKS: List[str]
     DATASET: bool
+    SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
 
 
 @dataclass
@@ -58,7 +60,8 @@ def load_config(config_file: str) -> Config:
         STATS=data["STATS"],
         MODELS_FILE=data["MODELS_FILE"],
         TASKS=data["TASKS"],
-        DATASET=data["DATASET"]
+        DATASET=data["DATASET"],
+        SUBJECTS=data.get("SUBJECTS")  # Optional field, defaults to None
     )
 
 
@@ -178,6 +181,7 @@ OPTIONS:
     -s, --settings, --config     Path to main configuration file
     -c, --container               Path to container configuration file
     -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
+    --pilot                       Pilot mode: process only one random subject for testing
 
 DESCRIPTION:
     BIDSPM Runner executes neuroimaging analysis pipelines using containerized 
@@ -203,8 +207,11 @@ CONFIGURATION EXAMPLE (main config file):
         "STATS": true,
         "DATASET": true,
         "MODELS_FILE": "model.json",
-        "TASKS": ["task1", "task2"]
+        "TASKS": ["task1", "task2"],
+        "SUBJECTS": ["01", "02", "03"]
     }
+    
+    Note: SUBJECTS is optional - if omitted, all subjects found will be processed
 
 CONTAINER CONFIGURATION EXAMPLE:
     {
@@ -238,6 +245,9 @@ EXAMPLES:
     # Run with custom model file
     python bidspm.py -s config.json -c container.json -m /path/to/my_model.json
     
+    # Pilot mode: test with one random subject
+    python bidspm.py -s config.json -c container.json --pilot
+    
     # Run with all custom files
     python bidspm.py -s study_config.json -c docker_setup.json -m models/task_model.json
     
@@ -269,6 +279,8 @@ def parse_arguments():
                        help='Path to container configuration file')
     parser.add_argument('-m', '--model', '--model-file',
                        help='Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)')
+    parser.add_argument('--pilot', action='store_true',
+                       help='Pilot mode: process only one random subject for testing')
     
     return parser.parse_args()
 
@@ -360,38 +372,82 @@ def main():
         print(f">>> Processing task: {task}")
         print("---------------------------------------------------")
 
-        for sub_dir in (config.WD / "derivatives" / "fmriprep").glob("sub-*"):
-            if sub_dir.is_dir():
-                subject_label = sub_dir.name.replace("sub-", "")
-                log_debug(f"Processing subject: {subject_label}, task: {task}")
+        # Get list of subjects to process
+        if args.pilot:
+            # Pilot mode: use one random subject
+            all_subjects = []
+            if config.SUBJECTS:
+                # Random from specified subjects
+                all_subjects = config.SUBJECTS
+            else:
+                # Random from auto-discovered subjects
+                for sub_dir in (config.WD / "derivatives" / "fmriprep").glob("sub-*"):
+                    if sub_dir.is_dir():
+                        subject_label = sub_dir.name.replace("sub-", "")
+                        all_subjects.append(subject_label)
+            
+            if not all_subjects:
+                log_error("No subjects found for pilot mode.")
+            
+            # Select random subject
+            pilot_subject = random.choice(all_subjects)
+            subjects_to_process = [pilot_subject]
+            log_debug(f"Pilot mode: selected random subject {pilot_subject}")
+            print(f">>> PILOT MODE: Processing random subject: {pilot_subject}")
+            
+        elif config.SUBJECTS:
+            # Use specific subjects from config
+            subjects_to_process = config.SUBJECTS
+            log_debug(f"Processing specific subjects: {', '.join(subjects_to_process)}")
+            print(f">>> Processing specific subjects: {', '.join(subjects_to_process)}")
+        else:
+            # Auto-discover all subjects from fmriprep derivatives
+            subjects_to_process = []
+            for sub_dir in (config.WD / "derivatives" / "fmriprep").glob("sub-*"):
+                if sub_dir.is_dir():
+                    subject_label = sub_dir.name.replace("sub-", "")
+                    subjects_to_process.append(subject_label)
+            log_debug(f"Auto-discovered subjects: {', '.join(subjects_to_process)}")
+            print(f">>> Auto-discovered {len(subjects_to_process)} subjects")
 
-                if config.SMOOTH:
-                    print(f">>> Smoothing for subject: {subject_label}, task: {task}")
-                    smooth_args = [
-                        "/data/derivatives/fmriprep", "/data/derivatives", "subject", "smooth",
-                        "--participant_label", subject_label,
-                        "--task", task,
-                        "--space", config.SPACE,
-                        "--fwhm", str(config.FWHM),
-                        "--verbosity", "0"
-                    ]
-                    cmd = build_container_command(container_config, config, smooth_args)
-                    run_command(cmd)
+        # Process each subject
+        for subject_label in subjects_to_process:
+            # Check if subject directory exists in fmriprep derivatives
+            subject_dir = config.WD / "derivatives" / "fmriprep" / f"sub-{subject_label}"
+            if not subject_dir.is_dir():
+                print(f">>> WARNING: Subject directory not found for {subject_label}, skipping...")
+                log_debug(f"Subject directory not found: {subject_dir}")
+                continue
+            
+            log_debug(f"Processing subject: {subject_label}, task: {task}")
 
-                if config.STATS:
-                    print(f">>> Running stats for subject: {subject_label}, task: {task}")
-                    stats_args = [
-                        "/data/rawdata", "/data/derivatives", "subject", "stats",
-                        "--preproc_dir", "/data/derivatives/bidspm-preproc",
-                        "--model_file", f"/data/derivatives/models/{models_file_name}",
-                        "--participant_label", subject_label,
-                        "--task", task,
-                        "--space", config.SPACE,
-                        "--fwhm", str(config.FWHM),
-                        "--verbosity", "0"
-                    ]
-                    cmd = build_container_command(container_config, config, stats_args)
-                    run_command(cmd)
+            if config.SMOOTH:
+                print(f">>> Smoothing for subject: {subject_label}, task: {task}")
+                smooth_args = [
+                    "/data/derivatives/fmriprep", "/data/derivatives", "subject", "smooth",
+                    "--participant_label", subject_label,
+                    "--task", task,
+                    "--space", config.SPACE,
+                    "--fwhm", str(config.FWHM),
+                    "--verbosity", "0"
+                ]
+                cmd = build_container_command(container_config, config, smooth_args)
+                run_command(cmd)
+
+            if config.STATS:
+                print(f">>> Running stats for subject: {subject_label}, task: {task}")
+                stats_args = [
+                    "/data/rawdata", "/data/derivatives", "subject", "stats",
+                    "--preproc_dir", "/data/derivatives/bidspm-preproc",
+                    "--model_file", f"/data/derivatives/models/{models_file_name}",
+                    "--participant_label", subject_label,
+                    "--task", task,
+                    "--space", config.SPACE,
+                    "--fwhm", str(config.FWHM),
+                    "--verbosity", "0"
+                ]
+                cmd = build_container_command(container_config, config, stats_args)
+                run_command(cmd)
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
