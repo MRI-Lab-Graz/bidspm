@@ -35,6 +35,7 @@ class Config:
     TASKS: List[str]
     DATASET: bool
     FMRIPREP_DIR: Path
+    VERBOSITY: int = 0  # Default to 0, can be increased for more verbose output
     SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
 
 
@@ -71,6 +72,12 @@ def load_config(config_file: str) -> Config:
         if len(data["SUBJECTS"]) == 0:
             print("⚠️  'SUBJECTS' is an empty list. No subjects will be processed!")
 
+    # Validate VERBOSITY if provided
+    verbosity = data.get("VERBOSITY", 0)
+    if not isinstance(verbosity, int) or verbosity < 0 or verbosity > 3:
+        print("⚠️  VERBOSITY must be an integer between 0-3. Using default value 0.")
+        verbosity = 0
+
     # Path checks
     wd = Path(data["WD"])
     bids_dir = Path(data["BIDS_DIR"])
@@ -98,6 +105,7 @@ def load_config(config_file: str) -> Config:
         TASKS=data["TASKS"],
         DATASET=data["DATASET"],
         FMRIPREP_DIR=fmriprep_dir,
+        VERBOSITY=verbosity,
         SUBJECTS=data.get("SUBJECTS")  # Optional field, defaults to None
     )
 
@@ -296,10 +304,12 @@ CONFIGURATION EXAMPLE (main config file):
         "DATASET": true,
         "MODELS_FILE": "model.json",
         "TASKS": ["task1", "task2"],
-        "SUBJECTS": ["01", "02", "03"]
+        "SUBJECTS": ["01", "02", "03"],
+        "VERBOSITY": 1
     }
     
     Note: SUBJECTS is optional - if omitted, all subjects found will be processed
+    Note: VERBOSITY is optional (0-3) - higher values provide more detailed output
 
 CONTAINER CONFIGURATION EXAMPLE:
     {
@@ -533,7 +543,7 @@ def main():
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
-                    "--verbosity", "0"
+                    "--verbosity", str(config.VERBOSITY)
                 ]
                 cmd = build_container_command(container_config, config, smooth_args, model_file_path)
                 log_debug(f"Full container command: {' '.join(cmd)}")
@@ -554,7 +564,7 @@ def main():
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
-                    "--verbosity", "0"
+                    "--verbosity", str(config.VERBOSITY)
                 ]
                 cmd = build_container_command(container_config, config, stats_args, model_file_path)
                 success = run_command(cmd)
@@ -573,7 +583,7 @@ def main():
                 "--task", task,
                 "--space", config.SPACE,
                 "--fwhm", str(config.FWHM),
-                "--verbosity", "0"
+                "--verbosity", str(config.VERBOSITY)
             ]
             cmd = build_container_command(container_config, config, dataset_args, model_file_path)
             success = run_command(cmd)
