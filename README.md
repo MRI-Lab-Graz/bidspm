@@ -32,15 +32,21 @@ cd bidspm
 pip install -e .
 ```
 
-### Option 2: With setup script (Ubuntu)
+### Option 2: With setup script (cross-platform)
 
-The included setup script automatically creates a virtual environment and installs all dependencies:
+The included setup script automatically creates a virtual environment using UV and installs all dependencies:
 
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
 chmod +x setup.sh
 ./setup.sh
+```
+
+Then activate the environment:
+
+```bash
+source ./activate_bidspm.sh
 ```
 
 ### Option 3: Manual installation

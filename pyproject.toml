@@ -1,4 +1,8 @@
 # pyproject.toml
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "bidspm-runner"
 version = "0.1.0"
@@ -9,4 +13,11 @@ dependencies = [
   "requests",
   "jsonschema"
 ]
+
+[project.scripts]
+bidspm = "bidspm:main"
+validate-bids-model = "validate_bids_model:main"
+
+[tool.setuptools]
+py-modules = ["bidspm", "validate_bids_model"]
 

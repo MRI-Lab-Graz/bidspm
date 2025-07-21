@@ -1,0 +1,10 @@
+README.md
+bidspm.py
+pyproject.toml
+validate_bids_model.py
+bidspm_runner.egg-info/PKG-INFO
+bidspm_runner.egg-info/SOURCES.txt
+bidspm_runner.egg-info/dependency_links.txt
+bidspm_runner.egg-info/entry_points.txt
+bidspm_runner.egg-info/requires.txt
+bidspm_runner.egg-info/top_level.txt
