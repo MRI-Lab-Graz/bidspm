@@ -1,0 +1,36 @@
+{
+  "Name": "External Test Model",
+  "BIDSModelVersion": "1.0.0",
+  "Description": "A test model located outside derivatives directory",
+  "Input": {
+    "task": ["task-test"]
+  },
+  "Nodes": [
+    {
+      "Level": "Run",
+      "Name": "run_level",
+      "GroupBy": ["run", "subject"],
+      "Transformations": {
+        "Transformer": "pybids-transforms-v1",
+        "Instructions": [
+          {
+            "Name": "Factor",
+            "Input": ["trial_type"]
+          }
+        ]
+      },
+      "Model": {
+        "X": ["trial_type.condition1", "trial_type.condition2"],
+        "Type": "glm"
+      },
+      "Contrasts": [
+        {
+          "Name": "condition1",
+          "ConditionList": ["trial_type.condition1"],
+          "Weights": [1],
+          "Test": "t"
+        }
+      ]
+    }
+  ]
+}

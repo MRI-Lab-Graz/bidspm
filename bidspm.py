@@ -178,10 +178,21 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{config.BIDS_DIR}:/raw",
-            "-v", f"{config.DERIVATIVES_DIR}:/derivatives",
-            "-v", f"{model_file_path}:/models/smdl.json",
-            container_config.docker_image
+            "-v", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
+        
+        # Check if model file is inside derivatives directory
+        try:
+            model_file_path.relative_to(config.DERIVATIVES_DIR)
+            # Model file is inside derivatives, use relative path
+            relative_model_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
+            model_container_path = f"/derivatives/{relative_model_path}"
+        except ValueError:
+            # Model file is outside derivatives, mount it separately
+            cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
+            model_container_path = "/models/smdl.json"
+        
+        cmd.append(container_config.docker_image)
         cmd.extend(args)
         return cmd
     
@@ -195,10 +206,21 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "apptainer", "exec",
             "--bind", f"{config.BIDS_DIR}:/raw",
-            "--bind", f"{config.DERIVATIVES_DIR}:/derivatives",
-            "--bind", f"{model_file_path}:/models/smdl.json",
-            container_config.apptainer_image
+            "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
+        
+        # Check if model file is inside derivatives directory
+        try:
+            model_file_path.relative_to(config.DERIVATIVES_DIR)
+            # Model file is inside derivatives, use relative path
+            relative_model_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
+            model_container_path = f"/derivatives/{relative_model_path}"
+        except ValueError:
+            # Model file is outside derivatives, mount it separately
+            cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
+            model_container_path = "/models/smdl.json"
+        
+        cmd.append(container_config.apptainer_image)
         cmd.extend(args)
         return cmd
     
@@ -383,8 +405,12 @@ def main():
             model_file_path = config.DERIVATIVES_DIR / "models" / model_file_path
         models_file_name = model_file_path.name
     else:
-        model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
-        models_file_name = config.MODELS_FILE
+        # If MODELS_FILE is absolute path, use it directly
+        if config.MODELS_FILE and Path(config.MODELS_FILE).is_absolute():
+            model_file_path = Path(config.MODELS_FILE)
+        else:
+            model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
+        models_file_name = model_file_path.name
     
     # Set up log file with model name and timestamp
     global LOG_FILE
