@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # setup.sh - Setup script for bidspm-runner
-# This script sets up a Python virtual environment using venv and installs
-# dependencies using UV package manager on Ubuntu systems.
+# This script sets up a Python virtual environment (.bidspm) and installs
+# dependencies using UV package manager.
 
 set -e  # Exit on any error
 
@@ -32,11 +32,8 @@ print_error() {
 
 # Check if running on Ubuntu/Debian
 check_os() {
-    if ! command -v apt-get &> /dev/null; then
-        print_error "This script is designed for Ubuntu/Debian systems with apt-get package manager."
-        exit 1
-    fi
-    print_success "Running on Ubuntu/Debian system"
+    print_status "Setting up BIDSPM environment..."
+    print_success "Cross-platform setup (no sudo required)"
 }
 
 # Check if Python 3.8+ is available
@@ -58,24 +55,6 @@ check_python() {
 }
 
 # Install system dependencies
-install_system_deps() {
-    print_status "Installing system dependencies..."
-    
-    # Update package list
-    sudo apt-get update
-    
-    # Install required packages
-    sudo apt-get install -y \
-        python3-venv \
-        python3-pip \
-        curl \
-        build-essential \
-        python3-dev
-    
-    print_success "System dependencies installed"
-}
-
-# Install UV package manager
 install_uv() {
     print_status "Installing UV package manager..."
     
@@ -111,8 +90,9 @@ create_venv() {
         rm -rf .bidspm
     fi
     
-    # Create new virtual environment
-    python3 -m venv .bidspm
+    # Create new virtual environment using UV
+    export PATH="$HOME/.cargo/bin:$PATH"
+    uv venv .bidspm
     
     print_success "Virtual environment '.bidspm' created"
 }
@@ -121,15 +101,13 @@ create_venv() {
 install_dependencies() {
     print_status "Installing Python dependencies using UV..."
     
-    # Activate virtual environment
-    source .bidspm/bin/activate
-    
     # Add UV to PATH if not already there
     export PATH="$HOME/.cargo/bin:$PATH"
     
-    # Install dependencies from pyproject.toml
+    # Install dependencies from pyproject.toml using UV with the virtual environment
     if [ -f "pyproject.toml" ]; then
-        uv pip install -e .
+        # Use UV to install the project in the virtual environment
+        uv pip install --python .bidspm/bin/python -e .
         print_success "Dependencies installed from pyproject.toml"
     else
         print_error "pyproject.toml not found in current directory"
@@ -138,7 +116,7 @@ install_dependencies() {
     
     # Verify installation by listing installed packages
     print_status "Installed packages:"
-    uv pip list
+    uv pip list --python .bidspm/bin/python
 }
 
 # Create activation script
@@ -149,15 +127,11 @@ create_activation_script() {
 #!/bin/bash
 # Activation script for bidspm-runner environment
 
-# Add UV to PATH
-export PATH="$HOME/.cargo/bin:$PATH"
-
 # Activate virtual environment
 source .bidspm/bin/activate
 
 echo "BIDSPM virtual environment activated!"
 echo "Python path: $(which python)"
-echo "UV path: $(which uv)"
 echo ""
 echo "To deactivate, run: deactivate"
 EOF
@@ -175,7 +149,6 @@ main() {
     
     check_os
     check_python
-    install_system_deps
     install_uv
     create_venv
     install_dependencies
