@@ -472,9 +472,10 @@ def main():
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
                 smooth_args = [
-                    "/data/derivatives/fmriprep", "/data/derivatives", "subject", "smooth",
-                    "--participant_label", subject_label,
+                    "/data/derivatives/fmriprep", "/data/derivatives", "subject",
                     "--task", task,
+                    "preprocess",
+                    "--participant_label", subject_label,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
                     "--verbosity", "0"
