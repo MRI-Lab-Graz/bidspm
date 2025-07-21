@@ -6,6 +6,7 @@ import sys
 import shutil
 import argparse
 import random
+import re
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -157,6 +158,66 @@ def log(msg, error=False):
     print(full_msg, file=sys.stderr if error else sys.stdout)
 
 
+def validate_space_availability(config: Config, subjects_to_process: List[str], task: str) -> bool:
+    """Validate that the specified SPACE exists in fMRIPrep derivatives for the given subjects and task"""
+    log_debug(f"Validating SPACE '{config.SPACE}' for task '{task}'")
+    
+    found_subjects = []
+    missing_subjects = []
+    available_spaces = set()
+    
+    for subject_label in subjects_to_process:
+        subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
+        if not subject_dir.is_dir():
+            missing_subjects.append(subject_label)
+            continue
+            
+        # Look for BOLD files with the specified task
+        pattern = f"sub-{subject_label}_*task-{task}_*space-*_desc-preproc_bold.nii.gz"
+        bold_files = list(subject_dir.rglob(pattern))
+        
+        # Extract available spaces for this subject/task
+        subject_spaces = set()
+        space_found = False
+        
+        for bold_file in bold_files:
+            # Extract space from filename using regex
+            space_match = re.search(r'space-([^_]+)', bold_file.name)
+            if space_match:
+                space_name = space_match.group(1)
+                subject_spaces.add(space_name)
+                available_spaces.add(space_name)
+                
+                if space_name == config.SPACE:
+                    space_found = True
+        
+        if space_found:
+            found_subjects.append(subject_label)
+            log_debug(f"Subject {subject_label}: SPACE '{config.SPACE}' found")
+        else:
+            missing_subjects.append(subject_label)
+            if subject_spaces:
+                log_debug(f"Subject {subject_label}: SPACE '{config.SPACE}' NOT found. Available spaces: {sorted(subject_spaces)}")
+            else:
+                log_debug(f"Subject {subject_label}: No BOLD files found for task '{task}'")
+    
+    # Report results
+    if missing_subjects:
+        print("❌ SPACE validation failed!")
+        print(f"   Specified SPACE: '{config.SPACE}'")
+        print(f"   Task: '{task}'")
+        print(f"   Subjects missing SPACE '{config.SPACE}': {missing_subjects}")
+        if available_spaces:
+            print(f"   Available spaces found: {sorted(available_spaces)}")
+            print("   💡 Suggestion: Update SPACE in config.json to one of the available spaces")
+        else:
+            print(f"   ⚠️  No BOLD files found for task '{task}' in any subject")
+        return False
+    
+    print(f"✅ SPACE validation passed: '{config.SPACE}' found for all {len(found_subjects)} subjects")
+    return True
+
+
 def check_command(cmd):
     if not shutil.which(cmd):
         log_error(f"'{cmd}' is required but not installed or in PATH.")
@@ -197,17 +258,26 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "-v", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
         
+        # Create and mount a dedicated tmp directory for this run
+        run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
+        run_tmp_dir.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["-v", f"{run_tmp_dir}:/tmp"])
+        
         # Check if model file is inside derivatives directory
         try:
             model_file_path.relative_to(config.DERIVATIVES_DIR)
-            # Model file is inside derivatives, use relative path
-            relative_model_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
-            model_container_path = f"/derivatives/{relative_model_path}"
+            # Model file is inside derivatives, use relative path - no additional volume mount needed
         except ValueError:
             # Model file is outside derivatives, mount it separately
             cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
-            model_container_path = "/models/smdl.json"
         
+        # Set environment variables for better container isolation
+        cmd.extend([
+            "-e", "HOME=/tmp",
+            "-e", "TMPDIR=/tmp",
+            "-e", "TMP=/tmp"
+        ])
+
         cmd.append(container_config.docker_image)
         cmd.extend(args)
         return cmd
@@ -221,6 +291,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         cmd = [
             "apptainer", "run",
+            "--containall",  # Isolate container environment
+            "--writable-tmpfs",  # Allow writing to /tmp and other temp locations
             "--bind", f"{config.BIDS_DIR}:/raw",
             "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
@@ -228,13 +300,15 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         # Check if model file is inside derivatives directory
         try:
             model_file_path.relative_to(config.DERIVATIVES_DIR)
-            # Model file is inside derivatives, use relative path
-            relative_model_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
-            model_container_path = f"/derivatives/{relative_model_path}"
+            # Model file is inside derivatives, use relative path - no additional bind needed
         except ValueError:
             # Model file is outside derivatives, mount it separately
             cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
-            model_container_path = "/models/smdl.json"
+        
+        # Create and mount a dedicated tmp directory for this run
+        run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
+        run_tmp_dir.mkdir(parents=True, exist_ok=True)
+        cmd.extend(["--bind", f"{run_tmp_dir}:/tmp"])
         
         # Add additional bind mounts for writable directories to solve "Read-only file system" issues
         atlas_dir = config.WD / "atlas"
@@ -252,12 +326,49 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--bind", f"{error_logs_dir}:/home/neuro/bidspm/error_logs"
         ])
         
+        # Set important environment variables for the container
+        cmd.extend([
+            "--env", "HOME=/tmp",  # Set HOME to tmp directory
+            "--env", "TMPDIR=/tmp",  # Set TMPDIR
+            "--env", "TMP=/tmp"     # Set TMP
+        ])
+
         cmd.append(container_config.apptainer_image)
         cmd.extend(args)
         return cmd
     
     else:
         log_error(f"Unsupported container type: {container_config.container_type}")
+
+
+def cleanup_tmp_directories(config: Config, max_age_hours: int = 24):
+    """Clean up old temporary directories to prevent disk space issues."""
+    try:
+        tmp_base_dir = config.WD / "tmp"
+        if not tmp_base_dir.exists():
+            return
+        
+        current_time = datetime.now()
+        removed_count = 0
+        
+        for tmp_dir in tmp_base_dir.iterdir():
+            if tmp_dir.is_dir() and tmp_dir.name.startswith("run_"):
+                # Check age of directory
+                dir_age = current_time - datetime.fromtimestamp(tmp_dir.stat().st_mtime)
+                if dir_age.total_seconds() > (max_age_hours * 3600):
+                    try:
+                        shutil.rmtree(tmp_dir)
+                        removed_count += 1
+                        log_debug(f"Cleaned up old tmp directory: {tmp_dir}")
+                    except Exception as e:
+                        log_debug(f"Could not clean up tmp directory {tmp_dir}: {e}")
+        
+        if removed_count > 0:
+            print(f"🧹 Cleaned up {removed_count} old temporary directories")
+            log_debug(f"Cleaned up {removed_count} old temporary directories")
+    
+    except Exception as e:
+        log_debug(f"Error during tmp directory cleanup: {e}")
 
 
 # ------------------------------
@@ -524,6 +635,11 @@ def main():
             log_debug(f"Auto-discovered subjects: {', '.join(subjects_to_process)}")
             print(f">>> Auto-discovered {len(subjects_to_process)} subjects")
 
+        # Validate SPACE availability before processing
+        if not validate_space_availability(config, subjects_to_process, task):
+            print(f"⚠️  Skipping task '{task}' due to SPACE validation failure")
+            continue
+
         # Process each subject
         for subject_label in subjects_to_process:
             # Check if subject directory exists in fmriprep derivatives
@@ -592,6 +708,9 @@ def main():
                 log_error_non_fatal(f"Dataset stats failed for task {task}")
             else:
                 print(f"✅ Dataset stats completed for task {task}")
+
+    # Clean up old temporary directories
+    cleanup_tmp_directories(config)
 
     print(f">>> All processing complete. Logs saved to {LOG_FILE}")
 

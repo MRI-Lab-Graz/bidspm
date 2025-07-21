@@ -8,13 +8,17 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 
 ## Features
 
-- 🐳 **Container Support**: Works with Docker and Apptainer
+- 🐳 **Container Support**: Works with Docker and Apptainer with enhanced security
 - 📊 **BIDS Compatibility**: Full support for BIDS-StatsModel schema
 - 🔧 **Flexible Configuration**: JSON-based configuration for easy customization
-- 📝 **Logging**: Detailed logging of all processing steps
-- ✅ **Validation**: Automatic validation of BIDS-StatsModel files
+- 📝 **Logging**: Detailed logging of all processing steps with configurable verbosity
+- ✅ **Validation**: Automatic validation of BIDS-StatsModel files and SPACE compatibility
 - 🚀 **Batch Processing**: Processing of multiple subjects and tasks
 - 🧪 **Pilot Mode**: Test configuration with one random subject
+- 🛡️ **Container Security**: Uses `--containall` and `--writable-tmpfs` for Apptainer isolation
+- 🗂️ **Tmp Management**: Automatic creation and cleanup of run-specific temporary directories
+- 🌍 **SPACE Validation**: Validates spatial reference spaces exist in fMRIPrep data
+- 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
 
 ## Prerequisites
 
@@ -254,6 +258,37 @@ The tool automatically processes all subjects in the fMRIPrep output directory:
 - Debug mode can be enabled in `bidspm.py` (DEBUG = True)
 - Container commands are displayed before execution
 - Log files include configuration details, processing steps, and any errors
+
+## 🐳 Container Security & Performance
+
+The tool implements several container security and performance enhancements:
+
+### Apptainer Security Features
+
+- **`--containall`**: Provides complete environment isolation
+- **`--writable-tmpfs`**: Allows writing to `/tmp` and other temporary locations
+- **Custom tmp directories**: Each run gets a unique temporary directory
+- **Environment isolation**: Sets `HOME`, `TMPDIR`, and `TMP` to container `/tmp`
+
+### Automatic Cleanup
+
+- Old temporary directories (>24 hours) are automatically cleaned up
+- Each run creates a unique tmp directory: `run_YYYYMMDD_HHMMSS_XXXX`
+- Failed runs preserve tmp directories for debugging
+
+### SPACE Validation
+
+Before processing, the tool validates that the specified `SPACE` exists in your fMRIPrep data:
+
+```bash
+>>> Validating SPACE 'MNI152NLin6Asym' availability for task 'rest'...
+❌ SPACE validation failed!
+   Specified SPACE: 'MNI152NLin6Asym'
+   Task: 'rest'
+   Subjects missing SPACE 'MNI152NLin6Asym': ['sub-01', 'sub-02']
+   Available spaces found: ['MNI152NLin2009cAsym', 'T1w']
+   💡 Suggestion: Update SPACE in config.json to one of the available spaces
+```
 
 ## BIDS-StatsModel validation
 

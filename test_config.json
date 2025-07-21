@@ -10,5 +10,6 @@
   "MODELS_FILE": "model_test.json",
   "TASKS": ["task-test"],
   "SUBJECTS": ["01"],
-  "FMRIPREP_DIR": "/Volumes/Work/github/bidspm/derivatives/fmriprep"
+  "FMRIPREP_DIR": "/Volumes/Work/github/bidspm/derivatives/fmriprep",
+  "VERBOSITY": 2
 }
