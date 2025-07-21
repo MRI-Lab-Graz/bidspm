@@ -3,7 +3,6 @@
 import json
 import subprocess
 import sys
-import os
 import shutil
 import argparse
 import random
@@ -27,6 +26,7 @@ DEBUG = True  # Set to False to suppress debug output
 class Config:
     WD: Path
     BIDS_DIR: Path
+    DERIVATIVES_DIR: Path
     SPACE: str
     FWHM: float
     SMOOTH: bool
@@ -53,7 +53,7 @@ def load_config(config_file: str) -> Config:
         data = json.load(f)
 
     # --- Validation ---
-    required_fields = ["WD", "BIDS_DIR", "SPACE", "FWHM", "SMOOTH", "STATS", "DATASET", "TASKS", "FMRIPREP_DIR"]
+    required_fields = ["WD", "BIDS_DIR", "DERIVATIVES_DIR", "SPACE", "FWHM", "SMOOTH", "STATS", "DATASET", "TASKS", "FMRIPREP_DIR"]
     for field in required_fields:
         if field not in data:
             log_error(f"Missing required field in config: '{field}'")
@@ -74,8 +74,9 @@ def load_config(config_file: str) -> Config:
     # Path checks
     wd = Path(data["WD"])
     bids_dir = Path(data["BIDS_DIR"])
+    derivatives_dir = Path(data["DERIVATIVES_DIR"])
     fmriprep_dir = Path(data["FMRIPREP_DIR"])
-    for p, name in [(wd, "WD"), (bids_dir, "BIDS_DIR"), (fmriprep_dir, "FMRIPREP_DIR")]:
+    for p, name in [(wd, "WD"), (bids_dir, "BIDS_DIR"), (derivatives_dir, "DERIVATIVES_DIR"), (fmriprep_dir, "FMRIPREP_DIR")]:
         if not p.exists() or not p.is_dir():
             log_error(f"{name} '{p}' does not exist or is not a directory!")
 
@@ -88,6 +89,7 @@ def load_config(config_file: str) -> Config:
     return Config(
         WD=wd,
         BIDS_DIR=bids_dir,
+        DERIVATIVES_DIR=derivatives_dir,
         SPACE=data["SPACE"],
         FWHM=data["FWHM"],
         SMOOTH=data["SMOOTH"],
@@ -166,7 +168,7 @@ def run_command(cmd_list, capture_output=False):
         sys.exit(1)
 
 
-def build_container_command(container_config: ContainerConfig, config: Config, args: List[str]) -> List[str]:
+def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> List[str]:
     """Build container command based on container type (docker or apptainer)"""
     
     if container_config.container_type == "docker":
@@ -175,7 +177,9 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         cmd = [
             "docker", "run", "--rm",
-            "-v", f"{config.WD}:/data",
+            "-v", f"{config.BIDS_DIR}:/raw",
+            "-v", f"{config.DERIVATIVES_DIR}:/derivatives",
+            "-v", f"{model_file_path}:/models/smdl.json",
             container_config.docker_image
         ]
         cmd.extend(args)
@@ -190,7 +194,9 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         cmd = [
             "apptainer", "exec",
-            "--bind", f"{config.WD}:/data",
+            "--bind", f"{config.BIDS_DIR}:/raw",
+            "--bind", f"{config.DERIVATIVES_DIR}:/derivatives",
+            "--bind", f"{model_file_path}:/models/smdl.json",
             container_config.apptainer_image
         ]
         cmd.extend(args)
@@ -373,11 +379,11 @@ def main():
     if args.model:
         model_file_path = Path(args.model)
         if not model_file_path.is_absolute():
-            # If relative path, make it relative to working directory
-            model_file_path = config.WD / model_file_path
+            # If relative path, make it relative to derivatives directory
+            model_file_path = config.DERIVATIVES_DIR / "models" / model_file_path
         models_file_name = model_file_path.name
     else:
-        model_file_path = config.WD / "derivatives" / "models" / config.MODELS_FILE
+        model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
         models_file_name = config.MODELS_FILE
     
     # Set up log file with model name and timestamp
@@ -408,14 +414,13 @@ def main():
         log_error(f"Working directory '{config.WD}' does not exist.")
     if not config.BIDS_DIR.is_dir():
         log_error(f"BIDS directory '{config.BIDS_DIR}' does not exist.")
+    if not config.DERIVATIVES_DIR.is_dir():
+        log_error(f"Derivatives directory '{config.DERIVATIVES_DIR}' does not exist.")
 
-    # Check if fmriprep is accessible via WD (like in the original bash script)
-    fmriprep_via_wd = config.WD / "derivatives" / "fmriprep"
-    if not fmriprep_via_wd.exists():
-        log_error(f"fmriprep directory not found at '{fmriprep_via_wd}'. Make sure it's at WD/derivatives/fmriprep.")
-    if str(config.FMRIPREP_DIR) != str(fmriprep_via_wd):
-        print(f"⚠️  WARNING: FMRIPREP_DIR ({config.FMRIPREP_DIR}) differs from WD/derivatives/fmriprep ({fmriprep_via_wd})")
-        print("   Container expects fmriprep at /data/derivatives/fmriprep inside container")
+    # Validate that FMRIPREP_DIR is within DERIVATIVES_DIR
+    if not str(config.FMRIPREP_DIR).startswith(str(config.DERIVATIVES_DIR)):
+        print(f"⚠️  WARNING: FMRIPREP_DIR ({config.FMRIPREP_DIR}) is not within DERIVATIVES_DIR ({config.DERIVATIVES_DIR})")
+        print("   Container expects fmriprep at /derivatives/fmriprep inside container")
 
 
     # Processing loop
@@ -472,7 +477,7 @@ def main():
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
                 smooth_args = [
-                    "/data/derivatives/fmriprep", "/data/derivatives", "subject",
+                    "/derivatives/fmriprep", "/derivatives", "subject",
                     "--task", task,
                     "preprocess",
                     "--participant_label", subject_label,
@@ -480,7 +485,7 @@ def main():
                     "--fwhm", str(config.FWHM),
                     "--verbosity", "0"
                 ]
-                cmd = build_container_command(container_config, config, smooth_args)
+                cmd = build_container_command(container_config, config, smooth_args, model_file_path)
                 # Debug: Show the exact command being executed
                 log_debug(f"Full container command: {' '.join(cmd)}")
                 run_command(cmd)
@@ -488,30 +493,30 @@ def main():
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
                 stats_args = [
-                    "/data/rawdata", "/data/derivatives", "subject", "stats",
-                    "--preproc_dir", "/data/derivatives/bidspm-preproc",
-                    "--model_file", f"/data/derivatives/models/{models_file_name}",
+                    "/raw", "/derivatives", "subject", "stats",
+                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                    "--model_file", "/models/smdl.json",
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
                     "--verbosity", "0"
                 ]
-                cmd = build_container_command(container_config, config, stats_args)
+                cmd = build_container_command(container_config, config, stats_args, model_file_path)
                 run_command(cmd)
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
             dataset_args = [
-                "/data/rawdata", "/data/derivatives", "dataset", "stats",
-                "--preproc_dir", "/data/derivatives/bidspm-preproc",
-                "--model_file", f"/data/derivatives/models/{models_file_name}",
+                "/raw", "/derivatives", "dataset", "stats",
+                "--preproc_dir", "/derivatives/bidspm-preproc",
+                "--model_file", "/models/smdl.json",
                 "--task", task,
                 "--space", config.SPACE,
                 "--fwhm", str(config.FWHM),
                 "--verbosity", "0"
             ]
-            cmd = build_container_command(container_config, config, dataset_args)
+            cmd = build_container_command(container_config, config, dataset_args, model_file_path)
             run_command(cmd)
 
     print(f">>> All processing complete. Logs saved to {LOG_FILE}")

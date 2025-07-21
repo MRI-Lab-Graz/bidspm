@@ -1,6 +1,7 @@
 {
   "WD": "/Volumes/Work/github/bidspm",
   "BIDS_DIR": "/Volumes/Work/github/bidspm/test_data/rawdata",
+  "DERIVATIVES_DIR": "/Volumes/Work/github/bidspm/derivatives",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": true,
