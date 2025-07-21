@@ -175,6 +175,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{config.WD}:/data",
+            "-v", f"{config.BIDS_DIR}:/data/rawdata",
+            "-v", f"{config.FMRIPREP_DIR}:/data/derivatives/fmriprep",
             container_config.docker_image
         ]
         cmd.extend(args)
@@ -190,6 +192,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "apptainer", "exec",
             "--bind", f"{config.WD}:/data",
+            "--bind", f"{config.BIDS_DIR}:/data/rawdata",
+            "--bind", f"{config.FMRIPREP_DIR}:/data/derivatives/fmriprep",
             container_config.apptainer_image
         ]
         cmd.extend(args)
