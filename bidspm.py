@@ -163,9 +163,17 @@ def run_command(cmd_list, capture_output=False):
                                 stderr=subprocess.STDOUT)
         if capture_output:
             log(result.stdout)
+        return True  # Success
     except subprocess.CalledProcessError as e:
-        log_error(f"Command failed: {e}")
-        sys.exit(1)
+        log_error_non_fatal(f"Command failed with exit code {e.returncode}: {' '.join(cmd_list)}")
+        if e.stdout:
+            log(f"Command output: {e.stdout}")
+        return False  # Failure
+
+
+def log_error_non_fatal(msg):
+    """Log error without exiting - allows processing to continue"""
+    log(f"[ERROR] {msg}", error=True)
 
 
 def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> List[str]:
@@ -529,7 +537,12 @@ def main():
                 ]
                 cmd = build_container_command(container_config, config, smooth_args, model_file_path)
                 log_debug(f"Full container command: {' '.join(cmd)}")
-                run_command(cmd)
+                success = run_command(cmd)
+                if not success:
+                    print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
+                    log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
+                else:
+                    print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
@@ -544,7 +557,12 @@ def main():
                     "--verbosity", "0"
                 ]
                 cmd = build_container_command(container_config, config, stats_args, model_file_path)
-                run_command(cmd)
+                success = run_command(cmd)
+                if not success:
+                    print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
+                    log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
+                else:
+                    print(f"✅ Stats completed for subject {subject_label}, task {task}")
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
@@ -558,7 +576,12 @@ def main():
                 "--verbosity", "0"
             ]
             cmd = build_container_command(container_config, config, dataset_args, model_file_path)
-            run_command(cmd)
+            success = run_command(cmd)
+            if not success:
+                print(f"⚠️  Dataset stats failed for task {task}. Check logs for details.")
+                log_error_non_fatal(f"Dataset stats failed for task {task}")
+            else:
+                print(f"✅ Dataset stats completed for task {task}")
 
     print(f">>> All processing complete. Logs saved to {LOG_FILE}")
 
