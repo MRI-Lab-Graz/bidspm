@@ -8,5 +8,6 @@
   "DATASET": true,
   "MODELS_FILE": "model_pa_ses-2.json",
   "TASKS": ["pa"],
-  "SUBJECTS": ["01", "02", "03"]
+  "SUBJECTS": ["01", "02", "03"],
+  "FMRIPREP_DIR": "/data/local/107_JM01/derivatives/fmriprep"
 }

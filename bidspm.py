@@ -35,6 +35,7 @@ class Config:
     TASKS: List[str]
     DATASET: bool
     SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
+    FMRIPREP_DIR: Path
 
 
 @dataclass
@@ -61,7 +62,8 @@ def load_config(config_file: str) -> Config:
         MODELS_FILE=data["MODELS_FILE"],
         TASKS=data["TASKS"],
         DATASET=data["DATASET"],
-        SUBJECTS=data.get("SUBJECTS")  # Optional field, defaults to None
+        SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
+        FMRIPREP_DIR=Path(data["FMRIPREP_DIR"])
     )
 
 
@@ -366,6 +368,7 @@ def main():
     if not config.BIDS_DIR.is_dir():
         log_error(f"BIDS directory '{config.BIDS_DIR}' does not exist.")
 
+
     # Processing loop
     for task in config.TASKS:
         print("---------------------------------------------------")
@@ -381,20 +384,17 @@ def main():
                 all_subjects = config.SUBJECTS
             else:
                 # Random from auto-discovered subjects
-                for sub_dir in (config.WD / "derivatives" / "fmriprep").glob("sub-*"):
+                for sub_dir in config.FMRIPREP_DIR.glob("sub-*"):
                     if sub_dir.is_dir():
                         subject_label = sub_dir.name.replace("sub-", "")
                         all_subjects.append(subject_label)
-            
             if not all_subjects:
                 log_error("No subjects found for pilot mode.")
-            
             # Select random subject
             pilot_subject = random.choice(all_subjects)
             subjects_to_process = [pilot_subject]
             log_debug(f"Pilot mode: selected random subject {pilot_subject}")
             print(f">>> PILOT MODE: Processing random subject: {pilot_subject}")
-            
         elif config.SUBJECTS:
             # Use specific subjects from config
             subjects_to_process = config.SUBJECTS
@@ -403,7 +403,7 @@ def main():
         else:
             # Auto-discover all subjects from fmriprep derivatives
             subjects_to_process = []
-            for sub_dir in (config.WD / "derivatives" / "fmriprep").glob("sub-*"):
+            for sub_dir in config.FMRIPREP_DIR.glob("sub-*"):
                 if sub_dir.is_dir():
                     subject_label = sub_dir.name.replace("sub-", "")
                     subjects_to_process.append(subject_label)
@@ -413,12 +413,11 @@ def main():
         # Process each subject
         for subject_label in subjects_to_process:
             # Check if subject directory exists in fmriprep derivatives
-            subject_dir = config.WD / "derivatives" / "fmriprep" / f"sub-{subject_label}"
+            subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
             if not subject_dir.is_dir():
                 print(f">>> WARNING: Subject directory not found for {subject_label}, skipping...")
                 log_debug(f"Subject directory not found: {subject_dir}")
                 continue
-            
             log_debug(f"Processing subject: {subject_label}, task: {task}")
 
             if config.SMOOTH:
