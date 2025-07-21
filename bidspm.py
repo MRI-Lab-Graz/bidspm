@@ -520,7 +520,7 @@ def main():
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
                 smooth_args = [
-                    "/data/derivatives/fmriprep", "/data/derivatives", "subject", "smooth",
+                    "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
@@ -534,8 +534,8 @@ def main():
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
                 stats_args = [
-                    "/data/rawdata", "/data/derivatives", "subject", "stats",
-                    "--preproc_dir", "/data/derivatives/bidspm-preproc",
+                    "/raw", "/derivatives", "subject", "stats",
+                    "--preproc_dir", "/derivatives/bidspm-preproc",
                     "--model_file", "/models/smdl.json",
                     "--participant_label", subject_label,
                     "--task", task,
@@ -549,8 +549,8 @@ def main():
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
             dataset_args = [
-                "/data/rawdata", "/data/derivatives", "dataset", "stats",
-                "--preproc_dir", "/data/derivatives/bidspm-preproc",
+                "/raw", "/derivatives", "dataset", "stats",
+                "--preproc_dir", "/derivatives/bidspm-preproc",
                 "--model_file", "/models/smdl.json",
                 "--task", task,
                 "--space", config.SPACE,
