@@ -1,11 +1,11 @@
 {
-  "WD": "/Volumes/Thunder/138",
-  "BIDS_DIR": "/Volumes/Thunder/138/rawdata",
+  "WD": "/data/local/107_JM01",
+  "BIDS_DIR": "/data/local/107_JM01/rawdata",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
-  "SMOOTH": false,
+  "SMOOTH": true,
   "STATS": false,
   "DATASET": true,
-  "MODELS_FILE": "model_d1.json",
-  "TASKS": ["nonsymbol", "symbol"]
+  "MODELS_FILE": "model_pa_ses-2.json",
+  "TASKS": ["pa"]
 }

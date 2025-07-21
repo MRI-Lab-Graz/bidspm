@@ -127,6 +127,40 @@ Create a `config.json` file with your specific settings:
 python bidspm.py
 ```
 
+**Command line options:**
+
+```bash
+# Run with default configuration files
+python bidspm.py
+
+# Run with custom configuration files
+python bidspm.py -s my_config.json -c my_container.json
+
+# Run with custom model file
+python bidspm.py -m /path/to/my_model.json
+
+# Run with all custom files
+python bidspm.py -s config.json -c container.json -m models/task_model.json
+
+# Show help
+python bidspm.py -h
+```
+
+**Available options:**
+
+- `-h, --help`: Show help message and exit
+- `-s, --settings, --config`: Path to main configuration file (default: config.json)
+- `-c, --container`: Path to container configuration file (default: container.json)
+- `-m, --model, --model-file`: Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
+
+**Logging:**
+
+Log files are automatically generated with timestamps and model names for easy tracking:
+
+- Format: `{model_name}_{YYYYMMDD_HHMMSS}.log`
+- Example: `model_task1_20250721_143022.log`
+- Contains detailed debug information and processing logs
+
 ### Advanced examples
 
 #### Example 1: Smoothing only
@@ -161,7 +195,17 @@ python bidspm.py
 }
 ```
 
-#### Example 3: Multi-subject batch processing
+#### Example 3: Custom model file
+
+```bash
+# Use a specific model file instead of the one specified in config.json
+python bidspm.py -m /path/to/custom_model.json
+
+# Combine with custom configuration files
+python bidspm.py -s study_config.json -c docker_config.json -m models/task_analysis.json
+```
+
+#### Example 4: Multi-subject batch processing
 
 The tool automatically processes all subjects in the fMRIPrep output directory:
 
@@ -184,9 +228,10 @@ The tool automatically processes all subjects in the fMRIPrep output directory:
 
 ### Logs and debugging
 
-- All activities are logged to `run_bidspm.log`
+- All activities are logged to timestamped files: `{model_name}_{YYYYMMDD_HHMMSS}.log`
 - Debug mode can be enabled in `bidspm.py` (DEBUG = True)
 - Container commands are displayed before execution
+- Log files include configuration details, processing steps, and any errors
 
 ## BIDS-StatsModel validation
 

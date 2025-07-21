@@ -5,6 +5,7 @@ import subprocess
 import sys
 import os
 import shutil
+import argparse
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -83,6 +84,13 @@ def load_container_config(config_file: str) -> ContainerConfig:
 # Logging & Utilities
 # ------------------------------
 
+def generate_log_filename(model_file_path: str) -> str:
+    """Generate log filename based on model name and timestamp"""
+    model_name = Path(model_file_path).stem  # Get filename without extension
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{model_name}_{timestamp}.log"
+
+
 def log_debug(msg):
     if DEBUG:
         log(f"[DEBUG] {msg}")
@@ -154,16 +162,169 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
 
 
 # ------------------------------
+# Help and Usage
+# ------------------------------
+
+def show_help():
+    """Display help information for BIDSPM Runner"""
+    help_text = """
+BIDSPM Runner - A Python tool for running BIDS-StatsModel pipelines via containers
+
+USAGE:
+    python bidspm.py [OPTIONS]
+
+OPTIONS:
+    -h, --help                    Show this help message and exit
+    -s, --settings, --config     Path to main configuration file (default: config.json)
+    -c, --container               Path to container configuration file (default: container.json)
+    -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
+
+DESCRIPTION:
+    BIDSPM Runner executes neuroimaging analysis pipelines using containerized 
+    environments (Docker or Apptainer) without requiring MATLAB. The tool 
+    processes BIDS-compliant datasets and performs smoothing and statistical 
+    analyses based on configuration files.
+
+CONFIGURATION FILES:
+    Main config file contains analysis parameters (paths, smoothing, tasks, etc.)
+    Container config file specifies Docker or Apptainer settings
+
+CONFIGURATION EXAMPLE (main config file):
+    {
+        "WD": "/path/to/working/directory",
+        "BIDS_DIR": "/path/to/bids/rawdata", 
+        "SPACE": "MNI152NLin6Asym",
+        "FWHM": 8,
+        "SMOOTH": true,
+        "STATS": true,
+        "DATASET": true,
+        "MODELS_FILE": "model.json",
+        "TASKS": ["task1", "task2"]
+    }
+
+CONTAINER CONFIGURATION EXAMPLE:
+    {
+        "container_type": "docker",
+        "docker_image": "cpplab/bidspm:arm64",
+        "apptainer_image": ""
+    }
+
+WORKFLOW:
+    1. Validates BIDS-StatsModel file against official schema
+    2. For each subject and task:
+       - Performs smoothing (if SMOOTH=true)
+       - Runs statistical analysis (if STATS=true)
+    3. Runs dataset-level analysis (if DATASET=true)
+    4. Logs all activities to timestamped log file
+
+REQUIREMENTS:
+    - Python 3.8+
+    - Docker or Apptainer
+    - BIDS-compliant dataset
+    - Preprocessed fMRI data (e.g., from fMRIPrep)
+    - BIDS-StatsModel JSON file
+
+EXAMPLES:
+    # Run with default configuration files
+    python bidspm.py
+    
+    # Run with custom configuration files
+    python bidspm.py -s my_config.json -c my_container.json
+    
+    # Run with custom model file
+    python bidspm.py -m /path/to/my_model.json
+    
+    # Run with all custom files
+    python bidspm.py -s config.json -c container.json -m models/task_model.json
+    
+    # Show help
+    python bidspm.py -h
+
+LOGGING:
+    Log files are automatically named with model name and timestamp:
+    Example: model_task1_20250721_143022.log
+
+MORE INFORMATION:
+    GitHub: https://github.com/MRI-Lab-Graz/bidspm
+    BIDS-StatsModel: https://bids-standard.github.io/stats-models/
+    """
+    print(help_text)
+
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="BIDSPM Runner - Run BIDS-StatsModel pipelines via containers",
+        add_help=False  # We'll handle help manually
+    )
+    parser.add_argument('-h', '--help', action='store_true', 
+                       help='Show help message and exit')
+    parser.add_argument('-s', '--settings', '--config', 
+                       default=CONFIG_FILE,
+                       help=f'Path to main configuration file (default: {CONFIG_FILE})')
+    parser.add_argument('-c', '--container', '--container-config',
+                       default=CONTAINER_CONFIG_FILE,
+                       help=f'Path to container configuration file (default: {CONTAINER_CONFIG_FILE})')
+    parser.add_argument('-m', '--model', '--model-file',
+                       help='Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)')
+    
+    return parser.parse_args()
+
+
+# ------------------------------
 # Main Script
 # ------------------------------
 
 def main():
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Show help if requested
+    if args.help:
+        show_help()
+        sys.exit(0)
+    
+    # Use specified config files or defaults
+    config_file = args.settings
+    container_config_file = args.container
+    
+    # Check if configuration files exist, show help if not
+    if not Path(config_file).exists() or not Path(container_config_file).exists():
+        print("❌ Configuration files not found!")
+        if not Path(config_file).exists():
+            print(f"   Missing: {config_file}")
+        if not Path(container_config_file).exists():
+            print(f"   Missing: {container_config_file}")
+        print("\n" + "="*60)
+        show_help()
+        sys.exit(1)
+    
     # Dependency Checks
     check_command("python3")
 
     # Load configurations
-    config = load_config(CONFIG_FILE)
-    container_config = load_container_config(CONTAINER_CONFIG_FILE)
+    config = load_config(config_file)
+    container_config = load_container_config(container_config_file)
+    
+    # Determine model file path - command line argument overrides config
+    if args.model:
+        model_file_path = Path(args.model)
+        if not model_file_path.is_absolute():
+            # If relative path, make it relative to working directory
+            model_file_path = config.WD / model_file_path
+        models_file_name = model_file_path.name
+    else:
+        model_file_path = config.WD / "derivatives" / "models" / config.MODELS_FILE
+        models_file_name = config.MODELS_FILE
+    
+    # Set up log file with model name and timestamp
+    global LOG_FILE
+    LOG_FILE = generate_log_filename(models_file_name)
+    
+    log_debug(f"Using configuration file: {config_file}")
+    log_debug(f"Using container configuration: {container_config_file}")
+    log_debug(f"Using model file: {model_file_path}")
+    log_debug(f"Log file: {LOG_FILE}")
     
     # Check container runtime availability
     if container_config.container_type == "docker":
@@ -172,14 +333,12 @@ def main():
     elif container_config.container_type == "apptainer":
         check_command("apptainer")
         log_debug(f"Using Apptainer with image: {container_config.apptainer_image}")
-    
-    model_path = config.WD / "derivatives" / "models" / config.MODELS_FILE
 
-    if not model_path.exists():
-        log_error(f"Model file '{config.MODELS_FILE}' not found at '{model_path}'.")
+    if not model_file_path.exists():
+        log_error(f"Model file '{models_file_name}' not found at '{model_file_path}'.")
 
     log_debug("Validating model JSON against BIDS Stats Model schema")
-    run_command(["python3", "validate_bids_model.py", str(model_path)], capture_output=True)
+    run_command(["python3", "validate_bids_model.py", str(model_file_path)], capture_output=True)
 
     # Path validations
     if not config.WD.is_dir():
@@ -216,7 +375,7 @@ def main():
                     stats_args = [
                         "/data/rawdata", "/data/derivatives", "subject", "stats",
                         "--preproc_dir", "/data/derivatives/bidspm-preproc",
-                        "--model_file", f"/data/derivatives/models/{config.MODELS_FILE}",
+                        "--model_file", f"/data/derivatives/models/{models_file_name}",
                         "--participant_label", subject_label,
                         "--task", task,
                         "--space", config.SPACE,
@@ -231,7 +390,7 @@ def main():
             dataset_args = [
                 "/data/rawdata", "/data/derivatives", "dataset", "stats",
                 "--preproc_dir", "/data/derivatives/bidspm-preproc",
-                "--model_file", f"/data/derivatives/models/{config.MODELS_FILE}",
+                "--model_file", f"/data/derivatives/models/{models_file_name}",
                 "--task", task,
                 "--space", config.SPACE,
                 "--fwhm", str(config.FWHM),
