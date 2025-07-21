@@ -204,7 +204,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             log_error(f"Apptainer image file '{container_config.apptainer_image}' not found.")
         
         cmd = [
-            "apptainer", "exec",
+            "apptainer", "run",
             "--bind", f"{config.BIDS_DIR}:/raw",
             "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
