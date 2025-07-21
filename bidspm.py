@@ -175,8 +175,8 @@ USAGE:
 
 OPTIONS:
     -h, --help                    Show this help message and exit
-    -s, --settings, --config     Path to main configuration file (default: config.json)
-    -c, --container               Path to container configuration file (default: container.json)
+    -s, --settings, --config     Path to main configuration file
+    -c, --container               Path to container configuration file
     -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
 
 DESCRIPTION:
@@ -188,6 +188,10 @@ DESCRIPTION:
 CONFIGURATION FILES:
     Main config file contains analysis parameters (paths, smoothing, tasks, etc.)
     Container config file specifies Docker or Apptainer settings
+    
+    If not specified with -s and -c options, the tool will look for:
+    - config.json (main configuration)
+    - container.json (container configuration)
 
 CONFIGURATION EXAMPLE (main config file):
     {
@@ -225,17 +229,17 @@ REQUIREMENTS:
     - BIDS-StatsModel JSON file
 
 EXAMPLES:
-    # Run with default configuration files
-    python bidspm.py
+    # Run with default configuration files (config.json, container.json)
+    python bidspm.py -s config.json -c container.json
     
     # Run with custom configuration files
-    python bidspm.py -s my_config.json -c my_container.json
+    python bidspm.py -s my_analysis.json -c my_container.json
     
     # Run with custom model file
-    python bidspm.py -m /path/to/my_model.json
+    python bidspm.py -s config.json -c container.json -m /path/to/my_model.json
     
     # Run with all custom files
-    python bidspm.py -s config.json -c container.json -m models/task_model.json
+    python bidspm.py -s study_config.json -c docker_setup.json -m models/task_model.json
     
     # Show help
     python bidspm.py -h
@@ -260,11 +264,9 @@ def parse_arguments():
     parser.add_argument('-h', '--help', action='store_true', 
                        help='Show help message and exit')
     parser.add_argument('-s', '--settings', '--config', 
-                       default=CONFIG_FILE,
-                       help=f'Path to main configuration file (default: {CONFIG_FILE})')
+                       help='Path to main configuration file')
     parser.add_argument('-c', '--container', '--container-config',
-                       default=CONTAINER_CONFIG_FILE,
-                       help=f'Path to container configuration file (default: {CONTAINER_CONFIG_FILE})')
+                       help='Path to container configuration file')
     parser.add_argument('-m', '--model', '--model-file',
                        help='Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)')
     
@@ -284,9 +286,14 @@ def main():
         show_help()
         sys.exit(0)
     
-    # Use specified config files or defaults
-    config_file = args.settings
-    container_config_file = args.container
+    # If no arguments provided, show help
+    if len(sys.argv) == 1:
+        show_help()
+        sys.exit(0)
+    
+    # Use specified config files or look for defaults
+    config_file = args.settings if args.settings else CONFIG_FILE
+    container_config_file = args.container if args.container else CONTAINER_CONFIG_FILE
     
     # Check if configuration files exist, show help if not
     if not Path(config_file).exists() or not Path(container_config_file).exists():
@@ -295,6 +302,7 @@ def main():
             print(f"   Missing: {config_file}")
         if not Path(container_config_file).exists():
             print(f"   Missing: {container_config_file}")
+        print("\nPlease specify configuration files using -s and -c options, or ensure default files exist.")
         print("\n" + "="*60)
         show_help()
         sys.exit(1)
