@@ -1,0 +1,11 @@
+{
+  "WD": "/data/local/107_JM01",
+  "BIDS_DIR": "/data/local/107_JM01/rawdata",
+  "SPACE": "MNI152NLin6Asym",
+  "FWHM": 8,
+  "SMOOTH": true,
+  "STATS": false,
+  "DATASET": true,
+  "MODELS_FILE": "model_pa_ses-2.json",
+  "TASKS": ["pa"]
+}

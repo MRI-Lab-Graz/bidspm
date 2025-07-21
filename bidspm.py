@@ -154,6 +154,7 @@ def check_command(cmd):
 
 def run_command(cmd_list, capture_output=False):
     log_debug(f"Running command: {' '.join(cmd_list)}")
+    
     try:
         result = subprocess.run(cmd_list, check=True, text=True,
                                 stdout=subprocess.PIPE if capture_output else None,
@@ -175,8 +176,6 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{config.WD}:/data",
-            "-v", f"{config.BIDS_DIR}:/data/rawdata",
-            "-v", f"{config.FMRIPREP_DIR}:/data/derivatives/fmriprep",
             container_config.docker_image
         ]
         cmd.extend(args)
@@ -192,8 +191,6 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "apptainer", "exec",
             "--bind", f"{config.WD}:/data",
-            "--bind", f"{config.BIDS_DIR}:/data/rawdata",
-            "--bind", f"{config.FMRIPREP_DIR}:/data/derivatives/fmriprep",
             container_config.apptainer_image
         ]
         cmd.extend(args)
@@ -412,6 +409,14 @@ def main():
     if not config.BIDS_DIR.is_dir():
         log_error(f"BIDS directory '{config.BIDS_DIR}' does not exist.")
 
+    # Check if fmriprep is accessible via WD (like in the original bash script)
+    fmriprep_via_wd = config.WD / "derivatives" / "fmriprep"
+    if not fmriprep_via_wd.exists():
+        log_error(f"fmriprep directory not found at '{fmriprep_via_wd}'. Make sure it's at WD/derivatives/fmriprep.")
+    if str(config.FMRIPREP_DIR) != str(fmriprep_via_wd):
+        print(f"⚠️  WARNING: FMRIPREP_DIR ({config.FMRIPREP_DIR}) differs from WD/derivatives/fmriprep ({fmriprep_via_wd})")
+        print("   Container expects fmriprep at /data/derivatives/fmriprep inside container")
+
 
     # Processing loop
     for task in config.TASKS:
@@ -475,6 +480,8 @@ def main():
                     "--verbosity", "0"
                 ]
                 cmd = build_container_command(container_config, config, smooth_args)
+                # Debug: Show the exact command being executed
+                log_debug(f"Full container command: {' '.join(cmd)}")
                 run_command(cmd)
 
             if config.STATS:

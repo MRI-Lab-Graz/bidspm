@@ -207,3 +207,4 @@
 2025-07-21 14:43:07 [DEBUG] Processing subject: 138021, task: nonsymbol
 2025-07-21 14:43:07 [DEBUG] Running command: docker run --rm -v /Volumes/Thunder/138:/data cpplab/bidspm:arm64 /data/rawdata /data/derivatives dataset stats --preproc_dir /data/derivatives/bidspm-preproc --model_file /data/derivatives/models/model_d1.json --task nonsymbol --space MNI152NLin6Asym --fwhm 8 --verbosity 0
 2025-07-21 14:43:07 [ERROR] Command failed: Command '['docker', 'run', '--rm', '-v', '/Volumes/Thunder/138:/data', 'cpplab/bidspm:arm64', '/data/rawdata', '/data/derivatives', 'dataset', 'stats', '--preproc_dir', '/data/derivatives/bidspm-preproc', '--model_file', '/data/derivatives/models/model_d1.json', '--task', 'nonsymbol', '--space', 'MNI152NLin6Asym', '--fwhm', '8', '--verbosity', '0']' returned non-zero exit status 125.
+2025-07-21 16:00:31 [ERROR] WD '/data/local/107_JM01' does not exist or is not a directory!
