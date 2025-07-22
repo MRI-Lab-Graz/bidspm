@@ -306,8 +306,62 @@ def run_command(cmd_list, capture_output=False):
 
 
 def log_error_non_fatal(msg):
-    """Log error without exiting - allows processing to continue"""
-    log(f"[ERROR] {msg}", error=True)
+    """Log non-fatal error that doesn't stop execution"""
+    print(f"⚠️  {msg}", file=sys.stderr)
+
+def setup_octave_compatibility(container_config: ContainerConfig):
+    """Setup Octave compatibility for older versions that lack 'contains' function"""
+    setup_script = '''
+    mkdir -p /tmp/octave_compat
+    
+    # Create compatibility function for 'contains' (missing in Octave < 7.0)
+    cat > /tmp/octave_compat/octaverc << 'EOF'
+% Octave compatibility startup script for BIDSPM
+warning('off', 'all');
+
+% Add compatibility function for contains (Octave < 7.0)
+if ~exist('contains', 'builtin') && ~exist('contains', 'file')
+    function result = contains(str, pattern)
+        if ischar(str) && ischar(pattern)
+            result = ~isempty(strfind(str, pattern));
+        elseif iscell(str)
+            result = false(size(str));
+            for i = 1:numel(str)
+                if ischar(str{i})
+                    result(i) = ~isempty(strfind(str{i}, pattern));
+                end
+            end
+        else
+            result = false;
+        end
+    end
+end
+
+% Add BIDSPM paths
+addpath('/home/neuro/bidspm');
+addpath('/home/neuro/bidspm/lib/CPP_ROI');
+addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
+addpath('/opt/spm12');
+
+fprintf('🔧 Octave compatibility loaded
+');
+EOF
+    '''
+    
+    try:
+        # Set up compatibility in the container
+        cmd = [container_config.platform, "exec", "--writable-tmpfs", container_config.path, "bash", "-c", setup_script]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            log("✅ Octave compatibility setup successful")
+            return True
+        else:
+            log_error_non_fatal(f"Octave compatibility setup warning: {result.stderr}")
+            return False
+    except Exception as e:
+        log_error_non_fatal(f"Could not setup Octave compatibility: {e}")
+        return False
 
 
 def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> List[str]:
@@ -410,7 +464,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "OCTAVE_EXECUTABLE=/usr/bin/octave",  # Ensure Octave path
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
-            "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m"  # Custom Octave initialization to force atlas path
+            "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m",  # Custom Octave initialization to force atlas path
+            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc"  # Octave compatibility startup script
         ])
 
         cmd.append(container_config.apptainer_image)
@@ -623,6 +678,10 @@ def main():
     # Load configurations
     config = load_config(config_file)
     container_config = load_container_config(container_config_file)
+    
+    # Setup Octave compatibility for older containers
+    log("🔧 Setting up Octave compatibility...")
+    setup_octave_compatibility(container_config)
 
     # Validate MODELS_FILE or -m
     if not args.model and not config.MODELS_FILE:

@@ -18,6 +18,28 @@ build/
 develop-eggs/
 dist/
 downloads/
+
+# Debug and temporary files
+*_debug*.sh
+*_fix*.sh
+octave_*.sh
+remote_*.sh
+emergency_*.sh
+test_final_*.sh
+*_atlas_*.sh
+explore_*.sh
+*_compatibility_*.sh
+
+# Log files
+*.log
+model_*.log
+validate_*.log
+run_*.log
+
+# Temporary container configurations
+container_*_atlas_*.json
+container_*_debug*.json
+container_*_fix*.json
 eggs/
 .eggs/
 lib/

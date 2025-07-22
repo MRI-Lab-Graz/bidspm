@@ -1,5 +1,0 @@
-{
-  "container_type": "apptainer",
-  "docker_image": "cpplab/bidspm:arm64",
-  "apptainer_image": "/path/to/containers/bidspm.sif"
-}
