@@ -1,7 +1,49 @@
 #!/bin/bash
 
 # BIDSPM Atlas Error Diagnostic Script
-# Analyzes the specifiecho '📁 Looking for returnAtlasDir.m file:'
+# Analyzes the specifiecho '📁 Looking for echo ""
+echo "🔬 Checking function availability in container..."
+echo "================================================"
+apptainer exec "$TEST_SIF" bash -c "
+cd /home/neuro/bidspm
+echo '🧮 Testing Octave functionality:'
+
+# Test basic Octave functionality
+octave --eval 'disp("Octave working")' 2>/dev/null || echo 'Octave basic test failed'
+
+echo ''
+echo '📋 Checking MATLAB path setup:'
+octave --eval 'path' 2>/dev/null | grep -E '(bidspm|CPP_ROI|spm)' || echo 'BIDSPM/SPM paths not in MATLAB path'
+
+echo ''
+echo '🔍 Looking for returnAtlasDir function:'
+find /home/neuro/bidspm -name '*.m' -exec grep -l 'function.*returnAtlasDir' {} \; 2>/dev/null || echo 'returnAtlasDir function definition not found'
+
+echo ''
+echo '📁 Looking for returnAtlasDir.m file:'
+find /home/neuro/bidspm -name 'returnAtlasDir.m' 2>/dev/null || echo 'returnAtlasDir.m file not found'
+
+echo ''
+echo '📂 Checking CPP_ROI atlas directory structure:'
+ls -la /home/neuro/bidspm/lib/CPP_ROI/atlas/ 2>/dev/null || echo 'CPP_ROI atlas directory not found'
+
+echo ''
+echo '🧮 Testing MATLAB path with atlas directory:'
+octave --eval "
+addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
+if exist('returnAtlasDir', 'file')
+    disp('✅ returnAtlasDir function accessible with explicit path');
+    try
+        atlasDir = returnAtlasDir();
+        disp(['✅ returnAtlasDir() works, returns: ' atlasDir]);
+    catch e
+        disp(['❌ returnAtlasDir() call failed: ' e.message]);
+    end
+else
+    disp('❌ returnAtlasDir function not accessible even with explicit path');
+end
+" 2>/dev/null || echo 'MATLAB test with explicit atlas path failed'
+"rnAtlasDir.m file:'
 find /home/neuro/bidspm -name 'returnAtlasDir.m' 2>/dev/null || echo 'returnAtlasDir.m file not found'
 
 echo ''
