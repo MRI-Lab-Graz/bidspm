@@ -1,0 +1,15 @@
+{
+  "WD": "/Volumes/Work/github/bidspm/test_data",
+  "BIDS_DIR": "/Volumes/Work/github/bidspm/test_data/rawdata",
+  "SPACE": "MNI152NLin2009cAsym",
+  "FWHM": 6,
+  "SMOOTH": false,
+  "STATS": false,
+  "DATASET": false,
+  "MODELS_FILE": "/Volumes/Work/github/bidspm/derivatives/models/model_test.json",
+  "TASKS": ["test"],
+  "SUBJECTS": ["01"],
+  "DERIVATIVES_DIR": "/Volumes/Work/github/bidspm/test_data/derivatives",
+  "FMRIPREP_DIR": "/Volumes/Work/github/bidspm/test_data/derivatives/fmriprep",
+  "VERBOSITY": 3
+}

@@ -137,16 +137,31 @@ def detect_platform_and_suggest_container():
     if system == "darwin":  # macOS
         return "docker", "Docker recommended for macOS (Apptainer not supported)."
     elif system == "linux":
-        # Prefer Docker if available (for consistency)
+        # Check what's available - prefer what user has configured
+        docker_available = False
+        apptainer_available = False
+        
         try:
             subprocess.run(["docker", "--version"], capture_output=True, check=True)
-            return "docker", "Docker detected on Linux - using for consistency with macOS."
+            docker_available = True
         except (subprocess.CalledProcessError, FileNotFoundError):
-            try:
-                subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
-                return "apptainer", "Apptainer detected on Linux."
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                return None, "Neither Docker nor Apptainer found on Linux system."
+            pass
+            
+        try:
+            subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
+            apptainer_available = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        
+        # HPC systems often only have Apptainer
+        if apptainer_available and not docker_available:
+            return "apptainer", "HPC environment detected - using Apptainer (Docker not available)."
+        elif docker_available and not apptainer_available:
+            return "docker", "Docker detected on Linux."
+        elif docker_available and apptainer_available:
+            return "docker", "Both Docker and Apptainer available - using Docker for consistency."
+        else:
+            return None, "Neither Docker nor Apptainer found on Linux system."
     else:
         return "docker", f"Unknown platform ({system}), Docker recommended."
 
@@ -336,13 +351,15 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         if not container_config.apptainer_image:
             log_error("Apptainer image not specified in container configuration.")
         
-        if not Path(container_config.apptainer_image).exists():
+        # Check if it's a docker:// URL or local .sif file
+        if not container_config.apptainer_image.startswith("docker://") and not Path(container_config.apptainer_image).exists():
             log_error(f"Apptainer image file '{container_config.apptainer_image}' not found.")
         
         cmd = [
             "apptainer", "run",
             "--containall",  # Isolate container environment
             "--writable-tmpfs",  # Allow writing to /tmp and other temp locations
+            "--cleanenv",  # Start with clean environment
             "--bind", f"{config.BIDS_DIR}:/raw",
             "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
@@ -380,7 +397,9 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd.extend([
             "--env", "HOME=/tmp",  # Set HOME to tmp directory
             "--env", "TMPDIR=/tmp",  # Set TMPDIR
-            "--env", "TMP=/tmp"     # Set TMP
+            "--env", "TMP=/tmp",     # Set TMP
+            "--env", "MATLAB_LOG_DIR=/tmp",  # MATLAB logs to tmp
+            "--env", "SPM_HTML_BROWSER=0"   # Disable SPM browser for headless operation
         ])
 
         cmd.append(container_config.apptainer_image)
