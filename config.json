@@ -3,12 +3,13 @@
   "BIDS_DIR": "/Volumes/Thunder/138/rawdata",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
-  "SMOOTH": true,
-  "STATS": false,
+  "SMOOTH": false,
+  "STATS": true,
   "DATASET": false,
-  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d2.json",
-  "TASKS": ["symbol"],
+  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d2c.json",
+  "TASKS": ["nonsymbol"],
   "SUBJECTS": ["138014"],
   "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
-  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep"
+  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep",
+  "VERBOSITY": 3
 }

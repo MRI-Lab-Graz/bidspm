@@ -1,5 +1,5 @@
 {
   "container_type": "docker",
-  "docker_image": "cpplab/bidspm:latest",
+  "docker_image": "cpplab/bidspm:arm64",
   "apptainer_image": ""
 }

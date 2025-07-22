@@ -374,8 +374,12 @@ EOF
         return False
 
 
-def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> List[str]:
-    """Build container command based on container type (docker or apptainer)"""
+def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> tuple[List[str], str]:
+    """Build container command based on container type (docker or apptainer)
+    
+    Returns:
+        tuple: (container_command, model_file_container_path)
+    """
     
     if container_config.container_type == "docker":
         if not container_config.docker_image:
@@ -394,11 +398,13 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         # Check if model file is inside derivatives directory
         try:
-            model_file_path.relative_to(config.DERIVATIVES_DIR)
+            rel_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
             # Model file is inside derivatives, use relative path - no additional volume mount needed
+            model_container_path = f"/derivatives/{rel_path}"
         except ValueError:
             # Model file is outside derivatives, mount it separately
             cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
+            model_container_path = "/models/smdl.json"
         
         # Set environment variables for better container isolation
         cmd.extend([
@@ -409,7 +415,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
 
         cmd.append(container_config.docker_image)
         cmd.extend(args)
-        return cmd
+        return cmd, model_container_path
     
     elif container_config.container_type == "apptainer":
         if not container_config.apptainer_image:
@@ -430,11 +436,13 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         # Check if model file is inside derivatives directory
         try:
-            model_file_path.relative_to(config.DERIVATIVES_DIR)
+            rel_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
             # Model file is inside derivatives, use relative path - no additional bind needed
+            model_container_path = f"/derivatives/{rel_path}"
         except ValueError:
             # Model file is outside derivatives, mount it separately
             cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
+            model_container_path = "/models/smdl.json"
         
         # Create and mount a dedicated tmp directory for this run
         run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
@@ -480,7 +488,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
 
         cmd.append(container_config.apptainer_image)
         cmd.extend(args)
-        return cmd
+        return cmd, model_container_path
     
     else:
         log_error(f"Unsupported container type: {container_config.container_type}")
@@ -534,6 +542,7 @@ OPTIONS:
     -c, --container               Path to container configuration file
     -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
     --pilot                       Pilot mode: process only one random subject for testing
+    --skip-modelvalidation        Skip BIDS-StatsModel JSON validation
 
 DESCRIPTION:
     BIDSPM Runner executes neuroimaging analysis pipelines using containerized 
@@ -635,6 +644,8 @@ def parse_arguments():
                        help='Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)')
     parser.add_argument('--pilot', action='store_true',
                        help='Pilot mode: process only one random subject for testing')
+    parser.add_argument('--skip-modelvalidation', action='store_true',
+                       help='Skip BIDS-StatsModel JSON validation')
     
     return parser.parse_args()
 
@@ -732,8 +743,14 @@ def main():
     if not model_file_path.exists():
         log_error(f"Model file '{models_file_name}' not found at '{model_file_path}'.")
 
-    log_debug("Validating model JSON against BIDS Stats Model schema")
-    run_command(["python3", "validate_bids_model.py", str(model_file_path)], capture_output=True)
+    if not args.skip_modelvalidation:
+        log_debug("Validating model JSON against BIDS Stats Model schema")
+        # Try to use virtual environment Python first, fallback to system Python
+        venv_python = Path(".bidspm/bin/python")
+        python_cmd = str(venv_python) if venv_python.exists() else "python3"
+        run_command([python_cmd, "validate_bids_model.py", str(model_file_path)], capture_output=True)
+    else:
+        print("⚠️  Skipping BIDS-StatsModel JSON validation (--skip-modelvalidation flag used)")
 
     # Path validations
     if not config.WD.is_dir():
@@ -816,7 +833,7 @@ def main():
                     "--fwhm", str(config.FWHM),
                     "--verbosity", str(config.VERBOSITY)
                 ]
-                cmd = build_container_command(container_config, config, smooth_args, model_file_path)
+                cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
                 log_debug(f"Full container command: {' '.join(cmd)}")
                 success = run_command(cmd)
                 if not success:
@@ -827,17 +844,21 @@ def main():
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
+                # First build container command to get the correct model file path
+                temp_args = []  # We'll replace this
+                cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                
                 stats_args = [
                     "/raw", "/derivatives", "subject", "stats",
                     "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--model_file", "/models/smdl.json",
+                    "--model_file", model_container_path,
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
                     "--verbosity", str(config.VERBOSITY)
                 ]
-                cmd = build_container_command(container_config, config, stats_args, model_file_path)
+                cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
                 success = run_command(cmd)
                 if not success:
                     print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
@@ -847,16 +868,20 @@ def main():
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
+            # First build container command to get the correct model file path
+            temp_args = []  # We'll replace this
+            cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+            
             dataset_args = [
                 "/raw", "/derivatives", "dataset", "stats",
                 "--preproc_dir", "/derivatives/bidspm-preproc",
-                "--model_file", "/models/smdl.json",
+                "--model_file", model_container_path,
                 "--task", task,
                 "--space", config.SPACE,
                 "--fwhm", str(config.FWHM),
                 "--verbosity", str(config.VERBOSITY)
             ]
-            cmd = build_container_command(container_config, config, dataset_args, model_file_path)
+            cmd, _ = build_container_command(container_config, config, dataset_args, model_file_path)
             success = run_command(cmd)
             if not success:
                 print(f"⚠️  Dataset stats failed for task {task}. Check logs for details.")

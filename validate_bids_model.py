@@ -1,10 +1,22 @@
 # validate_bids_model.py
 import json
-import requests
-from jsonschema import validate, ValidationError, RefResolver
 import sys
 
+try:
+    import requests
+    from jsonschema import validate, ValidationError, RefResolver
+    VALIDATION_AVAILABLE = True
+except ImportError as e:
+    VALIDATION_AVAILABLE = False
+    MISSING_MODULES = str(e)
+
 def validate_json(model_path):
+    if not VALIDATION_AVAILABLE:
+        print(f"⚠️  Warning: BIDS-StatsModel validation skipped due to missing dependencies: {MISSING_MODULES}")
+        print("   Install with: pip install requests jsonschema")
+        print("   Or use --skip-modelvalidation flag to suppress this warning.")
+        return
+    
     schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
     try:
         schema = requests.get(schema_url).json()
