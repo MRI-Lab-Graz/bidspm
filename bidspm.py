@@ -343,14 +343,24 @@ addpath('/home/neuro/bidspm/lib/CPP_ROI');
 addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
 addpath('/opt/spm12');
 
-fprintf('🔧 Octave compatibility loaded
-');
+fprintf('🔧 Octave compatibility loaded\\n');
 EOF
     '''
     
     try:
+        # Determine container path and command based on container type
+        if container_config.container_type == "docker":
+            # For docker, we would need different handling, but mainly using apptainer
+            log_error_non_fatal("Octave compatibility setup not implemented for Docker containers")
+            return False
+        elif container_config.container_type == "apptainer":
+            container_path = container_config.apptainer_image
+            cmd = ["apptainer", "exec", "--writable-tmpfs", container_path, "bash", "-c", setup_script]
+        else:
+            log_error_non_fatal(f"Unknown container type: {container_config.container_type}")
+            return False
+        
         # Set up compatibility in the container
-        cmd = [container_config.platform, "exec", "--writable-tmpfs", container_config.path, "bash", "-c", setup_script]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0:
