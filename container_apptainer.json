@@ -1,5 +1,5 @@
 {
   "container_type": "apptainer",
   "docker_image": "",
-  "apptainer_image": "docker://cpplab/bidspm:latest"
+  "apptainer_image": "docker://cpplab/bidspm:4.0.0"
 }

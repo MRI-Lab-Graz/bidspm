@@ -381,16 +381,22 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         atlas_dir = config.WD / "atlas"
         cpp_roi_atlas_dir = config.WD / "cpp_roi_atlas"
         error_logs_dir = config.WD / "error_logs"
+        spm_dir = config.WD / "spm"
+        matlab_cache_dir = config.WD / "matlab_cache"
         
         # Create directories if they don't exist
         atlas_dir.mkdir(exist_ok=True)
         cpp_roi_atlas_dir.mkdir(exist_ok=True)
         error_logs_dir.mkdir(exist_ok=True)
+        spm_dir.mkdir(exist_ok=True)
+        matlab_cache_dir.mkdir(exist_ok=True)
         
         cmd.extend([
             "--bind", f"{atlas_dir}:/opt/spm12/atlas",
             "--bind", f"{cpp_roi_atlas_dir}:/home/neuro/bidspm/lib/CPP_ROI/atlas",
-            "--bind", f"{error_logs_dir}:/home/neuro/bidspm/error_logs"
+            "--bind", f"{error_logs_dir}:/home/neuro/bidspm/error_logs",
+            "--bind", f"{spm_dir}:/home/neuro/spm",  # SPM working directory
+            "--bind", f"{matlab_cache_dir}:/home/neuro/.matlab"  # MATLAB cache
         ])
         
         # Set important environment variables for the container
@@ -399,7 +405,11 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "TMPDIR=/tmp",  # Set TMPDIR
             "--env", "TMP=/tmp",     # Set TMP
             "--env", "MATLAB_LOG_DIR=/tmp",  # MATLAB logs to tmp
-            "--env", "SPM_HTML_BROWSER=0"   # Disable SPM browser for headless operation
+            "--env", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
+            "--env", "BIDSPM_SKIP_ATLAS_INIT=1",  # Try to skip problematic atlas initialization
+            "--env", "OCTAVE_EXECUTABLE=/usr/bin/octave",  # Ensure Octave path
+            "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
+            "--env", "CPP_ROI_SKIP_ATLAS=1"  # Skip CPP_ROI atlas operations if supported
         ])
 
         cmd.append(container_config.apptainer_image)

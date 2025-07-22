@@ -20,16 +20,78 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 🌍 **SPACE Validation**: Validates spatial reference spaces exist in fMRIPrep data
 - 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
 
+## ⚠️ Known Issues and Solutions
+
+### 🗺️ Atlas Initialization Error
+
+You may encounter this error when using BIDSPM containers:
+
+```bash
+'returnAtlasDir' undefined near line 88, column 88
+Error Octave:undefined-function occurred:
+  - Error in copyAtlasToSpmDir>prepareFiles
+    line 88 in /home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m
+```
+
+**Cause**: This is a bug in the BIDSPM container where the `returnAtlasDir` function from CPP_ROI is not properly accessible due to MATLAB path configuration issues.
+
+**Solutions**:
+
+1. **Use Specific Version** (Recommended):
+
+   ```bash
+   # Edit your container configuration to use a specific working version
+   "apptainer_image": "docker://cpplab/bidspm:4.0.0"  # instead of latest
+   ```
+
+2. **Skip Atlas Initialization**:
+
+   ```bash
+   # The tool automatically sets this environment variable
+   BIDSPM_SKIP_ATLAS_INIT=1
+   ```
+
+3. **Test Different Versions**:
+
+   ```bash
+   # Use our version testing script
+   chmod +x fix_atlas_error.sh
+   ./fix_atlas_error.sh
+   ```
+
+4. **Diagnostic Analysis**:
+
+   ```bash
+   # Run detailed diagnostics
+   chmod +x debug_atlas_error.sh
+   ./debug_atlas_error.sh 4.0.0
+   ```
+
+**Fixed Configuration**: Use `container_apptainer_atlas_fix.json` which includes enhanced path configuration and environment variables to work around this issue.
+
+### 🔧 Enhanced MATLAB Path Configuration
+
+The tool automatically configures the MATLAB path to include:
+
+- `/home/neuro/bidspm` (main BIDSPM directory)
+- `/home/neuro/bidspm/lib/CPP_ROI` (CPP_ROI library)
+- `/home/neuro/bidspm/lib/CPP_ROI/atlas` (atlas functions including returnAtlasDir)
+- `/opt/spm12` (SPM12 installation)
+
+This ensures that all required functions are accessible within the container.
+
 ## 🌍 Multi-Platform Support
 
 The tool automatically detects your platform and selects the appropriate container runtime:
 
 ### 🖥️ **macOS (Development/Piloting)**
+
 - **Auto-detected**: Docker (Apptainer not supported on macOS)
 - **Container**: `container.json` (Docker configuration)
 - **Usage**: Perfect for testing and piloting analyses
 
 ### 🐧 **Linux (Production/HPC)**
+
 - **Auto-detected**: Apptainer (preferred) or Docker
 - **Container**: `container_production.json` (Apptainer) or `container.json` (Docker)
 - **Usage**: Production runs on high-performance computing systems
