@@ -409,7 +409,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "BIDSPM_SKIP_ATLAS_INIT=1",  # Try to skip problematic atlas initialization
             "--env", "OCTAVE_EXECUTABLE=/usr/bin/octave",  # Ensure Octave path
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
-            "--env", "CPP_ROI_SKIP_ATLAS=1"  # Skip CPP_ROI atlas operations if supported
+            "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
+            "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m"  # Custom Octave initialization to force atlas path
         ])
 
         cmd.append(container_config.apptainer_image)
