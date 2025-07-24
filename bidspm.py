@@ -37,63 +37,26 @@ class Config:
     TASKS: List[str]
     DATASET: bool
     FMRIPREP_DIR: Path
-    VERBOSITY: int = 0  # Default to 0, can be increased for more verbose output
-    SUBJECTS: Optional[List[str]] = None  # If None, process all subjects found
-
-
-@dataclass
-class ContainerConfig:
-    container_type: str  # "docker" or "apptainer"
-    docker_image: str
-    apptainer_image: str
+    VERBOSITY: int
+    SUBJECTS: Optional[List[str]] = None
+    ROI: Optional[bool] = None
+    ROI_CONFIG: Optional[dict] = None
 
 
 def load_config(config_file: str) -> Config:
+    """Load configuration from JSON file."""
     if not Path(config_file).exists():
         log_error(f"Config file '{config_file}' not found.")
 
     with open(config_file) as f:
         data = json.load(f)
 
-    # --- Validation ---
-    required_fields = ["WD", "BIDS_DIR", "DERIVATIVES_DIR", "SPACE", "FWHM", "SMOOTH", "STATS", "DATASET", "TASKS", "FMRIPREP_DIR"]
-    for field in required_fields:
-        if field not in data:
-            log_error(f"Missing required field in config: '{field}'")
-
-    # MODELS_FILE is optional if -m is used, but warn if beides fehlt
-    if "MODELS_FILE" not in data:
-        print("⚠️  No MODELS_FILE in config. You must provide -m on the command line!")
-
-    # Check types and values
-    if not isinstance(data["TASKS"], list) or not data["TASKS"]:
-        log_error("'TASKS' must be a non-empty list!")
-    if "SUBJECTS" in data and data["SUBJECTS"] is not None:
-        if not isinstance(data["SUBJECTS"], list):
-            log_error("'SUBJECTS' must be a list or omitted/null!")
-        if len(data["SUBJECTS"]) == 0:
-            print("⚠️  'SUBJECTS' is an empty list. No subjects will be processed!")
-
-    # Validate VERBOSITY if provided
-    verbosity = data.get("VERBOSITY", 0)
-    if not isinstance(verbosity, int) or verbosity < 0 or verbosity > 3:
-        print("⚠️  VERBOSITY must be an integer between 0-3. Using default value 0.")
-        verbosity = 0
-
-    # Path checks
+    # Derive paths
     wd = Path(data["WD"])
     bids_dir = Path(data["BIDS_DIR"])
     derivatives_dir = Path(data["DERIVATIVES_DIR"])
     fmriprep_dir = Path(data["FMRIPREP_DIR"])
-    for p, name in [(wd, "WD"), (bids_dir, "BIDS_DIR"), (derivatives_dir, "DERIVATIVES_DIR"), (fmriprep_dir, "FMRIPREP_DIR")]:
-        if not p.exists() or not p.is_dir():
-            log_error(f"{name} '{p}' does not exist or is not a directory!")
-
-    # Log config summary
-    print("--- Loaded configuration ---")
-    for k, v in data.items():
-        print(f"{k}: {v}")
-    print("---------------------------")
+    verbosity = data.get("VERBOSITY", 3)
 
     return Config(
         WD=wd,
@@ -108,8 +71,17 @@ def load_config(config_file: str) -> Config:
         DATASET=data["DATASET"],
         FMRIPREP_DIR=fmriprep_dir,
         VERBOSITY=verbosity,
-        SUBJECTS=data.get("SUBJECTS")  # Optional field, defaults to None
+        SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
+        ROI=data.get("ROI"),
+        ROI_CONFIG=data.get("ROI_CONFIG")
     )
+
+
+@dataclass
+class ContainerConfig:
+    container_type: str  # "docker" or "apptainer"
+    docker_image: str = ""
+    apptainer_image: str = ""
 
 
 def load_container_config(config_file: str) -> ContainerConfig:
@@ -286,6 +258,24 @@ def validate_space_availability(config: Config, subjects_to_process: List[str], 
 def check_command(cmd):
     if not shutil.which(cmd):
         log_error(f"'{cmd}' is required but not installed or in PATH.")
+
+
+def check_docker_availability():
+    """Check if Docker is installed and running."""
+    # First check if docker command exists
+    if not shutil.which("docker"):
+        log_error("Docker is required but not installed or in PATH.")
+    
+    # Check if Docker daemon is running
+    try:
+        result = subprocess.run(["docker", "info"], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            log_error("Docker is installed but not running. Please start Docker and try again.")
+    except subprocess.TimeoutExpired:
+        log_error("Docker command timed out. Docker daemon may not be running.")
+    except Exception as e:
+        log_error(f"Failed to check Docker status: {e}")
 
 
 def run_command(cmd_list, capture_output=False):
@@ -492,6 +482,32 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
     
     else:
         log_error(f"Unsupported container type: {container_config.container_type}")
+
+
+def ensure_derivatives_dataset_description(derivatives_dir: Path):
+    """Create a minimal dataset_description.json in derivatives directory to suppress BIDSPM warnings."""
+    dataset_desc_file = derivatives_dir / "dataset_description.json"
+    
+    if not dataset_desc_file.exists():
+        minimal_description = {
+            "Name": "Derivatives",
+            "BIDSVersion": "1.8.0",
+            "DatasetType": "derivative",
+            "GeneratedBy": [
+                {
+                    "Name": "bidspm-runner",
+                    "Version": "1.0.0",
+                    "Description": "Minimal dataset description to satisfy BIDS validation"
+                }
+            ]
+        }
+        
+        try:
+            with open(dataset_desc_file, 'w') as f:
+                json.dump(minimal_description, f, indent=2)
+            log_debug(f"Created minimal dataset_description.json in {derivatives_dir}")
+        except Exception as e:
+            log_debug(f"Could not create dataset_description.json: {e}")
 
 
 def cleanup_tmp_directories(config: Config, max_age_hours: int = 24):
@@ -734,7 +750,7 @@ def main():
     
     # Check container runtime availability
     if container_config.container_type == "docker":
-        check_command("docker")
+        check_docker_availability()
         log_debug(f"Using Docker with image: {container_config.docker_image}")
     elif container_config.container_type == "apptainer":
         check_command("apptainer")
@@ -765,6 +781,8 @@ def main():
         print(f"⚠️  WARNING: FMRIPREP_DIR ({config.FMRIPREP_DIR}) is not within DERIVATIVES_DIR ({config.DERIVATIVES_DIR})")
         print("   Container expects fmriprep at /derivatives/fmriprep inside container")
 
+    # Ensure derivatives directory has dataset_description.json to suppress BIDSPM warnings
+    ensure_derivatives_dataset_description(config.DERIVATIVES_DIR)
 
     # Processing loop
     for task in config.TASKS:
@@ -822,6 +840,88 @@ def main():
                 continue
             log_debug(f"Processing subject: {subject_label}, task: {task}")
 
+
+            # ROI analysis block
+            if hasattr(config, "ROI") and config.ROI:
+                roi_config = config.ROI_CONFIG
+                preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
+                
+                # Check if preproc directory exists
+                if not preproc_dir.exists():
+                    print(f"❌ Preprocessing directory not found: {preproc_dir}")
+                    print(f"   ROI analysis requires smoothed data. Please run smoothing first by setting 'SMOOTH': true in config.")
+                    continue
+                
+                # Check for smoothed data for each required space
+                missing_spaces = []
+                for roi_space in roi_config["space"]:
+                    found = False
+                    for ses_dir in (preproc_dir.glob(f"sub-{subject_label}/ses-*/func") if (preproc_dir / f"sub-{subject_label}").exists() else []):
+                        if any(ses_dir.glob(f"*_space-{roi_space}*.nii*")):
+                            found = True
+                            break
+                    if not found:
+                        missing_spaces.append(roi_space)
+                if missing_spaces:
+                    print(f"❌ Smoothed data for ROI space(s) {missing_spaces} not found in {preproc_dir}.")
+                    print(f"   Please run smoothing for space(s) {missing_spaces} first by setting 'SMOOTH': true and updating 'SPACE' in config.")
+                    continue
+
+                # Create ROI
+                roi_args = [
+                    "/raw", "/derivatives", "subject", "create_roi",
+                    "--participant_label", subject_label,
+                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                    "--roi_atlas", roi_config["roi_atlas"],
+                    "--roi_name"
+                ]
+                # Add each ROI name as a separate argument
+                roi_args.extend(roi_config["roi_name"])
+                roi_args.extend(["--space", ",".join(roi_config["space"])])
+                cmd, _ = build_container_command(container_config, config, roi_args, model_file_path)
+                success = run_command(cmd)
+                if not success:
+                    print(f"⚠️  ROI creation failed for subject {subject_label}, task {task}.")
+                    continue
+
+                # Run ROI-based GLM
+                roi_dir = config.DERIVATIVES_DIR / "bidspm-roi"
+                temp_args = []
+                _, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                stats_args = [
+                    "/raw", "/derivatives", "subject", "stats",
+                    "--participant_label", subject_label,
+                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                    "--model_file", model_container_path,
+                    "--roi_based",
+                    "--roi_name"
+                ]
+                # Add each ROI name as a separate argument  
+                stats_args.extend(roi_config["roi_name"])
+                stats_args.extend([
+                    "--roi_dir", "/derivatives/bidspm-roi",
+                    "--space", ",".join(roi_config["space"]),
+                    "--fwhm", "0"
+                ])
+                cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
+                success = run_command(cmd)
+                if not success:
+                    print(f"⚠️  ROI stats failed for subject {subject_label}, task {task}.")
+                else:
+                    print(f"✅ ROI stats completed for subject {subject_label}, task {task}")
+
+            # Check for smoothed data for main SPACE before stats
+            if config.STATS:
+                main_space = config.SPACE
+                found = False
+                preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
+                for ses_dir in (preproc_dir.glob(f"sub-{subject_label}/ses-*/func") if (preproc_dir / f"sub-{subject_label}").exists() else []):
+                    if any(ses_dir.glob(f"*_space-{main_space}*.nii*")):
+                        found = True
+                        break
+                if not found:
+                    print(f"❌ Smoothed data for main SPACE '{main_space}' not found in {preproc_dir}. Run smoothing first!")
+                    continue
 
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")

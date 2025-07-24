@@ -4,12 +4,17 @@
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": false,
-  "STATS": true,
+  "STATS": false,
   "DATASET": false,
-  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d2c.json",
-  "TASKS": ["nonsymbol"],
-  "SUBJECTS": ["138014"],
+  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d1c.json",
+  "TASKS": ["symbol"],
   "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
   "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep",
-  "VERBOSITY": 3
+  "VERBOSITY": 3,
+  "ROI": true,
+  "ROI_CONFIG": {
+    "roi_atlas": "wang",
+    "roi_name": ["V1v", "V1d"],
+    "space": ["MNI152NLin6Asym"]
+  }
 }
