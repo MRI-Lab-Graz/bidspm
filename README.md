@@ -54,21 +54,15 @@ Error Octave:undefined-function occurred:
 
 3. **Test Different Versions**:
 
+   Try different container versions to find one that works:
    ```bash
-   # Use our version testing script
-   chmod +x fix_atlas_error.sh
-   ./fix_atlas_error.sh
+   # Edit container.json to test different versions
+   "docker_image": "cpplab/bidspm:4.0.0"
    ```
 
-4. **Diagnostic Analysis**:
+4. **Manual Path Configuration**:
 
-   ```bash
-   # Run detailed diagnostics
-   chmod +x debug_atlas_error.sh
-   ./debug_atlas_error.sh 4.0.0
-   ```
-
-**Fixed Configuration**: Use `container_apptainer_atlas_fix.json` which includes enhanced path configuration and environment variables to work around this issue.
+   If issues persist, the tool automatically configures enhanced MATLAB paths to work around this issue.
 
 ### 🔧 Enhanced MATLAB Path Configuration
 
@@ -94,7 +88,7 @@ The tool automatically detects your platform and selects the appropriate contain
 ### 🐧 **Linux (Production/HPC)**
 
 - **Auto-detected**: Apptainer (preferred) or Docker
-- **Container**: `container_production.json` (Apptainer) or `container.json` (Docker)
+- **Container**: `container_apptainer.json` (Apptainer) or `container.json` (Docker)
 - **Usage**: Production runs on high-performance computing systems
 
 ### 🚀 **Quick Platform Setup**
@@ -112,8 +106,7 @@ python bidspm.py --pilot  # Automatically selects the right container
 The tool supports multiple container configurations:
 
 - `container.json` - Docker for macOS/development
-- `container_production.json` - Apptainer for Linux/HPC
-- `container_apptainer.json` - Alternative Apptainer config
+- `container_apptainer.json` - Apptainer for Linux/HPC
 
 **Example Docker config (macOS):**
 ```json
