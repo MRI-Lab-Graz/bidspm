@@ -187,6 +187,8 @@ Create a `config.json` file with your specific settings:
 {
   "WD": "/path/to/your/working/directory",
   "BIDS_DIR": "/path/to/your/rawdata",
+  "DERIVATIVES_DIR": "/path/to/your/derivatives",
+  "FMRIPREP_DIR": "/path/to/your/derivatives/fmriprep",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": true,
@@ -194,7 +196,8 @@ Create a `config.json` file with your specific settings:
   "DATASET": true,
   "MODELS_FILE": "model_d1.json",
   "TASKS": ["nonsymbol", "symbol"],
-  "SUBJECTS": ["01", "02", "03"]
+  "SUBJECTS": ["01", "02", "03"],
+  "VERBOSITY": 3
 }
 ```
 
@@ -202,6 +205,8 @@ Create a `config.json` file with your specific settings:
 
 - `WD`: Working directory (contains derivatives, models, etc.)
 - `BIDS_DIR`: Path to BIDS raw data
+- `DERIVATIVES_DIR`: Path to derivatives directory (where preprocessed data is stored)
+- `FMRIPREP_DIR`: Path to fMRIPrep output directory
 - `SPACE`: Spatial reference space for analysis
 - `FWHM`: Full Width at Half Maximum for smoothing (in mm)
 - `SMOOTH`: Boolean - whether to perform smoothing
@@ -210,6 +215,7 @@ Create a `config.json` file with your specific settings:
 - `MODELS_FILE`: Name of the BIDS-StatsModel JSON file
 - `TASKS`: List of fMRI tasks to process
 - `SUBJECTS`: List of specific subjects to process (optional - if omitted, all subjects found will be processed)
+- `VERBOSITY`: Logging verbosity level (0=minimal, 3=debug)
 
 ### 2. Container configuration (`container.json`)
 
@@ -273,6 +279,7 @@ python bidspm.py -h
 - `-c, --container`: Path to container configuration file (default: container.json)
 - `-m, --model, --model-file`: Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
 - `--pilot`: Pilot mode - process only one random subject for testing
+- `--skip-modelvalidation`: Skip BIDS-StatsModel JSON validation
 
 **Logging:**
 
@@ -405,12 +412,20 @@ Before processing, the tool validates that the specified `SPACE` exists in your 
 
 ## BIDS-StatsModel validation
 
-The tool automatically validates your BIDS-StatsModel file against the official schema:
+The tool automatically validates your BIDS-StatsModel file against the official schema before processing:
 
 ```bash
-# Manual validation
+# Default behavior - automatic validation
+python bidspm.py
+
+# Skip validation if you're confident your model is correct
+python bidspm.py --skip-modelvalidation
+
+# Manual validation (standalone)
 python validate_bids_model.py /path/to/your/model.json
 ```
+
+**Note**: Validation ensures your BIDS-StatsModel follows the official specification and helps catch configuration errors early. Only skip validation if you're certain your model file is correctly formatted.
 
 ## Directory structure
 
@@ -476,7 +491,7 @@ To enable ROI analysis, add the following to your `config.json`:
 {
   "ROI": true,
   "ROI_CONFIG": {
-    "roi_atlas": ["wang"],
+    "roi_atlas": "wang",
     "roi_name": ["V1v", "V1d"],
     "space": ["MNI152NLin6Asym"]
   }
@@ -486,7 +501,7 @@ To enable ROI analysis, add the following to your `config.json`:
 ### ROI Parameters
 
 - **`ROI`**: Boolean flag to enable/disable ROI analysis
-- **`roi_atlas`**: Array of atlas names to use for ROI extraction (e.g., "wang", "neuromorphometrics")
+- **`roi_atlas`**: Atlas name to use for ROI extraction (e.g., "wang", "neuromorphometrics")
 - **`roi_name`**: Array of specific ROI names to extract from the atlas
 - **`space`**: Array of spatial reference spaces to use (must match available fMRIPrep outputs)
 
@@ -527,7 +542,7 @@ The Wang atlas provides retinotopic visual cortex parcellations:
   "QC": false,
   "ROI": true,
   "ROI_CONFIG": {
-    "roi_atlas": ["wang"],
+    "roi_atlas": "wang",
     "roi_name": ["V1v", "V1d"],
     "space": ["MNI152NLin6Asym"]
   }
