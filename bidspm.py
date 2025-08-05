@@ -415,7 +415,11 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd.extend([
             "-e", "HOME=/tmp",
             "-e", "TMPDIR=/tmp",
-            "-e", "TMP=/tmp"
+            "-e", "TMP=/tmp",
+            "-e", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
+            "-e", "BIDSPM_IGNORE_FIELDMAPS=1",  # Skip fieldmap processing (not needed for smoothing)
+            "-e", "BIDSPM_IGNORE_FIGURES=1",   # Skip HTML/SVG files processing
+            "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"  # Skip IntendedFor validation (irrelevant post-fMRIPrep)
         ])
 
         cmd.append(container_config.docker_image)
@@ -486,7 +490,10 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
             "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m",  # Custom Octave initialization to force atlas path
-            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc"  # Octave compatibility startup script
+            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc",  # Octave compatibility startup script
+            "--env", "BIDSPM_IGNORE_FIELDMAPS=1",  # Skip fieldmap processing (not needed for smoothing)
+            "--env", "BIDSPM_IGNORE_FIGURES=1",   # Skip HTML/SVG files processing
+            "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"  # Skip IntendedFor validation (irrelevant post-fMRIPrep)
         ])
 
         cmd.append(container_config.apptainer_image)
@@ -819,13 +826,21 @@ def main():
 
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
+                # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
+                # BIDSPM needs access to the raw fMRIPrep output for smoothing
+                fmriprep_source = config.DERIVATIVES_DIR / "fmriprep"
+                if not fmriprep_source.exists():
+                    print(f"⚠️  fMRIPrep directory not found at {fmriprep_source}")
+                    print(f"   Current FMRIPREP_DIR setting: {config.FMRIPREP_DIR}")
+                    print("   For smoothing, BIDSPM needs the original fMRIPrep output")
+                
                 smooth_args = [
                     "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
-                    "--verbosity", str(config.VERBOSITY)
+                    "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
                 ]
                 cmd = build_container_command(container_config, config, smooth_args, model_file_path)
                 log_debug(f"Full container command: {' '.join(cmd)}")
