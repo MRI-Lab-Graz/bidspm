@@ -19,6 +19,7 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 🗂️ **Tmp Management**: Automatic creation and cleanup of run-specific temporary directories
 - 🌍 **SPACE Validation**: Validates spatial reference spaces exist in fMRIPrep data
 - 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
+- 🎯 **ROI Analysis**: Extract signals from regions of interest using multiple atlases (Wang, Neuromorphometrics, etc.)
 
 ## ⚠️ Known Issues and Solutions
 
@@ -53,21 +54,15 @@ Error Octave:undefined-function occurred:
 
 3. **Test Different Versions**:
 
+   Try different container versions to find one that works:
    ```bash
-   # Use our version testing script
-   chmod +x fix_atlas_error.sh
-   ./fix_atlas_error.sh
+   # Edit container.json to test different versions
+   "docker_image": "cpplab/bidspm:4.0.0"
    ```
 
-4. **Diagnostic Analysis**:
+4. **Manual Path Configuration**:
 
-   ```bash
-   # Run detailed diagnostics
-   chmod +x debug_atlas_error.sh
-   ./debug_atlas_error.sh 4.0.0
-   ```
-
-**Fixed Configuration**: Use `container_apptainer_atlas_fix.json` which includes enhanced path configuration and environment variables to work around this issue.
+   If issues persist, the tool automatically configures enhanced MATLAB paths to work around this issue.
 
 ### 🔧 Enhanced MATLAB Path Configuration
 
@@ -93,7 +88,7 @@ The tool automatically detects your platform and selects the appropriate contain
 ### 🐧 **Linux (Production/HPC)**
 
 - **Auto-detected**: Apptainer (preferred) or Docker
-- **Container**: `container_production.json` (Apptainer) or `container.json` (Docker)
+- **Container**: `container_apptainer.json` (Apptainer) or `container.json` (Docker)
 - **Usage**: Production runs on high-performance computing systems
 
 ### 🚀 **Quick Platform Setup**
@@ -111,8 +106,7 @@ python bidspm.py --pilot  # Automatically selects the right container
 The tool supports multiple container configurations:
 
 - `container.json` - Docker for macOS/development
-- `container_production.json` - Apptainer for Linux/HPC
-- `container_apptainer.json` - Alternative Apptainer config
+- `container_apptainer.json` - Apptainer for Linux/HPC
 
 **Example Docker config (macOS):**
 ```json
@@ -186,6 +180,8 @@ Create a `config.json` file with your specific settings:
 {
   "WD": "/path/to/your/working/directory",
   "BIDS_DIR": "/path/to/your/rawdata",
+  "DERIVATIVES_DIR": "/path/to/your/derivatives",
+  "FMRIPREP_DIR": "/path/to/your/derivatives/fmriprep",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": true,
@@ -193,7 +189,8 @@ Create a `config.json` file with your specific settings:
   "DATASET": true,
   "MODELS_FILE": "model_d1.json",
   "TASKS": ["nonsymbol", "symbol"],
-  "SUBJECTS": ["01", "02", "03"]
+  "SUBJECTS": ["01", "02", "03"],
+  "VERBOSITY": 3
 }
 ```
 
@@ -201,6 +198,8 @@ Create a `config.json` file with your specific settings:
 
 - `WD`: Working directory (contains derivatives, models, etc.)
 - `BIDS_DIR`: Path to BIDS raw data
+- `DERIVATIVES_DIR`: Path to derivatives directory (where preprocessed data is stored)
+- `FMRIPREP_DIR`: Path to fMRIPrep output directory
 - `SPACE`: Spatial reference space for analysis
 - `FWHM`: Full Width at Half Maximum for smoothing (in mm)
 - `SMOOTH`: Boolean - whether to perform smoothing
@@ -209,6 +208,7 @@ Create a `config.json` file with your specific settings:
 - `MODELS_FILE`: Name of the BIDS-StatsModel JSON file
 - `TASKS`: List of fMRI tasks to process
 - `SUBJECTS`: List of specific subjects to process (optional - if omitted, all subjects found will be processed)
+- `VERBOSITY`: Logging verbosity level (0=minimal, 3=debug)
 
 ### 2. Container configuration (`container.json`)
 
@@ -272,6 +272,7 @@ python bidspm.py -h
 - `-c, --container`: Path to container configuration file (default: container.json)
 - `-m, --model, --model-file`: Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
 - `--pilot`: Pilot mode - process only one random subject for testing
+- `--skip-modelvalidation`: Skip BIDS-StatsModel JSON validation
 
 **Logging:**
 
@@ -404,12 +405,20 @@ Before processing, the tool validates that the specified `SPACE` exists in your 
 
 ## BIDS-StatsModel validation
 
-The tool automatically validates your BIDS-StatsModel file against the official schema:
+The tool automatically validates your BIDS-StatsModel file against the official schema before processing:
 
 ```bash
-# Manual validation
+# Default behavior - automatic validation
+python bidspm.py
+
+# Skip validation if you're confident your model is correct
+python bidspm.py --skip-modelvalidation
+
+# Manual validation (standalone)
 python validate_bids_model.py /path/to/your/model.json
 ```
+
+**Note**: Validation ensures your BIDS-StatsModel follows the official specification and helps catch configuration errors early. Only skip validation if you're certain your model file is correctly formatted.
 
 ## Directory structure
 
@@ -462,6 +471,90 @@ working_directory/
 - Enable debug mode in `bidspm.py`
 - Check the log file `run_bidspm.log`
 - Test container commands manually
+
+## ROI Analysis
+
+BIDSPM supports region of interest (ROI) analysis for extracting signals from specific brain regions. The ROI analysis uses various atlases to define regions and extract time series data.
+
+### ROI Configuration
+
+To enable ROI analysis, add the following to your `config.json`:
+
+```json
+{
+  "ROI": true,
+  "ROI_CONFIG": {
+    "roi_atlas": "wang",
+    "roi_name": ["V1v", "V1d"],
+    "space": ["MNI152NLin6Asym"]
+  }
+}
+```
+
+### ROI Parameters
+
+- **`ROI`**: Boolean flag to enable/disable ROI analysis
+- **`roi_atlas`**: Atlas name to use for ROI extraction (e.g., "wang", "neuromorphometrics")
+- **`roi_name`**: Array of specific ROI names to extract from the atlas
+- **`space`**: Array of spatial reference spaces to use (must match available fMRIPrep outputs)
+
+### Available Atlases and ROIs
+
+#### Wang Atlas
+The Wang atlas provides retinotopic visual cortex parcellations:
+- **V1v**: Ventral V1
+- **V1d**: Dorsal V1
+- **V2v**: Ventral V2
+- **V2d**: Dorsal V2
+- **V3v**: Ventral V3
+- **V3d**: Dorsal V3
+
+### ROI Analysis Workflow
+
+1. **Prerequisites Check**: Verifies Docker/Apptainer availability
+2. **ROI Extraction**: Extracts time series from specified ROIs using the selected atlas
+3. **Statistics**: Computes ROI-based statistics in the specified spatial reference space
+4. **Output**: Results are saved to `/derivatives/bidspm-roi/`
+
+### Example ROI Configuration
+
+```json
+{
+  "BIDSPM_PATH": "/path/to/bidspm-container.sif",
+  "BIDS_DIR": "/path/to/bids",
+  "OUTPUT_DIR": "/path/to/output",
+  "DERIVATIVES_DIR": "/path/to/derivatives",
+  "PARTICIPANT_LABEL": ["01", "02"],
+  "TASK_LABEL": ["task1"],
+  "SPACE": ["MNI152NLin6Asym"],
+  "FWHM": [8],
+  "MODEL_FILE": "/path/to/model.json",
+  "PREPROC_DIR": "/path/to/fmriprep",
+  "STATS": true,
+  "PREPROC": false,
+  "QC": false,
+  "ROI": true,
+  "ROI_CONFIG": {
+    "roi_atlas": "wang",
+    "roi_name": ["V1v", "V1d"],
+    "space": ["MNI152NLin6Asym"]
+  }
+}
+```
+
+### ROI Output Structure
+
+The ROI analysis creates the following output structure:
+
+```
+derivatives/bidspm-roi/
+├── dataset_description.json
+└── sub-*/
+    └── roi/
+        ├── *_roi-V1v_timeseries.tsv
+        ├── *_roi-V1d_timeseries.tsv
+        └── *_roi-stats.json
+```
 
 ## Contributing
 

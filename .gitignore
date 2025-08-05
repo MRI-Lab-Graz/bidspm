@@ -139,6 +139,7 @@ Thumbs.db
 *.temp
 *.bak
 *.backup
+bidspm_runner.egg-info/
 
 # Data directories (typically large, should be specified separately)
 data/
@@ -146,6 +147,7 @@ rawdata/
 derivatives/
 scratch/
 work/
+
 
 # BIDS specific
 .bidsignore

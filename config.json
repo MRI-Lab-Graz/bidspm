@@ -6,10 +6,26 @@
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
   "SMOOTH": false,
+<<<<<<< HEAD
   "STATS": true,
   "DATASET": false,
   "MODELS_FILE": "model_d1c.json",
   "TASKS": ["symbol"],
   "VERBOSITY": 2,
   "SUBJECTS": ["sub-138004"]
+=======
+  "STATS": false,
+  "DATASET": false,
+  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d1c.json",
+  "TASKS": ["symbol"],
+  "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
+  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep",
+  "VERBOSITY": 3,
+  "ROI": true,
+  "ROI_CONFIG": {
+    "roi_atlas": "wang",
+    "roi_name": ["V1v", "V1d"],
+    "space": ["MNI152NLin6Asym"]
+  }
+>>>>>>> 3bd4711591444693e72ab2098c3b6f6f57d5035d
 }
