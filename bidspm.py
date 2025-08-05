@@ -198,6 +198,17 @@ def auto_select_container_config():
 # Logging & Utilities
 # ------------------------------
 
+def get_container_model_path(model_file_path: Path, derivatives_dir: Path) -> str:
+    """Get the correct model file path within the container"""
+    try:
+        # If model file is inside derivatives directory, use relative path
+        relative_path = model_file_path.relative_to(derivatives_dir)
+        return f"/derivatives/{relative_path}"
+    except ValueError:
+        # Model file is outside derivatives, use mounted path
+        return "/models/smdl.json"
+
+
 def generate_log_filename(model_file_path: str) -> str:
     """Generate log filename based on model name and timestamp"""
     model_name = Path(model_file_path).stem  # Get filename without extension
@@ -827,10 +838,11 @@ def main():
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
+                container_model_path = get_container_model_path(model_file_path, config.DERIVATIVES_DIR)
                 stats_args = [
                     "/raw", "/derivatives", "subject", "stats",
                     "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--model_file", "/models/smdl.json",
+                    "--model_file", container_model_path,
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
@@ -847,10 +859,11 @@ def main():
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
+            container_model_path = get_container_model_path(model_file_path, config.DERIVATIVES_DIR)
             dataset_args = [
                 "/raw", "/derivatives", "dataset", "stats",
                 "--preproc_dir", "/derivatives/bidspm-preproc",
-                "--model_file", "/models/smdl.json",
+                "--model_file", container_model_path,
                 "--task", task,
                 "--space", config.SPACE,
                 "--fwhm", str(config.FWHM),

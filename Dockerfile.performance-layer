@@ -1,0 +1,63 @@
+# Performance-Enhanced BIDSPM Container Configuration
+# Author: Karl Koschutnig, MRI Lab Graz
+# Optimized version of working bidspm:mri-lab-graz container
+
+FROM bidspm:mri-lab-graz
+
+LABEL maintainer="Karl Koschutnig <karl.koschutnig@uni-graz.at>"
+LABEL description="Performance-enhanced BIDSPM container based on working foundation"
+LABEL version="2025.1-performance-enhanced"
+
+# Switch to root for system modifications
+USER root
+WORKDIR /
+
+# Set performance environment variables
+ENV OCTAVE_EXECUTABLE=/usr/bin/octave
+ENV BLAS_NUM_THREADS=4
+ENV OPENBLAS_NUM_THREADS=4
+ENV OMP_NUM_THREADS=4
+ENV MKL_NUM_THREADS=4
+ENV OMP_THREAD_LIMIT=4
+
+# Create optimized Octave startup configuration
+RUN echo "% Performance-Enhanced Octave Configuration for BIDSPM" > /usr/share/octave/site/m/startup/octaverc && \
+    echo "% Set performance threading" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "setenv('OPENBLAS_NUM_THREADS', '4');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "setenv('BLAS_NUM_THREADS', '4');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "setenv('OMP_NUM_THREADS', '4');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "setenv('MKL_NUM_THREADS', '4');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "% Performance optimizations" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "more off;" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "warning('off', 'Octave:shadowed-function');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "% Load critical packages silently" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "try pkg load parallel; catch; end" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "try pkg load struct; catch; end" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "% Add SPM12 and BIDSPM paths" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "addpath('/opt/spm12/');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "addpath('/home/neuro/bidspm');" >> /usr/share/octave/site/m/startup/octaverc && \
+    echo "% End performance configuration" >> /usr/share/octave/site/m/startup/octaverc
+
+# Create performance validation script
+RUN echo '#!/bin/bash' > /usr/local/bin/test-performance && \
+    echo 'echo "🧪 BIDSPM Performance Test Report"' >> /usr/local/bin/test-performance && \
+    echo 'echo "================================="' >> /usr/local/bin/test-performance && \
+    echo 'echo "Container: Performance-Enhanced BIDSPM"' >> /usr/local/bin/test-performance && \
+    echo 'echo ""' >> /usr/local/bin/test-performance && \
+    echo 'echo "Octave Configuration:"' >> /usr/local/bin/test-performance && \
+    echo 'octave --no-gui --eval "version; printf('Available CPU cores: %d\\n', nproc()); printf('OMP_NUM_THREADS: %s\\n', getenv('OMP_NUM_THREADS')); printf('OPENBLAS_NUM_THREADS: %s\\n', getenv('OPENBLAS_NUM_THREADS'));"' >> /usr/local/bin/test-performance && \
+    echo 'echo ""' >> /usr/local/bin/test-performance && \
+    echo 'echo "SPM12 Test:"' >> /usr/local/bin/test-performance && \
+    echo 'timeout 30 octave --no-gui --eval "addpath('"'"'/opt/spm12'"'"'); tic; try; spm('"'"'defaults'"'"', '"'"'fmri'"'"'); disp('"'"'✅ SPM12 initialized successfully'"'"'); catch e; disp(['"'"'⚠️ SPM12 issue: '"'"' e.message]); end; fprintf('"'"'Time taken: %.2f seconds\\n'"'"', toc);"' >> /usr/local/bin/test-performance && \
+    chmod +x /usr/local/bin/test-performance
+
+# Fix permissions
+RUN chown -R neuro:neuro /home/neuro
+
+# Switch back to neuro user
+USER neuro
+WORKDIR /home/neuro
+
+# Use BIDSPM CLI entrypoint
+ENTRYPOINT ["bidspm"]
+CMD ["--help"]

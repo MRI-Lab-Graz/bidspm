@@ -1,3 +1,0 @@
-[console_scripts]
-bidspm = bidspm:main
-validate-bids-model = validate_bids_model:main

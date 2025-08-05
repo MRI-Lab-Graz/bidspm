@@ -1,5 +1,19 @@
 {
   "container_type": "docker",
-  "docker_image": "cpplab/bidspm:latest",
-  "apptainer_image": ""
+  "docker_image": "bidspm:performance-enhanced",
+  "apptainer_image": "",
+  "description": "BIDSPM 4.0 container with Ubuntu 24.04, latest Octave, and SPM12 by MRI Lab Graz",
+  "author": "Karl Koschutnig",
+  "organization": "MRI Lab Graz",
+  "features": [
+    "Ubuntu 24.04 LTS",
+    "Octave 9.x (latest)",
+    "BIDSPM 4.0 (stable)",
+    "SPM12 (proven stable)",
+    "UV for fast Python installs",
+    "Production-ready configuration"
+  ],
+  "python_packages_via": "UV",
+  "spm_version": "12",
+  "bidspm_version": "4.0"
 }

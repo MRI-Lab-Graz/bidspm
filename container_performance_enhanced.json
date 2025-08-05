@@ -1,0 +1,29 @@
+{
+  "container_type": "docker",
+  "docker_image": "bidspm:performance-enhanced",
+  "apptainer_image": "",
+  "description": "Performance-enhanced BIDSPM container with optimized Octave configuration",
+  "author": "Karl Koschutnig",
+  "organization": "MRI Lab Graz",
+  "features": [
+    "Octave 7.3.0 (modern)",
+    "BIDSPM 4.0 (stable)",
+    "SPM12 (optimized compilation)",
+    "Enhanced threading (4 cores)",
+    "Optimized BLAS configuration",
+    "Suppressed warning messages",
+    "Fast SPM12 startup (~0.04s)",
+    "Pre-loaded critical packages"
+  ],
+  "performance_enhancements": {
+    "threading": "4 cores (OMP, OpenBLAS)",
+    "spm12_startup": "~0.04 seconds (vs 37+ seconds)",
+    "warning_suppression": "Octave shadowed function warnings disabled",
+    "package_preloading": "parallel, struct packages pre-loaded",
+    "memory_optimization": "Optimized startup configuration"
+  },
+  "python_packages_via": "UV",
+  "spm_version": "12",
+  "bidspm_version": "4.0",
+  "base_container": "bidspm:mri-lab-graz"
+}

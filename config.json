@@ -1,14 +1,15 @@
 {
   "WD": "/Volumes/Thunder/138",
   "BIDS_DIR": "/Volumes/Thunder/138/rawdata",
+  "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
+  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/bidspm-preproc",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
-  "SMOOTH": true,
-  "STATS": false,
+  "SMOOTH": false,
+  "STATS": true,
   "DATASET": false,
-  "MODELS_FILE": "/Volumes/Thunder/138/derivatives/models/model_d2.json",
+  "MODELS_FILE": "model_d1c.json",
   "TASKS": ["symbol"],
-  "SUBJECTS": ["138014"],
-  "DERIVATIVES_DIR": "/Volumes/Thunder/138/derivatives",
-  "FMRIPREP_DIR": "/Volumes/Thunder/138/derivatives/fmriprep"
+  "VERBOSITY": 2,
+  "SUBJECTS": ["sub-138004"]
 }

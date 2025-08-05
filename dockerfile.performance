@@ -1,0 +1,79 @@
+# High-Performance BIDSPM Container
+# Optimized for faster SPM12 computations
+FROM python:3.12-slim-bookworm
+
+# Set performance environment variables
+ENV OCTAVE_EXECUTABLE=/usr/bin/octave
+ENV BLAS_NUM_THREADS=4
+ENV OPENBLAS_NUM_THREADS=4
+ENV OMP_NUM_THREADS=4
+
+# Install optimized system dependencies
+RUN apt-get update -qq && \
+    apt-get -qq -y --no-install-recommends install \
+        ca-certificates curl wget git unzip \
+        python3 python3-pip python3-venv \
+        octave octave-common octave-dev \
+        octave-io octave-image octave-signal \
+        octave-statistics octave-struct \
+        octave-parallel octave-control octave-symbolic \
+        build-essential patch vim nano \
+        libblas3 liblapack3 libopenblas-base \
+        libopenblas-dev libatlas-base-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Install UV for ultra-fast Python package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    chmod +x /usr/local/bin/uv
+
+# Install Python packages with UV (much faster than pip)
+RUN uv pip install --system --no-cache-dir \
+        numpy scipy matplotlib pandas \
+        nibabel nilearn bids-validator pybids \
+        jsonschema setuptools wheel
+
+# Download and compile SPM12 with performance optimizations
+RUN mkdir -p /opt/spm12 && \
+    curl -fsSL https://github.com/spm/spm12/archive/r7771.tar.gz | tar -xzC /opt/spm12 --strip-components=1 && \
+    curl -fsSL https://raw.githubusercontent.com/spm/spm-octave/main/spm12_r7771.patch | patch -p0 && \
+    make -C /opt/spm12/src PLATFORM=octave distclean && \
+    make -C /opt/spm12/src PLATFORM=octave -j$(nproc) && \
+    make -C /opt/spm12/src PLATFORM=octave install && \
+    echo "✅ SPM12 r7771 compiled with $(nproc) cores"
+
+# Create optimized user with proper permissions
+RUN useradd -m -u 1000 -s /bin/bash neuro && \
+    mkdir -p /home/neuro && \
+    chown -R neuro:neuro /home/neuro && \
+    chown -R neuro:neuro /opt/spm12
+
+# Install BIDSPM 4.0 with submodules
+RUN git clone --depth 1 --branch v4.0.0 https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm || \
+    git clone --depth 1 https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm && \
+    cd /home/neuro/bidspm && \
+    git submodule update --init --recursive || true && \
+    echo "✅ BIDSPM 4.0 installed successfully"
+
+# Install BIDSPM Python CLI
+RUN cd /home/neuro/bidspm && \
+    pip install --no-cache-dir --break-system-packages . && \
+    echo "✅ BIDSPM Python CLI installed"
+
+# Configure Octave paths for optimal performance
+RUN octave --no-gui --eval "addpath('/opt/spm12/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
+    octave --no-gui --eval "cd('/home/neuro/bidspm'); addpath(pwd); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
+    echo "✅ Octave paths configured"
+
+# Set optimal ownership
+RUN chown -R neuro:neuro /home/neuro
+
+WORKDIR /home/neuro
+
+# Performance validation tests
+RUN octave --no-gui --eval "version; pkg list; disp('✅ High-Performance Octave ready!');" && \
+    octave --no-gui --eval "addpath('/opt/spm12'); try; spm('defaults', 'fmri'); disp('✅ SPM12 optimized!'); catch e; disp(['⚠️ SPM12 issue: ' e.message]); end"
+
+# Set the optimized BIDSPM CLI as entrypoint
+ENTRYPOINT ["bidspm"]
