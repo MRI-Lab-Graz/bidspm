@@ -51,29 +51,6 @@ def load_config(config_file: str) -> Config:
     with open(config_file) as f:
         data = json.load(f)
 
-    # SESSION-Unterstützung: falls vorhanden, generiere selection.json
-    session = data.get("SESSION")
-    if session:
-        selection = {
-            "bold": {
-                "datatype": "func",
-                "suffix": "bold",
-                "ses": session
-            }
-        }
-        # Optional: weitere Einschränkungen (z.B. run) aus config übernehmen
-        # Beispiel: falls RUNS in config vorhanden
-        runs = data.get("RUNS")
-        if runs:
-            selection["bold"]["run"] = runs
-        # Schreibe selection.json ins Arbeitsverzeichnis
-        try:
-            with open("selection.json", "w") as sel_f:
-                json.dump(selection, sel_f, indent=2)
-            print(f"✅ selection.json für Session {session} generiert.")
-        except Exception as e:
-            print(f"⚠️  Konnte selection.json nicht schreiben: {e}")
-
     # Derive paths
     wd = Path(data["WD"])
     bids_dir = Path(data["BIDS_DIR"])
@@ -192,17 +169,6 @@ def auto_select_container_config():
 # ------------------------------
 # Logging & Utilities
 # ------------------------------
-
-def get_container_model_path(model_file_path: Path, derivatives_dir: Path) -> str:
-    """Get the correct model file path within the container"""
-    try:
-        # If model file is inside derivatives directory, use relative path
-        relative_path = model_file_path.relative_to(derivatives_dir)
-        return f"/derivatives/{relative_path}"
-    except ValueError:
-        # Model file is outside derivatives, use mounted path
-        return "/models/smdl.json"
-
 
 def generate_log_filename(model_file_path: str) -> str:
     """Generate log filename based on model name and timestamp"""
@@ -434,11 +400,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd.extend([
             "-e", "HOME=/tmp",
             "-e", "TMPDIR=/tmp",
-            "-e", "TMP=/tmp",
-            "-e", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
-            "-e", "BIDSPM_IGNORE_FIELDMAPS=1",  # Skip fieldmap processing (not needed for smoothing)
-            "-e", "BIDSPM_IGNORE_FIGURES=1",   # Skip HTML/SVG files processing
-            "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"  # Skip IntendedFor validation (irrelevant post-fMRIPrep)
+            "-e", "TMP=/tmp"
         ])
 
         cmd.append(container_config.docker_image)
@@ -511,10 +473,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
             "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m",  # Custom Octave initialization to force atlas path
-            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc",  # Octave compatibility startup script
-            "--env", "BIDSPM_IGNORE_FIELDMAPS=1",  # Skip fieldmap processing (not needed for smoothing)
-            "--env", "BIDSPM_IGNORE_FIGURES=1",   # Skip HTML/SVG files processing
-            "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"  # Skip IntendedFor validation (irrelevant post-fMRIPrep)
+            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc"  # Octave compatibility startup script
         ])
 
         cmd.append(container_config.apptainer_image)
@@ -966,21 +925,13 @@ def main():
 
             if config.SMOOTH:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
-                # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
-                # BIDSPM needs access to the raw fMRIPrep output for smoothing
-                fmriprep_source = config.DERIVATIVES_DIR / "fmriprep"
-                if not fmriprep_source.exists():
-                    print(f"⚠️  fMRIPrep directory not found at {fmriprep_source}")
-                    print(f"   Current FMRIPREP_DIR setting: {config.FMRIPREP_DIR}")
-                    print("   For smoothing, BIDSPM needs the original fMRIPrep output")
-                
                 smooth_args = [
                     "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
                     "--participant_label", subject_label,
                     "--task", task,
                     "--space", config.SPACE,
                     "--fwhm", str(config.FWHM),
-                    "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
+                    "--verbosity", str(config.VERBOSITY)
                 ]
                 cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
                 log_debug(f"Full container command: {' '.join(cmd)}")
@@ -993,9 +944,10 @@ def main():
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
-                # First build container command to get den korrekten model file path
-                temp_args = []
+                # First build container command to get the correct model file path
+                temp_args = []  # We'll replace this
                 cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                
                 stats_args = [
                     "/raw", "/derivatives", "subject", "stats",
                     "--preproc_dir", "/derivatives/bidspm-preproc",
@@ -1016,9 +968,10 @@ def main():
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
-            # First build container command to get den korrekten model file path
-            temp_args = []
+            # First build container command to get the correct model file path
+            temp_args = []  # We'll replace this
             cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+            
             dataset_args = [
                 "/raw", "/derivatives", "dataset", "stats",
                 "--preproc_dir", "/derivatives/bidspm-preproc",
