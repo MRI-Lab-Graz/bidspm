@@ -31,11 +31,8 @@ class Config:
     DERIVATIVES_DIR: Path
     SPACE: str
     FWHM: float
-    SMOOTH: bool
-    STATS: bool
     MODELS_FILE: str
     TASKS: List[str]
-    DATASET: bool
     FMRIPREP_DIR: Path
     VERBOSITY: int
     SUBJECTS: Optional[List[str]] = None
@@ -87,11 +84,8 @@ def load_config(config_file: str) -> Config:
         DERIVATIVES_DIR=derivatives_dir,
         SPACE=data["SPACE"],
         FWHM=data["FWHM"],
-        SMOOTH=data["SMOOTH"],
-        STATS=data["STATS"],
         MODELS_FILE=data.get("MODELS_FILE", None),
         TASKS=data["TASKS"],
-        DATASET=data["DATASET"],
         FMRIPREP_DIR=fmriprep_dir,
         VERBOSITY=verbosity,
         SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
@@ -890,7 +884,7 @@ def main():
                 # Check if preproc directory exists
                 if not preproc_dir.exists():
                     print(f"❌ Preprocessing directory not found: {preproc_dir}")
-                    print(f"   ROI analysis requires smoothed data. Please run smoothing first by setting 'SMOOTH': true in config.")
+                    print("   ROI analysis requires smoothed data. Please run smoothing first using the --action smooth Option.")
                     continue
                 
                 # Check for smoothed data for each required space
@@ -926,7 +920,7 @@ def main():
                     continue
 
                 # Run ROI-based GLM
-                roi_dir = config.DERIVATIVES_DIR / "bidspm-roi"
+                # roi_dir wird nicht mehr benötigt
                 temp_args = []
                 _, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
                 stats_args = [
