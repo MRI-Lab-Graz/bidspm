@@ -586,15 +586,16 @@ def show_help():
 BIDSPM Runner - A Python tool for running BIDS-StatsModel pipelines via containers
 
 USAGE:
-    python bidspm.py [OPTIONS]
+    python bidspm.py [OPTIONS] --action [smooth] [stats] [dataset]
 
 OPTIONS:
     -h, --help                    Show this help message and exit
-    -s, --settings, --config     Path to main configuration file
+    -s, --settings, --config      Path to main configuration file
     -c, --container               Path to container configuration file
     -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
     --pilot                       Pilot mode: process only one random subject for testing
     --skip-modelvalidation        Skip BIDS-StatsModel JSON validation
+    --action                      Actions to perform: smooth, stats, dataset (at least one required)
 
 DESCRIPTION:
     BIDSPM Runner executes neuroimaging analysis pipelines using containerized 
@@ -602,8 +603,11 @@ DESCRIPTION:
     processes BIDS-compliant datasets and performs smoothing and statistical 
     analyses based on configuration files.
 
+    Actions (smoothing, stats, dataset-level) are now controlled via the --action argument.
+    Example: --action smooth stats
+
 CONFIGURATION FILES:
-    Main config file contains analysis parameters (paths, smoothing, tasks, etc.)
+    Main config file contains analysis parameters (paths, tasks, etc.)
     Container config file specifies Docker or Apptainer settings
     
     If not specified with -s and -c options, the tool will look for:
@@ -614,11 +618,10 @@ CONFIGURATION EXAMPLE (main config file):
     {
         "WD": "/path/to/working/directory",
         "BIDS_DIR": "/path/to/bids/rawdata", 
+        "DERIVATIVES_DIR": "/path/to/derivatives",
+        "FMRIPREP_DIR": "/path/to/derivatives/fmriprep",
         "SPACE": "MNI152NLin6Asym",
         "FWHM": 8,
-        "SMOOTH": true,
-        "STATS": true,
-        "DATASET": true,
         "MODELS_FILE": "model.json",
         "TASKS": ["task1", "task2"],
         "SUBJECTS": ["01", "02", "03"],
@@ -636,12 +639,13 @@ CONTAINER CONFIGURATION EXAMPLE:
     }
 
 WORKFLOW:
-    1. Validates BIDS-StatsModel file against official schema
-    2. For each subject and task:
-       - Performs smoothing (if SMOOTH=true)
-       - Runs statistical analysis (if STATS=true)
-    3. Runs dataset-level analysis (if DATASET=true)
-    4. Logs all activities to timestamped log file
+    1. Validates config.json against config_schema.json (JSON schema)
+    2. Validates BIDS-StatsModel file against official schema
+    3. For each subject and task:
+       - Performs smoothing if selected via --action smooth
+       - Runs statistical analysis if selected via --action stats
+    4. Runs dataset-level analysis if selected via --action dataset
+    5. Logs all activities to timestamped log file
 
 REQUIREMENTS:
     - Python 3.8+
@@ -652,19 +656,19 @@ REQUIREMENTS:
 
 EXAMPLES:
     # Run with default configuration files (config.json, container.json)
-    python bidspm.py -s config.json -c container.json
+    python bidspm.py --action smooth stats
     
     # Run with custom configuration files
-    python bidspm.py -s my_analysis.json -c my_container.json
+    python bidspm.py -s my_analysis.json -c my_container.json --action smooth
     
     # Run with custom model file
-    python bidspm.py -s config.json -c container.json -m /path/to/my_model.json
+    python bidspm.py -s config.json -c container.json -m /path/to/my_model.json --action stats
     
     # Pilot mode: test with one random subject
-    python bidspm.py -s config.json -c container.json --pilot
+    python bidspm.py -s config.json -c container.json --pilot --action stats
     
     # Run with all custom files
-    python bidspm.py -s study_config.json -c docker_setup.json -m models/task_model.json
+    python bidspm.py -s study_config.json -c docker_setup.json -m models/task_model.json --action smooth stats dataset
     
     # Show help
     python bidspm.py -h
@@ -672,6 +676,10 @@ EXAMPLES:
 LOGGING:
     Log files are automatically named with model name and timestamp:
     Example: model_task1_20250721_143022.log
+
+CONFIGURATION VALIDATION:
+    Your config.json is automatically validated against config_schema.json using the jsonschema package.
+    If validation fails, you will get a clear error message and the run will abort.
 
 MORE INFORMATION:
     GitHub: https://github.com/MRI-Lab-Graz/bidspm
