@@ -706,7 +706,8 @@ def parse_arguments():
                        help='Pilot mode: process only one random subject for testing')
     parser.add_argument('--skip-modelvalidation', action='store_true',
                        help='Skip BIDS-StatsModel JSON validation')
-    
+    parser.add_argument('--action', nargs='+', choices=['smooth', 'stats', 'dataset'], required=True,
+                       help='Actions to perform: smooth, stats, dataset (at least one required)')
     return parser.parse_args()
 
 
