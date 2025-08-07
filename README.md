@@ -184,15 +184,14 @@ Create a `config.json` file with your specific settings:
   "FMRIPREP_DIR": "/path/to/your/derivatives/fmriprep",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 8,
-  "SMOOTH": true,
-  "STATS": true,
-  "DATASET": true,
+  // (actions are now controlled via --action argument, not in config.json)
   "MODELS_FILE": "model_d1.json",
   "TASKS": ["nonsymbol", "symbol"],
   "SUBJECTS": ["01", "02", "03"],
   "VERBOSITY": 3
 }
 ```
+
 
 **Parameter explanation:**
 
@@ -202,13 +201,13 @@ Create a `config.json` file with your specific settings:
 - `FMRIPREP_DIR`: Path to fMRIPrep output directory
 - `SPACE`: Spatial reference space for analysis
 - `FWHM`: Full Width at Half Maximum for smoothing (in mm)
-- `SMOOTH`: Boolean - whether to perform smoothing
-- `STATS`: Boolean - whether to perform statistical analyses
-- `DATASET`: Boolean - whether to perform dataset-level analyses
 - `MODELS_FILE`: Name of the BIDS-StatsModel JSON file
 - `TASKS`: List of fMRI tasks to process
 - `SUBJECTS`: List of specific subjects to process (optional - if omitted, all subjects found will be processed)
 - `VERBOSITY`: Logging verbosity level (0=minimal, 3=debug)
+- `ROI`, `ROI_CONFIG`: Optional, for ROI analysis (see below)
+
+**Note:** The actions (smoothing, stats, dataset-level) are now controlled via the `--action` command line argument, e.g. `--action smooth stats dataset`.
 
 ### 2. Container configuration (`container.json`)
 
@@ -284,37 +283,72 @@ Log files are automatically generated with timestamps and model names for easy t
 
 ### Advanced examples
 
-#### Example 1: Smoothing only
+
+#### Example: Minimal config.json
 
 ```json
 {
   "WD": "/data/study01",
   "BIDS_DIR": "/data/study01/rawdata",
+  "DERIVATIVES_DIR": "/data/study01/derivatives",
+  "FMRIPREP_DIR": "/data/study01/derivatives/fmriprep",
   "SPACE": "MNI152NLin6Asym",
   "FWHM": 6,
-  "SMOOTH": true,
-  "STATS": false,
-  "DATASET": false,
   "MODELS_FILE": "task-localizer_model.json",
   "TASKS": ["localizer"]
 }
 ```
 
-#### Example 2: Complete analysis pipeline
+**Actions are now selected at runtime:**
+
+```bash
+python bidspm.py --action smooth stats
+```
+## Configuration Validation
+
+The tool automatically validates your `config.json` against a JSON schema (`config_schema.json`) using the [jsonschema](https://pypi.org/project/jsonschema/) package. This ensures your configuration is complete and correctly structured before processing starts.
+
+**How it works:**
+
+- The schema is defined in `config_schema.json` (see repository for example).
+- On startup, `bidspm.py` checks that your `config.json` matches the schema.
+- If validation fails, you get a clear error message and the run is aborted.
+- The schema validation uses the `jsonschema` Python package (installed automatically via setup.sh/pyproject.toml).
+
+**Example schema:**
 
 ```json
 {
-  "WD": "/data/study02",
-  "BIDS_DIR": "/data/study02/rawdata",
-  "SPACE": "MNI152NLin2009cAsym",
-  "FWHM": 8,
-  "SMOOTH": true,
-  "STATS": true,
-  "DATASET": true,
-  "MODELS_FILE": "full_analysis_model.json",
-  "TASKS": ["rest", "task", "localizer"]
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["WD", "BIDS_DIR", "DERIVATIVES_DIR", "FMRIPREP_DIR", "SPACE", "FWHM", "MODELS_FILE", "TASKS"],
+  "properties": {
+    "WD": {"type": "string"},
+    "BIDS_DIR": {"type": "string"},
+    "DERIVATIVES_DIR": {"type": "string"},
+    "FMRIPREP_DIR": {"type": "string"},
+    "SPACE": {"type": "string"},
+    "FWHM": {"type": "number"},
+    "MODELS_FILE": {"type": "string"},
+    "TASKS": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "VERBOSITY": {"type": "integer", "minimum": 0, "maximum": 3},
+    "SUBJECTS": {"type": "array", "items": {"type": "string"}},
+    "ROI": {"type": "boolean"},
+    "ROI_CONFIG": {
+      "type": "object",
+      "properties": {
+        "roi_atlas": {"type": "string"},
+        "roi_name": {"type": "array", "items": {"type": "string"}},
+        "space": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["roi_atlas", "roi_name", "space"]
+    }
+  },
+  "additionalProperties": false
 }
 ```
+
+**Tip:** You can adapt the schema to your needs if you want to enforce additional fields or constraints.
 
 #### Example 3: Custom model file
 

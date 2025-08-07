@@ -1,3 +1,4 @@
+from json_validator import JSONValidator
 #!/usr/bin/env python3
 
 import json
@@ -721,7 +722,7 @@ def main():
     
     # Use specified config files or look for defaults
     config_file = args.settings if args.settings else CONFIG_FILE
-    
+
     # Auto-select container config if not specified
     if args.container:
         container_config_file = args.container
@@ -729,12 +730,17 @@ def main():
         auto_selected = auto_select_container_config()
         container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
 
-    # Check if configuration files exist, show help if not
+    # Check if configuration files exist and are valid JSON
     missing_files = []
+    invalid_json_files = []
     if not Path(config_file).exists():
         missing_files.append(config_file)
+    elif not JSONValidator.is_valid_json(config_file):
+        invalid_json_files.append(config_file)
     if not Path(container_config_file).exists():
         missing_files.append(container_config_file)
+    elif not JSONValidator.is_valid_json(container_config_file):
+        invalid_json_files.append(container_config_file)
     if missing_files:
         print("❌ Configuration files not found!")
         for f in missing_files:
@@ -743,6 +749,21 @@ def main():
         print("\n" + "="*60)
         show_help()
         sys.exit(1)
+    if invalid_json_files:
+        print("❌ The following configuration files are not valid JSON:")
+        for f in invalid_json_files:
+            print(f"   Invalid JSON: {f}")
+        print("\nPlease check and fix the JSON syntax errors.")
+        sys.exit(1)
+
+    # Validate config.json against schema (if jsonschema is available)
+    try:
+        if not JSONValidator.validate_with_schema(config_file, "config_schema.json"):
+            print("❌ config.json does not match the required schema (config_schema.json)!")
+            print("   Please check your config.json and compare it to config_schema.json.")
+            sys.exit(1)
+    except ImportError:
+        print("⚠️  Skipping schema validation: jsonschema package is not installed.")
 
     # Dependency Checks
     check_command("python3")
@@ -750,7 +771,7 @@ def main():
     # Load configurations
     config = load_config(config_file)
     container_config = load_container_config(container_config_file)
-    
+
     # Setup Octave compatibility for older containers
     log("🔧 Setting up Octave compatibility...")
     setup_octave_compatibility(container_config)
@@ -758,7 +779,7 @@ def main():
     # Validate MODELS_FILE or -m
     if not args.model and not config.MODELS_FILE:
         log_error("No model file specified! Please provide MODELS_FILE in config or use -m.")
-    
+
     # Determine model file path - command line argument overrides config
     if args.model:
         model_file_path = Path(args.model)
@@ -773,11 +794,11 @@ def main():
         else:
             model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
         models_file_name = model_file_path.name
-    
+
     # Set up log file with model name and timestamp
     global LOG_FILE
     LOG_FILE = generate_log_filename(models_file_name)
-    
+
     log_debug(f"Using configuration file: {config_file}")
     log_debug(f"Using container configuration: {container_config_file}")
     log_debug(f"Using model file: {model_file_path}")
@@ -796,7 +817,6 @@ def main():
 
     if not args.skip_modelvalidation:
         log_debug("Validating model JSON against BIDS Stats Model schema")
-        # Try to use virtual environment Python first, fallback to system Python
         venv_python = Path(".bidspm/bin/python")
         python_cmd = str(venv_python) if venv_python.exists() else "python3"
         run_command([python_cmd, "validate_bids_model.py", str(model_file_path)], capture_output=True)
@@ -884,7 +904,7 @@ def main():
                 # Check if preproc directory exists
                 if not preproc_dir.exists():
                     print(f"❌ Preprocessing directory not found: {preproc_dir}")
-                    print("   ROI analysis requires smoothed data. Please run smoothing first using the --action smooth Option.")
+                    print("   ROI analysis requires smoothed data. Please run smoothing first using the --action smooth option.")
                     continue
                 
                 # Check for smoothed data for each required space
@@ -899,7 +919,7 @@ def main():
                         missing_spaces.append(roi_space)
                 if missing_spaces:
                     print(f"❌ Smoothed data for ROI space(s) {missing_spaces} not found in {preproc_dir}.")
-                    print(f"   Please run smoothing for space(s) {missing_spaces} first by setting 'SMOOTH': true and updating 'SPACE' in config.")
+                    print(f"   Please run smoothing for space(s) {missing_spaces} first using the --action smooth option and update 'SPACE' in config if needed.")
                     continue
 
                 # Create ROI
@@ -982,8 +1002,8 @@ def main():
                 if not success:
                     print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
-                else:
-                    print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
+            else:
+                print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
 
             if config.STATS:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
@@ -1005,8 +1025,8 @@ def main():
                 if not success:
                     print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
-                else:
-                    print(f"✅ Stats completed for subject {subject_label}, task {task}")
+            else:
+                print(f"✅ Stats completed for subject {subject_label}, task {task}")
 
         if config.DATASET:
             print(f">>> Running stats on dataset: task: {task}")
