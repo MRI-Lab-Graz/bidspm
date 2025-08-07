@@ -975,7 +975,7 @@ def main():
                     print(f"✅ ROI stats completed for subject {subject_label}, task {task}")
 
             # Check for smoothed data for main SPACE before stats
-            if config.STATS:
+            if 'stats' in args.action:
                 main_space = config.SPACE
                 found = False
                 preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
@@ -987,7 +987,7 @@ def main():
                     print(f"❌ Smoothed data for main SPACE '{main_space}' not found in {preproc_dir}. Run smoothing first!")
                     continue
 
-            if config.SMOOTH:
+            if 'smooth' in args.action:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
                 # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
                 # BIDSPM needs access to the raw fMRIPrep output for smoothing
@@ -1014,7 +1014,7 @@ def main():
             else:
                 print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
 
-            if config.STATS:
+            if 'stats' in args.action:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
                 # First build container command to get den korrekten model file path
                 temp_args = []
@@ -1037,7 +1037,7 @@ def main():
             else:
                 print(f"✅ Stats completed for subject {subject_label}, task {task}")
 
-        if config.DATASET:
+        if 'dataset' in args.action:
             print(f">>> Running stats on dataset: task: {task}")
             # First build container command to get den korrekten model file path
             temp_args = []
