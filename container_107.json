@@ -1,0 +1,5 @@
+{
+  "container_type": "docker",
+  "docker_image": "cpplab/bidspm",
+  "apptainer_image": ""
+}

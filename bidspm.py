@@ -1,6 +1,6 @@
-from json_validator import JSONValidator
 #!/usr/bin/env python3
 
+from json_validator import JSONValidator
 import json
 import subprocess
 import sys
@@ -49,7 +49,7 @@ def load_config(config_file: str) -> Config:
     with open(config_file) as f:
         data = json.load(f)
 
-    # SESSION-Unterstützung: falls vorhanden, generiere selection.json
+    # SESSION support: if present, generate selection.json
     session = data.get("SESSION")
     if session:
         selection = {
@@ -59,18 +59,18 @@ def load_config(config_file: str) -> Config:
                 "ses": session
             }
         }
-        # Optional: weitere Einschränkungen (z.B. run) aus config übernehmen
-        # Beispiel: falls RUNS in config vorhanden
+        # Optional: additional restrictions (e.g. run) from config
+        # Example: if RUNS in config is present
         runs = data.get("RUNS")
         if runs:
             selection["bold"]["run"] = runs
-        # Schreibe selection.json ins Arbeitsverzeichnis
+        # Write selection.json to working directory
         try:
             with open("selection.json", "w") as sel_f:
                 json.dump(selection, sel_f, indent=2)
-            print(f"✅ selection.json für Session {session} generiert.")
+            print(f"✅ selection.json generated for session {session}.")
         except Exception as e:
-            print(f"⚠️  Konnte selection.json nicht schreiben: {e}")
+            print(f"⚠️  Could not write selection.json: {e}")
 
     # Derive paths
     wd = Path(data["WD"])
@@ -583,107 +583,76 @@ def cleanup_tmp_directories(config: Config, max_age_hours: int = 24):
 def show_help():
     """Display help information for BIDSPM Runner"""
     help_text = """
-BIDSPM Runner - A Python tool for running BIDS-StatsModel pipelines via containers
-
-USAGE:
-    python bidspm.py [OPTIONS] --action [smooth] [stats] [dataset]
-
-OPTIONS:
-    -h, --help                    Show this help message and exit
-    -s, --settings, --config      Path to main configuration file
-    -c, --container               Path to container configuration file
-    -m, --model, --model-file     Path to BIDS-StatsModel JSON file (overrides MODELS_FILE in config)
-    --pilot                       Pilot mode: process only one random subject for testing
-    --skip-modelvalidation        Skip BIDS-StatsModel JSON validation
-    --action                      Actions to perform: smooth, stats, dataset (at least one required)
+🧠 BIDSPM Runner - BIDS-StatsModel Pipeline Tool
 
 DESCRIPTION:
-    BIDSPM Runner executes neuroimaging analysis pipelines using containerized 
-    environments (Docker or Apptainer) without requiring MATLAB. The tool 
-    processes BIDS-compliant datasets and performs smoothing and statistical 
-    analyses based on configuration files.
+    A Python wrapper for running BIDS-StatsModel statistical pipelines using 
+    containerized BIDSPM. This tool manages the entire pipeline from smoothing 
+    preprocessed data to running statistical analyses at subject and group levels.
 
-    Actions (smoothing, stats, dataset-level) are now controlled via the --action argument.
-    Example: --action smooth stats
+USAGE:
+    python bidspm.py [OPTIONS] --action ACTION [ACTION ...]
 
-CONFIGURATION FILES:
-    Main config file contains analysis parameters (paths, tasks, etc.)
-    Container config file specifies Docker or Apptainer settings
-    
-    If not specified with -s and -c options, the tool will look for:
-    - config.json (main configuration)
-    - container.json (container configuration)
+REQUIRED ARGUMENTS:
+    --action {smooth,stats,dataset}
+                          Actions to perform (specify one or more):
+                          • smooth  : Smooth preprocessed fMRI data
+                          • stats   : Run subject-level statistical analysis
+                          • dataset : Run group-level statistical analysis
 
-CONFIGURATION EXAMPLE (main config file):
-    {
-        "WD": "/path/to/working/directory",
-        "BIDS_DIR": "/path/to/bids/rawdata", 
-        "DERIVATIVES_DIR": "/path/to/derivatives",
-        "FMRIPREP_DIR": "/path/to/derivatives/fmriprep",
-        "SPACE": "MNI152NLin6Asym",
-        "FWHM": 8,
-        "MODELS_FILE": "model.json",
-        "TASKS": ["task1", "task2"],
-        "SUBJECTS": ["01", "02", "03"],
-        "VERBOSITY": 1
-    }
-    
-    Note: SUBJECTS is optional - if omitted, all subjects found will be processed
-    Note: VERBOSITY is optional (0-3) - higher values provide more detailed output
-
-CONTAINER CONFIGURATION EXAMPLE:
-    {
-        "container_type": "docker",
-        "docker_image": "cpplab/bidspm:arm64",
-        "apptainer_image": ""
-    }
-
-WORKFLOW:
-    1. Validates config.json against config_schema.json (JSON schema)
-    2. Validates BIDS-StatsModel file against official schema
-    3. For each subject and task:
-       - Performs smoothing if selected via --action smooth
-       - Runs statistical analysis if selected via --action stats
-    4. Runs dataset-level analysis if selected via --action dataset
-    5. Logs all activities to timestamped log file
-
-REQUIREMENTS:
-    - Python 3.8+
-    - Docker or Apptainer
-    - BIDS-compliant dataset
-    - Preprocessed fMRI data (e.g., from fMRIPrep)
-    - BIDS-StatsModel JSON file
+OPTIONAL ARGUMENTS:
+    -h, --help           Show this help message and exit
+    -s, --settings       Path to configuration JSON file (default: config.json)
+    -c, --container      Path to container config file (default: auto-detect)
+    -m, --model          Path to BIDS-StatsModel JSON file (overrides config)
+    --pilot              Test mode: process only one random subject
+    --skip-modelvalidation
+                         Skip validation of BIDS-StatsModel JSON
 
 EXAMPLES:
-    # Run with default configuration files (config.json, container.json)
-    python bidspm.py --action smooth stats
-    
-    # Run with custom configuration files
-    python bidspm.py -s my_analysis.json -c my_container.json --action smooth
-    
-    # Run with custom model file
-    python bidspm.py -s config.json -c container.json -m /path/to/my_model.json --action stats
-    
-    # Pilot mode: test with one random subject
-    python bidspm.py -s config.json -c container.json --pilot --action stats
-    
-    # Run with all custom files
-    python bidspm.py -s study_config.json -c docker_setup.json -m models/task_model.json --action smooth stats dataset
-    
-    # Show help
+    # Get help and usage information
     python bidspm.py -h
+    
+    # Run complete pipeline (smoothing + stats + group analysis)
+    python bidspm.py --action smooth stats dataset
+    
+    # Run only smoothing for testing
+    python bidspm.py --action smooth --pilot
+    
+    # Use custom config and model files
+    python bidspm.py -s my_config.json -m my_model.json --action smooth stats
+    
+    # Skip model validation (faster startup)
+    python bidspm.py --action stats --skip-modelvalidation
 
-LOGGING:
-    Log files are automatically named with model name and timestamp:
-    Example: model_task1_20250721_143022.log
+WORKFLOW:
+    1. Validates configuration files and dependencies
+    2. Auto-detects available container system (Docker/Apptainer)
+    3. For each task in your config:
+       • Smooth preprocessed data (if --action smooth specified)
+       • Run subject-level stats (if --action stats specified)  
+       • Run group-level analysis (if --action dataset specified)
+    4. Cleans up temporary files and generates log reports
+
+CONFIGURATION FILES:
+    • config.json: Main settings (paths, tasks, subjects, etc.)
+    • container.json: Container configuration (auto-detected if missing)
+    • BIDS-StatsModel JSON: Statistical model specification
+
+REQUIREMENTS:
+    • Python 3.7+
+    • Docker OR Apptainer/Singularity
+    • BIDS-formatted dataset with fMRIPrep derivatives
+    • Valid BIDS-StatsModel JSON file
 
 CONFIGURATION VALIDATION:
-    Your config.json is automatically validated against config_schema.json using the jsonschema package.
-    If validation fails, you will get a clear error message and the run will abort.
+    Your config.json is automatically validated against config_schema.json.
+    If validation fails, you'll get clear error messages to fix the issues.
 
 MORE INFORMATION:
-    GitHub: https://github.com/MRI-Lab-Graz/bidspm
-    BIDS-StatsModel: https://bids-standard.github.io/stats-models/
+    • GitHub: https://github.com/MRI-Lab-Graz/bidspm
+    • BIDS-StatsModel: https://bids-standard.github.io/stats-models/
+    • Documentation: Check README.md for detailed setup instructions
     """
     print(help_text)
 
@@ -706,7 +675,7 @@ def parse_arguments():
                        help='Pilot mode: process only one random subject for testing')
     parser.add_argument('--skip-modelvalidation', action='store_true',
                        help='Skip BIDS-StatsModel JSON validation')
-    parser.add_argument('--action', nargs='+', choices=['smooth', 'stats', 'dataset'], required=True,
+    parser.add_argument('--action', nargs='+', choices=['smooth', 'stats', 'dataset'],
                        help='Actions to perform: smooth, stats, dataset (at least one required)')
     return parser.parse_args()
 
@@ -719,15 +688,18 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
-    # Show help if requested
-    if args.help:
+    # Show help if requested or if no arguments provided
+    if args.help or len(sys.argv) == 1:
         show_help()
         sys.exit(0)
     
-    # If no arguments provided, show help
-    if len(sys.argv) == 1:
+    # Check if action is provided (now that it's not required in argparse)
+    if not args.action:
+        print("❌ Error: --action argument is required")
+        print("   Please specify at least one action: smooth, stats, dataset")
+        print("\nUse --help for more information\n")
         show_help()
-        sys.exit(0)
+        sys.exit(1)
     
     # Use specified config files or look for defaults
     config_file = args.settings if args.settings else CONFIG_FILE
@@ -949,7 +921,7 @@ def main():
                     continue
 
                 # Run ROI-based GLM
-                # roi_dir wird nicht mehr benötigt
+                # roi_dir is no longer needed
                 temp_args = []
                 _, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
                 stats_args = [
@@ -1011,12 +983,12 @@ def main():
                 if not success:
                     print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
-            else:
-                print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
+                else:
+                    print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
 
             if 'stats' in args.action:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
-                # First build container command to get den korrekten model file path
+                # First build container command to get the correct model file path
                 temp_args = []
                 cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
                 stats_args = [
@@ -1034,12 +1006,12 @@ def main():
                 if not success:
                     print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
-            else:
-                print(f"✅ Stats completed for subject {subject_label}, task {task}")
+                else:
+                    print(f"✅ Stats completed for subject {subject_label}, task {task}")
 
         if 'dataset' in args.action:
             print(f">>> Running stats on dataset: task: {task}")
-            # First build container command to get den korrekten model file path
+            # First build container command to get the correct model file path
             temp_args = []
             cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
             dataset_args = [
