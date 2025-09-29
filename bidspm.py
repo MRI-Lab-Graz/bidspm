@@ -394,14 +394,17 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
             if action == "smooth":
                 # Create MATLAB/Octave script for smoothing
                 script_content = f"""
-% BIDSPM Local Execution Script for Smoothing
+% BIDSPM Local Execution Script for Smoothing - MINIMAL MODE
 % HPC-compatible setup with SPM12 and BIDSPM paths
 
-% Configure local package installation directory to avoid disk space issues
+% Configure local package installation directory
 if exist('pkg', 'builtin')
     pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
     fprintf('Octave package directory set to local folder\\n');
 end
+
+% Set warning level to reduce verbose output and ignore dependency errors
+warning('off', 'all');
 
 % Add SPM12 standalone if available
 spm12_path = fullfile(pwd, 'spm12_standalone');
@@ -410,9 +413,37 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path and initialize
-addpath('{local_bidspm_dir.absolute()}');
-bidspm('init');
+% Add BIDSPM to path manually (complete offline mode)
+bidspm_path = '{local_bidspm_dir.absolute()}';
+addpath(bidspm_path);
+addpath(fullfile(bidspm_path, 'src'));
+addpath(genpath(fullfile(bidspm_path, 'lib')));
+addpath(genpath(fullfile(bidspm_path, 'src')));
+fprintf('BIDSPM paths added manually (minimal mode)\\n');
+
+% Try to initialize SPM if available
+try
+    if exist('spm', 'file')
+        spm('defaults', 'fmri');
+        spm_jobman('initcfg');
+        fprintf('SPM initialized successfully\\n');
+    end
+catch
+    fprintf('SPM initialization skipped\\n');
+end
+
+% Override pkg function to ignore statistics package errors
+function pkg(varargin)
+    try
+        builtin('pkg', varargin{{:}});
+    catch ME
+        if ~isempty(strfind(ME.message, 'statistics')) || ~isempty(strfind(ME.message, 'octave >= 8.1.0')) || ~isempty(strfind(ME.message, 'image')) || ~isempty(strfind(ME.message, 'octave >= 7.2'))
+            fprintf('Warning: Ignoring package dependency (incompatible Octave version): %s\\n', ME.message);
+        else
+            rethrow(ME);
+        end
+    end
+end
 
 try
     bidspm('{config.FMRIPREP_DIR}', ...
@@ -434,7 +465,7 @@ end
             elif action == "stats":
                 # Create MATLAB/Octave script for stats
                 script_content = f"""
-% BIDSPM Local Execution Script for Stats
+% BIDSPM Local Execution Script for Stats - OFFLINE MODE
 % HPC-compatible setup with SPM12 and BIDSPM paths
 
 % Configure local package installation directory to avoid disk space issues
@@ -443,6 +474,9 @@ if exist('pkg', 'builtin')
     fprintf('Octave package directory set to local folder\\n');
 end
 
+% Set warning level to reduce verbose output
+warning('off', 'all');
+
 % Add SPM12 standalone if available
 spm12_path = fullfile(pwd, 'spm12_standalone');
 if exist(spm12_path, 'dir')
@@ -450,9 +484,24 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path and initialize
-addpath('{local_bidspm_dir.absolute()}');
-bidspm('init');
+% Add BIDSPM to path manually (skip bidspm('init') to avoid package downloads)
+bidspm_path = '{local_bidspm_dir.absolute()}';
+addpath(bidspm_path);
+addpath(fullfile(bidspm_path, 'src'));
+addpath(genpath(fullfile(bidspm_path, 'lib')));
+addpath(genpath(fullfile(bidspm_path, 'src')));
+fprintf('BIDSPM paths added manually (offline mode)\\n');
+
+% Try to initialize SPM if available
+try
+    if exist('spm', 'file')
+        spm('defaults', 'fmri');
+        spm_jobman('initcfg');
+        fprintf('SPM initialized successfully\\n');
+    end
+catch
+    fprintf('SPM initialization skipped\\n');
+end
 
 try
     bidspm('{config.BIDS_DIR}', ...
@@ -475,7 +524,7 @@ end
             elif action == "dataset":
                 # Create MATLAB/Octave script for dataset level stats
                 script_content = f"""
-% BIDSPM Local Execution Script for Dataset Stats
+% BIDSPM Local Execution Script for Dataset Stats - OFFLINE MODE
 % HPC-compatible setup with SPM12 and BIDSPM paths
 
 % Configure local package installation directory to avoid disk space issues
@@ -484,6 +533,9 @@ if exist('pkg', 'builtin')
     fprintf('Octave package directory set to local folder\\n');
 end
 
+% Set warning level to reduce verbose output
+warning('off', 'all');
+
 % Add SPM12 standalone if available
 spm12_path = fullfile(pwd, 'spm12_standalone');
 if exist(spm12_path, 'dir')
@@ -491,9 +543,24 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path and initialize
-addpath('{local_bidspm_dir.absolute()}');
-bidspm('init');
+% Add BIDSPM to path manually (skip bidspm('init') to avoid package downloads)
+bidspm_path = '{local_bidspm_dir.absolute()}';
+addpath(bidspm_path);
+addpath(fullfile(bidspm_path, 'src'));
+addpath(genpath(fullfile(bidspm_path, 'lib')));
+addpath(genpath(fullfile(bidspm_path, 'src')));
+fprintf('BIDSPM paths added manually (offline mode)\\n');
+
+% Try to initialize SPM if available
+try
+    if exist('spm', 'file')
+        spm('defaults', 'fmri');
+        spm_jobman('initcfg');
+        fprintf('SPM initialized successfully\\n');
+    end
+catch
+    fprintf('SPM initialization skipped\\n');
+end
 
 try
     bidspm('{config.BIDS_DIR}', ...
