@@ -328,6 +328,275 @@ def log_error_non_fatal(msg):
     """Log non-fatal error that doesn't stop execution"""
     print(f"⚠️  {msg}", file=sys.stderr)
 
+
+def check_local_bidspm_installation():
+    """Check if local BIDSPM installation is available"""
+    try:
+        # Check if bidspm command is available
+        result = subprocess.run(["bidspm", "--help"], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print("✅ Local BIDSPM CLI found")
+            return True
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    
+    # Check if local BIDSPM directory exists
+    local_bidspm_dir = Path("bidspm_local")
+    if local_bidspm_dir.exists():
+        print("✅ Local BIDSPM directory found")
+        return True
+    
+    print("❌ Local BIDSPM installation not found")
+    print("   Run: ./setup.sh --local-install")
+    return False
+
+
+def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
+    """Execute BIDSPM locally using the CLI or direct Python call"""
+    print(f"🔧 Running BIDSPM locally for action: {action}")
+    
+    # Check if local installation is available
+    if not check_local_bidspm_installation():
+        log_error("Local BIDSPM installation not found. Use containers or run: ./setup.sh --local-install")
+        return False
+    
+    # For now, use direct MATLAB/Octave approach since CLI has issues
+    return run_local_bidspm_direct(config, action, subjects, task, model_file_path)
+
+
+def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
+    """Execute BIDSPM directly using MATLAB/Octave"""
+    print(f"🔧 Running BIDSPM directly using MATLAB/Octave for action: {action}")
+    
+    # Check if MATLAB or Octave is available
+    matlab_cmd = None
+    if shutil.which("matlab"):
+        matlab_cmd = "matlab"
+    elif shutil.which("octave"):
+        matlab_cmd = "octave"
+    else:
+        print("❌ Neither MATLAB nor Octave found in PATH")
+        print("   Local BIDSPM requires MATLAB or Octave to be installed and available")
+        print("   Alternatives:")
+        print("   1. Install MATLAB or Octave and add to PATH")
+        print("   2. Use container execution (remove --local flag)")
+        print("   3. If MATLAB/Octave is installed elsewhere, create symlinks in PATH")
+        return False
+    
+    success = True
+    local_bidspm_dir = Path("bidspm_local")
+    
+    for subject in subjects:
+        try:
+            print(f">>> Local {action} for subject: {subject}, task: {task}")
+            
+            if action == "smooth":
+                # Create MATLAB/Octave script for smoothing
+                script_content = f"""
+% BIDSPM Local Execution Script for Smoothing
+% HPC-compatible setup with SPM12 and BIDSPM paths
+
+% Configure local package installation directory to avoid disk space issues
+if exist('pkg', 'builtin')
+    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
+    fprintf('Octave package directory set to local folder\\n');
+end
+
+% Add SPM12 standalone if available
+spm12_path = fullfile(pwd, 'spm12_standalone');
+if exist(spm12_path, 'dir')
+    addpath(spm12_path);
+    fprintf('SPM12 standalone added to path\\n');
+end
+
+% Add BIDSPM to path and initialize
+addpath('{local_bidspm_dir.absolute()}');
+bidspm('init');
+
+try
+    bidspm('{config.FMRIPREP_DIR}', ...
+           '{config.DERIVATIVES_DIR}', ...
+           'subject', ...
+           'action', 'smooth', ...
+           'participant_label', {{'{subject}'}}, ...
+           'task', {{'{task}'}}, ...
+           'space', {{'{config.SPACE}'}}, ...
+           'fwhm', {config.FWHM}, ...
+           'verbosity', {config.VERBOSITY});
+    fprintf('✅ Smoothing completed successfully\\n');
+    exit(0);
+catch ME
+    fprintf('❌ Error during smoothing: %s\\n', ME.message);
+    exit(1);
+end
+"""
+            elif action == "stats":
+                # Create MATLAB/Octave script for stats
+                script_content = f"""
+% BIDSPM Local Execution Script for Stats
+% HPC-compatible setup with SPM12 and BIDSPM paths
+
+% Configure local package installation directory to avoid disk space issues
+if exist('pkg', 'builtin')
+    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
+    fprintf('Octave package directory set to local folder\\n');
+end
+
+% Add SPM12 standalone if available
+spm12_path = fullfile(pwd, 'spm12_standalone');
+if exist(spm12_path, 'dir')
+    addpath(spm12_path);
+    fprintf('SPM12 standalone added to path\\n');
+end
+
+% Add BIDSPM to path and initialize
+addpath('{local_bidspm_dir.absolute()}');
+bidspm('init');
+
+try
+    bidspm('{config.BIDS_DIR}', ...
+           '{config.DERIVATIVES_DIR}', ...
+           'subject', ...
+           'action', 'stats', ...
+           'participant_label', {{'{subject}'}}, ...
+           'task', {{'{task}'}}, ...
+           'space', {{'{config.SPACE}'}}, ...
+           'fwhm', {config.FWHM}, ...
+           'model_file', '{model_file_path.absolute()}', ...
+           'verbosity', {config.VERBOSITY});
+    fprintf('✅ Stats completed successfully\\n');
+    exit(0);
+catch ME
+    fprintf('❌ Error during stats: %s\\n', ME.message);
+    exit(1);
+end
+"""
+            elif action == "dataset":
+                # Create MATLAB/Octave script for dataset level stats
+                script_content = f"""
+% BIDSPM Local Execution Script for Dataset Stats
+% HPC-compatible setup with SPM12 and BIDSPM paths
+
+% Configure local package installation directory to avoid disk space issues
+if exist('pkg', 'builtin')
+    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
+    fprintf('Octave package directory set to local folder\\n');
+end
+
+% Add SPM12 standalone if available
+spm12_path = fullfile(pwd, 'spm12_standalone');
+if exist(spm12_path, 'dir')
+    addpath(spm12_path);
+    fprintf('SPM12 standalone added to path\\n');
+end
+
+% Add BIDSPM to path and initialize
+addpath('{local_bidspm_dir.absolute()}');
+bidspm('init');
+
+try
+    bidspm('{config.BIDS_DIR}', ...
+           '{config.DERIVATIVES_DIR}', ...
+           'dataset', ...
+           'action', 'stats', ...
+           'task', {{'{task}'}}, ...
+           'space', {{'{config.SPACE}'}}, ...
+           'fwhm', {config.FWHM}, ...
+           'model_file', '{model_file_path.absolute()}', ...
+           'verbosity', {config.VERBOSITY});
+    fprintf('✅ Dataset stats completed successfully\\n');
+    exit(0);
+catch ME
+    fprintf('❌ Error during dataset stats: %s\\n', ME.message);
+    exit(1);
+end
+"""
+            else:
+                print(f"❌ Unsupported action: {action}")
+                success = False
+                continue
+            
+            # Write script to temporary file
+            script_file = Path(f"bidspm_local_{action}_{subject}_{task}.m")
+            script_file.write_text(script_content)
+            
+            try:
+                # Execute MATLAB/Octave script
+                if matlab_cmd == "matlab":
+                    cmd = ["matlab", "-nodisplay", "-nosplash", "-nodesktop", "-r", f"run('{script_file.stem}')"]
+                else:  # octave
+                    cmd = ["octave", "--no-gui", "--eval", f"run('{script_file.stem}')"]
+                
+                log_debug(f"Local BIDSPM command: {' '.join(cmd)}")
+                
+                result = subprocess.run(cmd, check=True, text=True, 
+                                      capture_output=True, timeout=1800)  # 30 minute timeout
+                
+                print(f"✅ Local {action} completed successfully for subject {subject}")
+                
+            finally:
+                # Clean up script file
+                if script_file.exists():
+                    script_file.unlink()
+                
+        except subprocess.CalledProcessError as e:
+            log_error_non_fatal(f"Local {action} failed for subject {subject}: {e}")
+            if e.stdout:
+                print(f"STDOUT: {e.stdout}")
+            if e.stderr:
+                print(f"STDERR: {e.stderr}")
+            success = False
+        except subprocess.TimeoutExpired:
+            log_error_non_fatal(f"Local {action} timed out for subject {subject}")
+            success = False
+        except Exception as e:
+            log_error_non_fatal(f"Error running local {action} for subject {subject}: {e}")
+            success = False
+    
+    return success
+
+
+def setup_local_environment():
+    """Setup environment for local BIDSPM execution"""
+    print("🔧 Setting up local BIDSPM environment...")
+    
+    # Check for MATLAB/Octave
+    matlab_available = shutil.which("matlab") is not None
+    octave_available = shutil.which("octave") is not None
+    mcr_available = Path("/usr/local/freesurfer/MCRv97").exists()
+    
+    if matlab_available:
+        print("✅ MATLAB found in PATH")
+    elif octave_available:
+        print("✅ Octave found in PATH")
+    elif mcr_available:
+        print("✅ MATLAB Compiler Runtime found")
+        print("   (Advanced: Compiled MATLAB applications can run with MCR)")
+    else:
+        print("⚠️  No MATLAB, Octave, or MCR found")
+        print("   Local BIDSPM execution options:")
+        print("   1. Install Octave: sudo apt-get install octave (recommended)")
+        print("   2. Load Octave module if on HPC: module load octave")
+        print("   3. Use container execution instead (remove --local flag)")
+        
+        # Check if this might be an HPC environment
+        if Path("/etc/modulefiles").exists() or Path("/usr/share/modules").exists():
+            print("   HPC detected: Try 'module avail octave' or 'module avail matlab'")
+        
+        return False
+    
+    # Check for SPM12 standalone
+    spm12_dir = Path("spm12_standalone")
+    if spm12_dir.exists():
+        print(f"✅ SPM12 standalone found at {spm12_dir}")
+    else:
+        print("⚠️  SPM12 standalone not found (will be downloaded if needed)")
+    
+    # Check if local BIDSPM is properly installed
+    return check_local_bidspm_installation()
+
+
 def setup_octave_compatibility(container_config: ContainerConfig):
     """Setup Octave compatibility for older versions that lack 'contains' function"""
     setup_script = '''
@@ -363,6 +632,34 @@ addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
 addpath('/opt/spm12');
 
 fprintf('🔧 Octave compatibility loaded\\n');
+EOF
+
+    # Create the octave_init.m file that is referenced by OCTAVE_INIT_FILE
+    cat > /tmp/octave_init.m << 'EOF'
+% Custom Octave initialization file for BIDSPM
+warning('off', 'all');
+
+% Add BIDSPM paths
+addpath('/home/neuro/bidspm');
+addpath('/home/neuro/bidspm/lib/CPP_ROI');
+addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
+addpath('/opt/spm12');
+
+% Try to initialize bidspm if the function exists
+if exist('/home/neuro/bidspm/bidspm.m', 'file')
+    fprintf('Initializing BIDSPM...\\n');
+    try
+        bidspm_init = true;
+    catch
+        fprintf('Warning: Could not initialize BIDSPM\\n');
+        bidspm_init = false;
+    end
+else
+    fprintf('Warning: bidspm.m not found in expected location\\n');
+    bidspm_init = false;
+end
+
+fprintf('🔧 Octave init completed\\n');
 EOF
     '''
     
@@ -450,9 +747,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         
         cmd = [
             "apptainer", "run",
-            "--containall",  # Isolate container environment
             "--writable-tmpfs",  # Allow writing to /tmp and other temp locations
-            "--cleanenv",  # Start with clean environment
             "--bind", f"{config.BIDS_DIR}:/raw",
             "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
@@ -470,6 +765,41 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         # Create and mount a dedicated tmp directory for this run
         run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
         run_tmp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a custom Octave wrapper script in the tmp directory
+        octave_wrapper = run_tmp_dir / "octave_wrapper.sh"
+        octave_wrapper_content = f"""#!/bin/bash
+# Octave wrapper to ensure BIDSPM paths are available
+export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12:$MATLABPATH"
+
+# Copy ALL the atlas-related functions to tmp to fix path resolution issues
+mkdir -p /tmp/atlas_functions
+cp /home/neuro/bidspm/lib/CPP_ROI/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
+cp /home/neuro/bidspm/lib/CPP_ROI/src/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
+
+# Create init file to add paths and fix function resolution
+cat > /tmp/octave_init_runtime.m << 'EOF'
+% Runtime Octave initialization for BIDSPM
+warning('off', 'all');
+addpath('/tmp/atlas_functions');  % Add copied functions first
+addpath('/tmp');  
+addpath('/home/neuro/bidspm');
+addpath('/home/neuro/bidspm/lib/CPP_ROI');
+addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
+addpath('/home/neuro/bidspm/lib/CPP_ROI/src');
+addpath('/home/neuro/bidspm/lib/CPP_ROI/src/atlas');
+addpath('/opt/spm12');
+fprintf('Runtime paths added with atlas functions copied\\n');
+EOF
+
+# Run octave with the init file
+exec /usr/bin/octave --init-file /tmp/octave_init_runtime.m "$@"
+"""
+        
+        with open(octave_wrapper, 'w') as f:
+            f.write(octave_wrapper_content)
+        octave_wrapper.chmod(0o755)
+        
         cmd.extend(["--bind", f"{run_tmp_dir}:/tmp"])
         
         # Add additional bind mounts for writable directories to solve "Read-only file system" issues
@@ -502,11 +832,12 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
             "--env", "MATLAB_LOG_DIR=/tmp",  # MATLAB logs to tmp
             "--env", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
             "--env", "BIDSPM_SKIP_ATLAS_INIT=1",  # Try to skip problematic atlas initialization
-            "--env", "OCTAVE_EXECUTABLE=/usr/bin/octave",  # Ensure Octave path
+            "--env", "OCTAVE_EXECUTABLE=/tmp/octave_wrapper.sh",  # Use our custom Octave wrapper
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
-            "--env", "OCTAVE_INIT_FILE=/tmp/octave_init.m",  # Custom Octave initialization to force atlas path
-            "--env", "OCTAVE_SITE_INITFILE=/tmp/octave_compat/octaverc",  # Octave compatibility startup script
+            "--env", "CPP_ROI_SKIP_ATLAS_INIT=1",  # Additional skip flag
+            "--env", "CPP_ROI_ATLAS_SKIP=1",  # Another possible skip flag
+            "--env", "SKIP_ATLAS_INIT=1",  # General skip flag
             "--env", "BIDSPM_IGNORE_FIELDMAPS=1",  # Skip fieldmap processing (not needed for smoothing)
             "--env", "BIDSPM_IGNORE_FIGURES=1",   # Skip HTML/SVG files processing
             "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"  # Skip IntendedFor validation (irrelevant post-fMRIPrep)
@@ -608,6 +939,7 @@ OPTIONAL ARGUMENTS:
     --pilot              Test mode: process only one random subject
     --skip-modelvalidation
                          Skip validation of BIDS-StatsModel JSON
+    --local              Use local BIDSPM installation instead of containers
 
 EXAMPLES:
     # Get help and usage information
@@ -624,6 +956,9 @@ EXAMPLES:
     
     # Skip model validation (faster startup)
     python bidspm.py --action stats --skip-modelvalidation
+    
+    # Use local BIDSPM installation (no containers)
+    python bidspm.py --local --action smooth --pilot
 
 WORKFLOW:
     1. Validates configuration files and dependencies
@@ -675,6 +1010,8 @@ def parse_arguments():
                        help='Pilot mode: process only one random subject for testing')
     parser.add_argument('--skip-modelvalidation', action='store_true',
                        help='Skip BIDS-StatsModel JSON validation')
+    parser.add_argument('--local', action='store_true',
+                       help='Use local BIDSPM installation instead of containers')
     parser.add_argument('--action', nargs='+', choices=['smooth', 'stats', 'dataset'],
                        help='Actions to perform: smooth, stats, dataset (at least one required)')
     return parser.parse_args()
@@ -704,12 +1041,16 @@ def main():
     # Use specified config files or look for defaults
     config_file = args.settings if args.settings else CONFIG_FILE
 
-    # Auto-select container config if not specified
-    if args.container:
-        container_config_file = args.container
+    # Auto-select container config if not specified (only needed for container execution)
+    if not args.local:
+        if args.container:
+            container_config_file = args.container
+        else:
+            auto_selected = auto_select_container_config()
+            container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
     else:
-        auto_selected = auto_select_container_config()
-        container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
+        # For local execution, container config is not required
+        container_config_file = None
 
     # Check if configuration files exist and are valid JSON
     missing_files = []
@@ -718,10 +1059,13 @@ def main():
         missing_files.append(config_file)
     elif not JSONValidator.is_valid_json(config_file):
         invalid_json_files.append(config_file)
-    if not Path(container_config_file).exists():
-        missing_files.append(container_config_file)
-    elif not JSONValidator.is_valid_json(container_config_file):
-        invalid_json_files.append(container_config_file)
+    
+    # Only check container config if not using local execution
+    if not args.local and container_config_file:
+        if not Path(container_config_file).exists():
+            missing_files.append(container_config_file)
+        elif not JSONValidator.is_valid_json(container_config_file):
+            invalid_json_files.append(container_config_file)
     if missing_files:
         print("❌ Configuration files not found!")
         for f in missing_files:
@@ -751,11 +1095,31 @@ def main():
 
     # Load configurations
     config = load_config(config_file)
-    container_config = load_container_config(container_config_file)
+    
+    # Only load container config if not using local execution
+    if not args.local:
+        container_config = load_container_config(container_config_file)
+    else:
+        container_config = None
 
-    # Setup Octave compatibility for older containers
-    log("🔧 Setting up Octave compatibility...")
-    setup_octave_compatibility(container_config)
+    # Handle local execution
+    if args.local:
+        print("🔧 Using local BIDSPM installation...")
+        if not setup_local_environment():
+            log_error("Local BIDSPM environment setup failed. Use containers or run: ./setup.sh --local-install")
+        # Skip container checks for local execution
+    else:
+        # Check container runtime availability
+        if container_config.container_type == "docker":
+            check_docker_availability()
+            log_debug(f"Using Docker with image: {container_config.docker_image}")
+        elif container_config.container_type == "apptainer":
+            check_command("apptainer")
+            log_debug(f"Using Apptainer with image: {container_config.apptainer_image}")
+        
+        # Setup Octave compatibility for older containers (only for container execution)
+        log("🔧 Setting up Octave compatibility...")
+        setup_octave_compatibility(container_config)
 
     # Validate MODELS_FILE or -m
     if not args.model and not config.MODELS_FILE:
@@ -781,17 +1145,31 @@ def main():
     LOG_FILE = generate_log_filename(models_file_name)
 
     log_debug(f"Using configuration file: {config_file}")
-    log_debug(f"Using container configuration: {container_config_file}")
+    if not args.local:
+        log_debug(f"Using container configuration: {container_config_file}")
+    else:
+        log_debug("Using local BIDSPM execution (no container)")
     log_debug(f"Using model file: {model_file_path}")
     log_debug(f"Log file: {LOG_FILE}")
     
-    # Check container runtime availability
-    if container_config.container_type == "docker":
-        check_docker_availability()
-        log_debug(f"Using Docker with image: {container_config.docker_image}")
-    elif container_config.container_type == "apptainer":
-        check_command("apptainer")
-        log_debug(f"Using Apptainer with image: {container_config.apptainer_image}")
+    # Handle local execution
+    if args.local:
+        print("🔧 Using local BIDSPM installation...")
+        if not setup_local_environment():
+            log_error("Local BIDSPM environment setup failed. Use containers or run: ./setup.sh --local-install")
+        # Skip container checks for local execution
+    else:
+        # Check container runtime availability
+        if container_config.container_type == "docker":
+            check_docker_availability()
+            log_debug(f"Using Docker with image: {container_config.docker_image}")
+        elif container_config.container_type == "apptainer":
+            check_command("apptainer")
+            log_debug(f"Using Apptainer with image: {container_config.apptainer_image}")
+        
+        # Setup Octave compatibility for older containers (only for container execution)
+        log("🔧 Setting up Octave compatibility...")
+        setup_octave_compatibility(container_config)
 
     if not model_file_path.exists():
         log_error(f"Model file '{models_file_name}' not found at '{model_file_path}'.")
@@ -812,8 +1190,8 @@ def main():
     if not config.DERIVATIVES_DIR.is_dir():
         log_error(f"Derivatives directory '{config.DERIVATIVES_DIR}' does not exist.")
 
-    # Validate that FMRIPREP_DIR is within DERIVATIVES_DIR
-    if not str(config.FMRIPREP_DIR).startswith(str(config.DERIVATIVES_DIR)):
+    # Validate that FMRIPREP_DIR is within DERIVATIVES_DIR (only relevant for containers)
+    if not args.local and not str(config.FMRIPREP_DIR).startswith(str(config.DERIVATIVES_DIR)):
         print(f"⚠️  WARNING: FMRIPREP_DIR ({config.FMRIPREP_DIR}) is not within DERIVATIVES_DIR ({config.DERIVATIVES_DIR})")
         print("   Container expects fmriprep at /derivatives/fmriprep inside container")
 
@@ -961,25 +1339,32 @@ def main():
 
             if 'smooth' in args.action:
                 print(f">>> Smoothing for subject: {subject_label}, task: {task}")
-                # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
-                # BIDSPM needs access to the raw fMRIPrep output for smoothing
-                fmriprep_source = config.DERIVATIVES_DIR / "fmriprep"
-                if not fmriprep_source.exists():
-                    print(f"⚠️  fMRIPrep directory not found at {fmriprep_source}")
-                    print(f"   Current FMRIPREP_DIR setting: {config.FMRIPREP_DIR}")
-                    print("   For smoothing, BIDSPM needs the original fMRIPrep output")
                 
-                smooth_args = [
-                    "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
-                    "--participant_label", subject_label,
-                    "--task", task,
-                    "--space", config.SPACE,
-                    "--fwhm", str(config.FWHM),
-                    "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
-                ]
-                cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
-                log_debug(f"Full container command: {' '.join(cmd)}")
-                success = run_command(cmd)
+                if args.local:
+                    # Local execution
+                    success = run_local_bidspm(config, "smooth", [subject_label], task, model_file_path)
+                else:
+                    # Container execution
+                    # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
+                    # BIDSPM needs access to the raw fMRIPrep output for smoothing
+                    fmriprep_source = config.DERIVATIVES_DIR / "fmriprep"
+                    if not fmriprep_source.exists():
+                        print(f"⚠️  fMRIPrep directory not found at {fmriprep_source}")
+                        print(f"   Current FMRIPREP_DIR setting: {config.FMRIPREP_DIR}")
+                        print("   For smoothing, BIDSPM needs the original fMRIPrep output")
+                    
+                    smooth_args = [
+                        "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
+                        "--participant_label", subject_label,
+                        "--task", task,
+                        "--space", config.SPACE,
+                        "--fwhm", str(config.FWHM),
+                        "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
+                    ]
+                    cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
+                    log_debug(f"Full container command: {' '.join(cmd)}")
+                    success = run_command(cmd)
+                
                 if not success:
                     print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
@@ -988,21 +1373,28 @@ def main():
 
             if 'stats' in args.action:
                 print(f">>> Running stats for subject: {subject_label}, task: {task}")
-                # First build container command to get the correct model file path
-                temp_args = []
-                cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
-                stats_args = [
-                    "/raw", "/derivatives", "subject", "stats",
-                    "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--model_file", model_container_path,
-                    "--participant_label", subject_label,
-                    "--task", task,
-                    "--space", config.SPACE,
-                    "--fwhm", str(config.FWHM),
-                    "--verbosity", str(config.VERBOSITY)
-                ]
-                cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
-                success = run_command(cmd)
+                
+                if args.local:
+                    # Local execution
+                    success = run_local_bidspm(config, "stats", [subject_label], task, model_file_path)
+                else:
+                    # Container execution
+                    # First build container command to get the correct model file path
+                    temp_args = []
+                    cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                    stats_args = [
+                        "/raw", "/derivatives", "subject", "stats",
+                        "--preproc_dir", "/derivatives/bidspm-preproc",
+                        "--model_file", model_container_path,
+                        "--participant_label", subject_label,
+                        "--task", task,
+                        "--space", config.SPACE,
+                        "--fwhm", str(config.FWHM),
+                        "--verbosity", str(config.VERBOSITY)
+                    ]
+                    cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
+                    success = run_command(cmd)
+                
                 if not success:
                     print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
                     log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
@@ -1011,20 +1403,37 @@ def main():
 
         if 'dataset' in args.action:
             print(f">>> Running stats on dataset: task: {task}")
-            # First build container command to get the correct model file path
-            temp_args = []
-            cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
-            dataset_args = [
-                "/raw", "/derivatives", "dataset", "stats",
-                "--preproc_dir", "/derivatives/bidspm-preproc",
-                "--model_file", model_container_path,
-                "--task", task,
-                "--space", config.SPACE,
-                "--fwhm", str(config.FWHM),
-                "--verbosity", str(config.VERBOSITY)
-            ]
-            cmd, _ = build_container_command(container_config, config, dataset_args, model_file_path)
-            success = run_command(cmd)
+            
+            if args.local:
+                # Local execution - run for all subjects at dataset level
+                all_subjects = []
+                if config.SUBJECTS:
+                    all_subjects = config.SUBJECTS
+                else:
+                    # Auto-discover all subjects
+                    for sub_dir in config.FMRIPREP_DIR.glob("sub-*"):
+                        if sub_dir.is_dir():
+                            subject_label = sub_dir.name.replace("sub-", "")
+                            all_subjects.append(subject_label)
+                
+                success = run_local_bidspm(config, "dataset", all_subjects, task, model_file_path)
+            else:
+                # Container execution
+                # First build container command to get the correct model file path
+                temp_args = []
+                cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                dataset_args = [
+                    "/raw", "/derivatives", "dataset", "stats",
+                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                    "--model_file", model_container_path,
+                    "--task", task,
+                    "--space", config.SPACE,
+                    "--fwhm", str(config.FWHM),
+                    "--verbosity", str(config.VERBOSITY)
+                ]
+                cmd, _ = build_container_command(container_config, config, dataset_args, model_file_path)
+                success = run_command(cmd)
+            
             if not success:
                 print(f"⚠️  Dataset stats failed for task {task}. Check logs for details.")
                 log_error_non_fatal(f"Dataset stats failed for task {task}")

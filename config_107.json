@@ -3,7 +3,7 @@
   "BIDS_DIR": "/data/local/107_JM01/rawdata",
   "SPACE": "MNI152NLin2009cAsym",
   "FWHM": 8,
-  "MODELS_FILE": "/data/local/107_JM01/code/old_models/models/model_pa_ses-2.json",
+  "MODELS_FILE": "/data/local/107_JM01/code/old_models/latest_model.json",
   "FMRIPREP_DIR": "/data/local/107_JM01/derivatives/fmriprep/",
   "DERIVATIVES_DIR": "/data/local/107_JM01/derivatives/",
   "TASKS": ["pa"],

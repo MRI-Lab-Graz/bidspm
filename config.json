@@ -7,7 +7,7 @@
   "FWHM": 8,
   "MODELS_FILE": "model_d1c.json",
   "TASKS": ["symbol"],
-  "ROI": true,
+  "ROI": false,
   "ROI_CONFIG": {
     "roi_atlas": "wang",
     "roi_name": ["V1v", "V1d"],
