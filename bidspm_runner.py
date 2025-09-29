@@ -4,6 +4,7 @@ from docs.json_validator import JSONValidator
 import json
 import subprocess
 import sys
+import os
 import shutil
 import argparse
 import random
@@ -342,7 +343,7 @@ def check_local_bidspm_installation():
         pass
     
     # Check if local BIDSPM directory exists
-    local_bidspm_dir = Path("bidspm_local")
+    local_bidspm_dir = Path("local_src/bidspm_local")
     if local_bidspm_dir.exists():
         print("✅ Local BIDSPM directory found")
         return True
@@ -353,7 +354,7 @@ def check_local_bidspm_installation():
 
 
 def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
-    """Execute BIDSPM locally using the CLI or direct Python call"""
+    """Execute BIDSPM locally using the Python CLI"""
     print(f"🔧 Running BIDSPM locally for action: {action}")
     
     # Check if local installation is available
@@ -361,8 +362,110 @@ def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str
         log_error("Local BIDSPM installation not found. Use containers or run: ./setup.sh --local-install")
         return False
     
-    # For now, use direct MATLAB/Octave approach since CLI has issues
-    return run_local_bidspm_direct(config, action, subjects, task, model_file_path)
+    # Use Python CLI approach (much faster and more reliable)
+    return run_local_bidspm_cli(config, action, subjects, task, model_file_path)
+
+
+def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
+    """Execute BIDSPM using the Python CLI (fast and reliable)"""
+    print(f"🔧 Running BIDSPM Python CLI for action: {action}")
+
+    repo_root = Path(__file__).resolve().parent
+    bidspm_root = repo_root / "local_src" / "bidspm_local"
+    bidspm_src = bidspm_root / "src"
+    bidspm_lib = bidspm_root / "lib"
+    spm_root = repo_root / "external" / "spm12_standalone"
+    octave_startup = repo_root / "octave_startup.m"
+    octave_minimal = repo_root / "octave_minimal.m"
+
+    search_paths = [bidspm_root, bidspm_src, bidspm_lib, spm_root]
+
+    def prepend_env_path(env_dict, key, paths):
+        existing = env_dict.get(key, "")
+        entries = [str(p) for p in paths if p and Path(p).exists()]
+        if existing:
+            entries.append(existing)
+        # Remove duplicates while preserving order
+        seen = set()
+        cleaned = []
+        for entry in entries:
+            if entry and entry not in seen:
+                cleaned.append(entry)
+                seen.add(entry)
+        env_dict[key] = os.pathsep.join(cleaned)
+
+    success = True
+
+    for subject in subjects:
+        print(f">>> {action.title()} for subject: {subject}, task: {task}")
+
+        try:
+            cmd = [
+                ".bidspm/bin/bidspm",
+                str(config.BIDS_DIR),
+                str(config.DERIVATIVES_DIR),
+                "subject",
+                action,
+            ]
+
+            cmd.extend([
+                "--participant_label", subject,
+                "--task", task,
+                "--space", config.SPACE,
+                "--verbosity", str(config.VERBOSITY),
+            ])
+
+            if action == "smooth":
+                cmd.extend(["--fwhm", str(config.FWHM)])
+            elif action in ["stats", "contrasts", "results"]:
+                cmd.extend(["--model_file", str(model_file_path)])
+
+            log_debug(f"Local BIDSPM CLI command: {' '.join(cmd)}")
+
+            env = os.environ.copy()
+            env["BIDSPM_PROJECT_ROOT"] = str(repo_root)
+            env["BIDSPM_PATH"] = str(bidspm_root)
+            env["SPM12_PATH"] = str(spm_root)
+            env["SPM_HOME"] = str(spm_root)
+            env["SPM_STANDALONE_HOME"] = str(spm_root)
+
+            prepend_env_path(env, "MATLABPATH", search_paths)
+            prepend_env_path(env, "OCTAVE_PATH", search_paths)
+
+            if octave_startup.exists():
+                env["OCTAVE_SITE_INITFILE"] = str(octave_startup)
+            elif octave_minimal.exists():
+                env["OCTAVE_SITE_INITFILE"] = str(octave_minimal)
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+                cwd=repo_root,
+                env=env,
+            )
+
+            if result.returncode == 0:
+                print(f"✅ {action.title()} completed successfully for subject {subject}")
+                if result.stdout:
+                    log_debug(f"STDOUT: {result.stdout}")
+            else:
+                print(f"❌ {action.title()} failed for subject {subject}")
+                if result.stdout:
+                    print(f"   STDOUT: {result.stdout}")
+                if result.stderr:
+                    print(f"   STDERR: {result.stderr}")
+                success = False
+
+        except subprocess.TimeoutExpired:
+            print(f"⚠️  {action.title()} timed out for subject {subject}")
+            success = False
+        except Exception as e:
+            print(f"⚠️  {action.title()} failed for subject {subject}: {e}")
+            success = False
+
+    return success
 
 
 def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
@@ -385,7 +488,7 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
         return False
     
     success = True
-    local_bidspm_dir = Path("bidspm_local")
+    local_bidspm_dir = Path("local_src/bidspm_local")
     
     for subject in subjects:
         try:
@@ -407,7 +510,7 @@ end
 warning('off', 'all');
 
 % Add SPM12 standalone if available
-spm12_path = fullfile(pwd, 'spm12_standalone');
+spm12_path = fullfile(pwd, 'external/spm12_standalone');
 if exist(spm12_path, 'dir')
     addpath(spm12_path);
     fprintf('SPM12 standalone added to path\\n');
@@ -478,7 +581,7 @@ end
 warning('off', 'all');
 
 % Add SPM12 standalone if available
-spm12_path = fullfile(pwd, 'spm12_standalone');
+spm12_path = fullfile(pwd, 'external/spm12_standalone');
 if exist(spm12_path, 'dir')
     addpath(spm12_path);
     fprintf('SPM12 standalone added to path\\n');
@@ -537,7 +640,7 @@ end
 warning('off', 'all');
 
 % Add SPM12 standalone if available
-spm12_path = fullfile(pwd, 'spm12_standalone');
+spm12_path = fullfile(pwd, 'external/spm12_standalone');
 if exist(spm12_path, 'dir')
     addpath(spm12_path);
     fprintf('SPM12 standalone added to path\\n');
@@ -654,7 +757,7 @@ def setup_local_environment():
         return False
     
     # Check for SPM12 standalone
-    spm12_dir = Path("spm12_standalone")
+    spm12_dir = Path("external/spm12_standalone")
     if spm12_dir.exists():
         print(f"✅ SPM12 standalone found at {spm12_dir}")
     else:

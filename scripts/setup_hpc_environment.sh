@@ -2,13 +2,28 @@
 # HPC Environment Setup for BIDSPM Local Execution
 # This script sets up the environment for running BIDSPM locally
 
-# Add SPM12 to MATLAB/Octave path
-export SPM12_PATH="$(pwd)/external/spm12_standalone"
-export BIDSPM_PATH="$(pwd)/local_src/bidspm_local"
+# Determine project root relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export BIDSPM_PROJECT_ROOT="$PROJECT_ROOT"
+export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
+export BIDSPM_PATH="$PROJECT_ROOT/local_src/bidspm_local"
+export SPM_HOME="$SPM12_PATH"
+export SPM_STANDALONE_HOME="$SPM12_PATH"
+
+if [ -d "$PROJECT_ROOT/local_src/bidspm_local/src" ]; then
+    export MATLABPATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/external/spm12_standalone:${MATLABPATH}"
+    export OCTAVE_PATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/local_src/bidspm_local/lib:$PROJECT_ROOT/external/spm12_standalone:${OCTAVE_PATH}"
+fi
+
+if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+fi
 
 # Add local Octave to PATH if available
-if [ -d "$(pwd)/external/octave/bin" ]; then
-    export PATH="$(pwd)/external/octave/bin:$PATH"
+if [ -d "$PROJECT_ROOT/external/octave/bin" ]; then
+    export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
     echo "✅ Local Octave added to PATH"
 fi
 

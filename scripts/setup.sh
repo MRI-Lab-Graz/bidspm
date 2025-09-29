@@ -642,43 +642,146 @@ EOF
 # Install SPM12 standalone for HPC compatibility
 install_spm12_standalone() {
     print_status "Setting up SPM12 for local BIDSPM execution..."
-    
-    SPM12_DIR="external/spm12_standalone"
-    
-    if [ ! -d "$SPM12_DIR" ]; then
-        print_status "Downloading SPM12 for Octave compatibility..."
-        mkdir -p external
-        git clone https://github.com/spm/spm12.git "$SPM12_DIR" --depth 1
-        
-        if [ $? -eq 0 ]; then
-            print_success "SPM12 cloned successfully"
-            
-            # If Octave is available, compile SPM for Octave
-            if command -v octave &> /dev/null; then
-                print_status "Compiling SPM12 for Octave compatibility..."
-                cd "$SPM12_DIR"
-                
-                # Clean and compile for Octave (as per HPC documentation)
-                make -C src PLATFORM=octave distclean 2>/dev/null || true
-                if make -C src PLATFORM=octave; then
-                    make -C src PLATFORM=octave install
-                    print_success "SPM12 compiled for Octave"
-                else
-                    print_warning "SPM12 compilation for Octave failed, but SPM12 is still available"
-                fi
-                cd ..
-            else
-                print_status "SPM12 downloaded (Octave not available for compilation)"
-            fi
-        else
-            print_warning "Failed to clone SPM12, but local BIDSPM may still work with existing installations"
+
+    local SPM12_VERSION="r7771"
+    local SPM12_ARCHIVE="spm12-${SPM12_VERSION}.zip"
+    local SPM12_URL="https://github.com/spm/spm12/archive/${SPM12_VERSION}.zip"
+    local SPM_PATCH="spm12_${SPM12_VERSION}.patch"
+    local SPM_PATCH_URL="https://raw.githubusercontent.com/spm/spm-octave/main/${SPM_PATCH}"
+    local SPM12_DIR="external/spm12_standalone"
+
+    if [ -d "$SPM12_DIR" ]; then
+        print_success "SPM12 already available at $SPM12_DIR"
+        create_hpc_environment_script
+        return
+    fi
+
+    mkdir -p external
+    pushd external >/dev/null
+
+    if [ ! -f "$SPM12_ARCHIVE" ]; then
+        print_status "Downloading SPM12 ${SPM12_VERSION}..."
+        if ! curl -fsSL "$SPM12_URL" -o "$SPM12_ARCHIVE"; then
+            popd >/dev/null
+            print_warning "Failed to download SPM12 archive."
+            return 1
         fi
     else
-        print_success "SPM12 already available at $SPM12_DIR"
+        print_warning "SPM12 archive already exists, reusing: $SPM12_ARCHIVE"
     fi
-    
-    # Create environment setup script
+
+    print_status "Extracting SPM12 archive..."
+    if ! unzip -q "$SPM12_ARCHIVE"; then
+        popd >/dev/null
+        print_error "Failed to extract SPM12 archive"
+        return 1
+    fi
+
+    local UNPACKED_DIR="spm12-${SPM12_VERSION}"
+    if [ ! -d "$UNPACKED_DIR" ]; then
+        UNPACKED_DIR=$(find . -maxdepth 1 -type d -name "spm12-*" | head -n 1)
+    fi
+
+    if [ -z "$UNPACKED_DIR" ] || [ ! -d "$UNPACKED_DIR" ]; then
+        popd >/dev/null
+        print_error "Could not locate extracted SPM12 directory"
+        return 1
+    fi
+
+    if [ ! -f "$SPM_PATCH" ]; then
+        print_status "Downloading SPM Octave compatibility patch..."
+        if ! curl -fsSL "$SPM_PATCH_URL" -o "$SPM_PATCH"; then
+            print_warning "Failed to download SPM Octave patch. Continuing without patch."
+        fi
+    fi
+
+    pushd "$UNPACKED_DIR" >/dev/null
+
+    if [ -f "../$SPM_PATCH" ]; then
+        print_status "Applying Octave compatibility patch..."
+        if patch --forward -p1 < "../$SPM_PATCH"; then
+            print_success "Octave compatibility patch applied"
+        else
+            print_warning "Patch could not be applied (already applied?). Continuing."
+        fi
+    fi
+
+    if command -v octave &> /dev/null; then
+        print_status "Compiling SPM12 MEX files for Octave (this may take a few minutes)..."
+        local NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+        if make -C src PLATFORM=octave -j"$NPROC"; then
+            make -C src PLATFORM=octave install >/dev/null 2>&1 || true
+            print_success "SPM12 compiled for Octave"
+        else
+            print_warning "SPM12 compilation for Octave failed. Falling back to precompiled scripts."
+        fi
+    else
+        print_warning "Octave not available. Skipping SPM12 compilation."
+    fi
+
+    popd >/dev/null
+
+    rm -f "$SPM_PATCH"
+    rm -f "$SPM12_ARCHIVE"
+
+    rm -rf spm12_standalone
+    mv "$UNPACKED_DIR" spm12_standalone
+
+    popd >/dev/null
+
+    print_success "SPM12 installed at $SPM12_DIR"
+
     create_hpc_environment_script
+}
+
+create_octave_startup_script() {
+    local STARTUP_FILE="octave_startup.m"
+
+    if [ -f "$STARTUP_FILE" ]; then
+        cp "$STARTUP_FILE" "${STARTUP_FILE}.backup" 2>/dev/null || true
+    fi
+
+    cat > "$STARTUP_FILE" <<'EOF'
+% Octave startup script for BIDSPM local execution
+warning('off', 'all');
+
+project_root = getenv('BIDSPM_PROJECT_ROOT');
+if isempty(project_root)
+    project_root = pwd;
+end
+
+spm12_path = fullfile(project_root, 'external', 'spm12_standalone');
+if exist(spm12_path, 'dir')
+    addpath(spm12_path);
+    fprintf('SPM12 added to path\n');
+else
+    fprintf('Warning: SPM12 path not found at %s\n', spm12_path);
+end
+
+bidspm_path = fullfile(project_root, 'local_src', 'bidspm_local');
+if exist(bidspm_path, 'dir')
+    addpath(bidspm_path);
+    addpath(fullfile(bidspm_path, 'src'));
+    addpath(genpath(fullfile(bidspm_path, 'lib')));
+    fprintf('BIDSPM added to path\n');
+else
+    fprintf('Warning: BIDSPM path not found at %s\n', bidspm_path);
+end
+
+if exist('spm', 'file')
+    try
+        spm('defaults', 'fmri');
+        spm_jobman('initcfg');
+        fprintf('SPM initialised\n');
+    catch ME
+        fprintf('Warning: SPM initialisation failed (%s)\n', ME.message);
+    end
+end
+
+fprintf('Octave startup complete\n');
+EOF
+
+    print_success "Octave startup script created: octave_startup.m"
 }
 
 # Create HPC-compatible environment setup script
@@ -690,13 +793,28 @@ create_hpc_environment_script() {
 # HPC Environment Setup for BIDSPM Local Execution
 # This script sets up the environment for running BIDSPM locally
 
-# Add SPM12 to MATLAB/Octave path
-export SPM12_PATH="$(pwd)/external/spm12_standalone"
-export BIDSPM_PATH="$(pwd)/local_src/bidspm_local"
+# Determine project root relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export BIDSPM_PROJECT_ROOT="$PROJECT_ROOT"
+export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
+export BIDSPM_PATH="$PROJECT_ROOT/local_src/bidspm_local"
+export SPM_HOME="$SPM12_PATH"
+export SPM_STANDALONE_HOME="$SPM12_PATH"
+
+if [ -d "$PROJECT_ROOT/local_src/bidspm_local/src" ]; then
+    export MATLABPATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/external/spm12_standalone:${MATLABPATH}"
+    export OCTAVE_PATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/local_src/bidspm_local/lib:$PROJECT_ROOT/external/spm12_standalone:${OCTAVE_PATH}"
+fi
+
+if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+fi
 
 # Add local Octave to PATH if available
-if [ -d "$(pwd)/external/octave/bin" ]; then
-    export PATH="$(pwd)/external/octave/bin:$PATH"
+if [ -d "$PROJECT_ROOT/external/octave/bin" ]; then
+    export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
     echo "✅ Local Octave added to PATH"
 fi
 
@@ -787,10 +905,20 @@ create_activation_script() {
 #!/bin/bash
 # Activation script for bidspm-runner environment
 
-# Activate virtual environment
-source .bidspm/bin/activate
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+if [ ! -d "$PROJECT_ROOT/.bidspm" ]; then
+    echo "❌ Virtual environment not found. Please run ./scripts/setup.sh first."
+    return 1 2>/dev/null || exit 1
+fi
+
+source "$PROJECT_ROOT/.bidspm/bin/activate"
+
+export BIDSPM_PROJECT_ROOT="$PROJECT_ROOT"
 
 echo "🚀 BIDSPM environment activated!"
+echo "Project root: $PROJECT_ROOT"
 echo "Python path: $(which python)"
 EOF
 
@@ -811,8 +939,8 @@ EOF
         cat >> activate_bidspm.sh << 'EOF'
 
 # Local Octave installation
-export PATH="$(pwd)/external/octave/bin:$PATH"
-echo "🔧 Local Octave added to PATH: $(pwd)/external/octave/bin"
+export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
+echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
 EOF
     fi
 
@@ -821,8 +949,21 @@ EOF
         cat >> activate_bidspm.sh << 'EOF'
 
 # Local BIDSPM environment
-export SPM12_PATH="$(pwd)/external/spm12_standalone"
-export BIDSPM_PATH="$(pwd)/local_src/bidspm_local"
+export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
+export BIDSPM_PATH="$PROJECT_ROOT/local_src/bidspm_local"
+export SPM_HOME="$SPM12_PATH"
+export SPM_STANDALONE_HOME="$SPM12_PATH"
+export BIDSPM_SKIP_OCTAVE_FORGE=1
+
+if [ -d "$BIDSPM_PATH/src" ]; then
+    export MATLABPATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$SPM12_PATH:${MATLABPATH}"
+    export OCTAVE_PATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$BIDSPM_PATH/lib:$SPM12_PATH:${OCTAVE_PATH}"
+fi
+
+if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+fi
+
 echo "🧠 BIDSPM local environment configured"
 echo "   SPM12: $SPM12_PATH"
 echo "   BIDSPM: $BIDSPM_PATH"
@@ -886,6 +1027,7 @@ main() {
     # Install local BIDSPM if requested
     if [ "$LOCAL_INSTALL" = true ]; then
         install_local_bidspm
+        create_octave_startup_script
     fi
     
     install_dependencies
