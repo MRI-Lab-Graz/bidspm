@@ -7,9 +7,16 @@ env.bak/
 venv.bak/
 .Python
 .venv/
+
+# Local installations and builds
+build/uv
+build/uvx
 cleanup_disk.sh
 error_logs/
-
+studies/
+external/
+local_src/
+logs/
 # Python cache
 __pycache__/
 *.py[cod]

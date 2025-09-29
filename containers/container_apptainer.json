@@ -1,0 +1,5 @@
+{
+  "container_type": "apptainer",
+  "docker_image": "",
+  "apptainer_image": "/path/to/containers/bidspm.sif"
+}

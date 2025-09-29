@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from json_validator import JSONValidator
+from docs.json_validator import JSONValidator
 import json
 import subprocess
 import sys
@@ -19,8 +19,8 @@ from typing import List, Optional
 # Configuration
 # ------------------------------
 
-CONFIG_FILE = "config.json"
-CONTAINER_CONFIG_FILE = "container.json"
+CONFIG_FILE = "config/config.json"
+CONTAINER_CONFIG_FILE = "containers/container.json"
 LOG_FILE = "run_bidspm.log"
 DEBUG = True  # Set to False to suppress debug output
 
@@ -166,9 +166,9 @@ def auto_select_container_config():
     config_candidates = []
     
     if detected_type == "docker":
-        config_candidates = ["container.json", "container_docker.json", "container_dev.json"]
+        config_candidates = ["containers/container.json", "containers/container_docker.json", "containers/container_dev.json"]
     elif detected_type == "apptainer":
-        config_candidates = ["container_production.json", "container_apptainer.json", "container.json"]
+        config_candidates = ["containers/container_production.json", "containers/container_apptainer.json", "containers/container.json"]
     
     for candidate in config_candidates:
         if Path(candidate).exists():
@@ -275,7 +275,7 @@ def validate_space_availability(config: Config, subjects_to_process: List[str], 
         print(f"   Subjects missing SPACE '{config.SPACE}': {missing_subjects}")
         if available_spaces:
             print(f"   Available spaces found: {sorted(available_spaces)}")
-            print("   💡 Suggestion: Update SPACE in config.json to one of the available spaces")
+            print("   💡 Suggestion: Update SPACE in config/config.json to one of the available spaces")
         else:
             print(f"   ⚠️  No BOLD files found for task '{task}' in any subject")
         return False
@@ -1000,7 +1000,7 @@ REQUIRED ARGUMENTS:
 
 OPTIONAL ARGUMENTS:
     -h, --help           Show this help message and exit
-    -s, --settings       Path to configuration JSON file (default: config.json)
+    -s, --settings       Path to configuration JSON file (default: config/config.json)
     -c, --container      Path to container config file (default: auto-detect)
     -m, --model          Path to BIDS-StatsModel JSON file (overrides config)
     --pilot              Test mode: process only one random subject
@@ -1019,7 +1019,7 @@ EXAMPLES:
     python bidspm.py --action smooth --pilot
     
     # Use custom config and model files
-    python bidspm.py -s my_config.json -m my_model.json --action smooth stats
+    python bidspm.py -s config/my_config.json -m my_model.json --action smooth stats
     
     # Skip model validation (faster startup)
     python bidspm.py --action stats --skip-modelvalidation
@@ -1037,8 +1037,8 @@ WORKFLOW:
     4. Cleans up temporary files and generates log reports
 
 CONFIGURATION FILES:
-    • config.json: Main settings (paths, tasks, subjects, etc.)
-    • container.json: Container configuration (auto-detected if missing)
+    • config/config.json: Main settings (paths, tasks, subjects, etc.)
+    • containers/container.json: Container configuration (auto-detected if missing)
     • BIDS-StatsModel JSON: Statistical model specification
 
 REQUIREMENTS:
@@ -1048,7 +1048,7 @@ REQUIREMENTS:
     • Valid BIDS-StatsModel JSON file
 
 CONFIGURATION VALIDATION:
-    Your config.json is automatically validated against config_schema.json.
+    Your config/config.json is automatically validated against config/config_schema.json.
     If validation fails, you'll get clear error messages to fix the issues.
 
 MORE INFORMATION:
@@ -1150,9 +1150,9 @@ def main():
 
     # Validate config.json against schema (if jsonschema is available)
     try:
-        if not JSONValidator.validate_with_schema(config_file, "config_schema.json"):
-            print("❌ config.json does not match the required schema (config_schema.json)!")
-            print("   Please check your config.json and compare it to config_schema.json.")
+        if not JSONValidator.validate_with_schema(config_file, "config/config_schema.json"):
+            print("❌ config/config.json does not match the required schema (config/config_schema.json)!")
+            print("   Please check your config/config.json and compare it to config/config_schema.json.")
             sys.exit(1)
     except ImportError:
         print("⚠️  Skipping schema validation: jsonschema package is not installed.")
@@ -1245,7 +1245,7 @@ def main():
         log_debug("Validating model JSON against BIDS Stats Model schema")
         venv_python = Path(".bidspm/bin/python")
         python_cmd = str(venv_python) if venv_python.exists() else "python3"
-        run_command([python_cmd, "validate_bids_model.py", str(model_file_path)], capture_output=True)
+        run_command([python_cmd, "docs/validate_bids_model.py", str(model_file_path)], capture_output=True)
     else:
         print("⚠️  Skipping BIDS-StatsModel JSON validation (--skip-modelvalidation flag used)")
 
