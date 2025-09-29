@@ -25,6 +25,7 @@ echo "📦 Apptainer cache configured: $APPTAINER_CACHEDIR"
 
 # Local Octave installation
 export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
+export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/8.4.0:$LD_LIBRARY_PATH"
 echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
 
 # Local BIDSPM environment
