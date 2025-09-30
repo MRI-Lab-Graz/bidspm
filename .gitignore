@@ -8,6 +8,7 @@ venv.bak/
 .Python
 .venv/
 
+
 # Local installations and builds
 build/uv
 build/uvx

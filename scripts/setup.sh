@@ -298,15 +298,6 @@ setup_apptainer_environment() {
     mkdir -p "$APPTAINER_CACHEDIR"
     mkdir -p "$APPTAINER_TMPDIR"
     
-    # Add to environment activation script
-    cat >> activate_bidspm.sh << 'EOF'
-
-# Apptainer environment variables
-export APPTAINER_CACHEDIR="/data/local/apptainer_cache"
-export APPTAINER_TMPDIR="/data/local/apptainer_tmp"
-export TMPDIR="/data/local/apptainer_tmp"
-EOF
-    
     print_success "Apptainer environment configured:"
     print_status "   Cache Directory: $APPTAINER_CACHEDIR"
     print_status "   Temp Directory: $APPTAINER_TMPDIR"
@@ -735,7 +726,9 @@ install_spm12_standalone() {
 }
 
 create_octave_startup_script() {
-    local STARTUP_FILE="octave_startup.m"
+    local STARTUP_FILE="octave/octave_startup.m"
+
+    mkdir -p "$(dirname "$STARTUP_FILE")"
 
     if [ -f "$STARTUP_FILE" ]; then
         cp "$STARTUP_FILE" "${STARTUP_FILE}.backup" 2>/dev/null || true
@@ -781,7 +774,7 @@ end
 fprintf('Octave startup complete\n');
 EOF
 
-    print_success "Octave startup script created: octave_startup.m"
+    print_success "Octave startup script created: $STARTUP_FILE"
 }
 
 # Create HPC-compatible environment setup script
@@ -808,8 +801,8 @@ if [ -d "$PROJECT_ROOT/local_src/bidspm_local/src" ]; then
     export OCTAVE_PATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/local_src/bidspm_local/lib:$PROJECT_ROOT/external/spm12_standalone:${OCTAVE_PATH}"
 fi
 
-if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
-    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+if [ -f "$PROJECT_ROOT/octave/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave/octave_startup.m"
 fi
 
 # Add local Octave to PATH if available
@@ -901,12 +894,12 @@ install_dependencies() {
 create_activation_script() {
     print_status "Creating activation script..."
     
-    cat > activate_bidspm.sh << 'EOF'
+    cat > scripts/activate_bidspm.sh << 'EOF'
 #!/bin/bash
 # Activation script for bidspm-runner environment
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ ! -d "$PROJECT_ROOT/.bidspm" ]; then
     echo "❌ Virtual environment not found. Please run ./scripts/setup.sh first."
@@ -924,7 +917,7 @@ EOF
 
     # Add platform-specific environment variables
     if [ "$SETUP_APPTAINER" = true ] || [ "$PLATFORM" = "apptainer" ]; then
-        cat >> activate_bidspm.sh << 'EOF'
+        cat >> scripts/activate_bidspm.sh << 'EOF'
 
 # Apptainer environment variables
 export APPTAINER_CACHEDIR="/data/local/apptainer_cache"
@@ -936,17 +929,20 @@ EOF
 
     # Add local Octave to PATH if installed
     if [ "$SETUP_OCTAVE" = true ] && [ -d "external/octave" ]; then
-        cat >> activate_bidspm.sh << 'EOF'
+        cat >> scripts/activate_bidspm.sh << 'EOF'
 
 # Local Octave installation
 export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
+if [ -d "$PROJECT_ROOT/external/octave/lib" ]; then
+    export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/8.4.0:$LD_LIBRARY_PATH"
+fi
 echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
 EOF
     fi
 
     # Add local BIDSPM environment if installed
     if [ "$LOCAL_INSTALL" = true ]; then
-        cat >> activate_bidspm.sh << 'EOF'
+        cat >> scripts/activate_bidspm.sh << 'EOF'
 
 # Local BIDSPM environment
 export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
@@ -960,8 +956,8 @@ if [ -d "$BIDSPM_PATH/src" ]; then
     export OCTAVE_PATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$BIDSPM_PATH/lib:$SPM12_PATH:${OCTAVE_PATH}"
 fi
 
-if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
-    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+if [ -f "$PROJECT_ROOT/octave/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave/octave_startup.m"
 fi
 
 echo "🧠 BIDSPM local environment configured"
@@ -970,14 +966,14 @@ echo "   BIDSPM: $BIDSPM_PATH"
 EOF
     fi
 
-    cat >> activate_bidspm.sh << 'EOF'
+    cat >> scripts/activate_bidspm.sh << 'EOF'
 
 echo ""
 echo "To deactivate, run: deactivate"
 EOF
     
-    chmod +x activate_bidspm.sh
-    print_success "Activation script created: ./activate_bidspm.sh"
+    chmod +x scripts/activate_bidspm.sh
+    print_success "Activation script created: ./scripts/activate_bidspm.sh"
 }
 
 # Main setup function
@@ -1054,8 +1050,8 @@ main() {
         echo "  - HPC environment compatibility"
         echo "  - No container dependencies"
         echo ""
-        echo "🚀 To activate the environment:"
-        echo "  source ./activate_bidspm.sh"
+    echo "🚀 To activate the environment:"
+    echo "  source ./scripts/activate_bidspm.sh"
         echo ""
         echo "🧪 To test the local installation:"
         echo "  source .bidspm/bin/activate"
@@ -1080,8 +1076,8 @@ main() {
             echo "   Temp:  /data/local/apptainer_tmp"
         fi
         echo ""
-        echo "🚀 To activate the environment:"
-        echo "  source ./activate_bidspm.sh"
+    echo "🚀 To activate the environment:"
+    echo "  source ./scripts/activate_bidspm.sh"
         echo ""
         echo "🧪 To test the installation:"
         echo "  python3 bidspm.py --pilot"

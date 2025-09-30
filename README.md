@@ -21,6 +21,13 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
 - 🎯 **ROI Analysis**: Extract signals from regions of interest using multiple atlases (Wang, Neuromorphometrics, etc.)
 
+## Repository layout
+
+- `bidspm.py` – primary entry point for all local and container workflows
+- `scripts/` – helper utilities (environment activation, legacy runner, wrapper scripts)
+- `octave/` – Octave startup files consumed by the Python CLI and shell helpers
+- `logs/` – auto-generated run logs (e.g., `run_bidspm.log`, `model_*_timestamp.log`)
+
 ## ⚠️ Known Issues and Solutions
 
 ### 🗺️ Atlas Initialization Error
@@ -157,7 +164,7 @@ chmod +x setup.sh
 Then activate the environment:
 
 ```bash
-source ./activate_bidspm.sh
+source ./scripts/activate_bidspm.sh
 ```
 
 ### Option 3: Manual installation
@@ -279,7 +286,27 @@ Log files are automatically generated with timestamps and model names for easy t
 
 - Format: `{model_name}_{YYYYMMDD_HHMMSS}.log`
 - Example: `model_task1_20250721_143022.log`
+- Stored in the `logs/` directory (created automatically)
 - Contains detailed debug information and processing logs
+
+### Local Octave/SPM execution (no containers)
+
+Use the locally installed BIDSPM + Octave stack when you want to avoid containers (e.g., HPC nodes without Docker):
+
+1. Activate the environment to populate the required Octave/SPM paths and environment variables:
+  ```bash
+  source ./scripts/activate_bidspm.sh
+  ```
+2. Run the pipeline in pilot mode to process a single random subject:
+  ```bash
+  python bidspm.py --local --pilot --action smooth --settings config/config_local_107.json
+  ```
+3. To preview the generated SPM batches without executing them, append `--dry_run` to the direct CLI call:
+  ```bash
+  .bidspm/bin/bidspm /data/local/107_JM01/rawdata /data/local/107_JM01/derivatives subject smooth \
+    --participant_label 107BFJM011019 --task pa --space MNI152NLin2009cAsym --fwhm 8 --verbosity 3 --dry_run
+  ```
+4. Drop `--pilot` and `--dry_run` when you're ready for full execution. Log output for these runs is stored under `logs/`.
 
 ### Advanced examples
 

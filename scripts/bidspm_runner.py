@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from docs.json_validator import JSONValidator
 import json
 import subprocess
 import sys
@@ -15,6 +14,12 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from docs.json_validator import JSONValidator
+
 
 # ------------------------------
 # Configuration
@@ -22,7 +27,8 @@ from typing import List, Optional
 
 CONFIG_FILE = "config/config.json"
 CONTAINER_CONFIG_FILE = "containers/container.json"
-LOG_FILE = "run_bidspm.log"
+LOG_DIR = Path("logs")
+LOG_FILE = str(LOG_DIR / "run_bidspm.log")
 DEBUG = True  # Set to False to suppress debug output
 
 
@@ -204,7 +210,8 @@ def generate_log_filename(model_file_path: str) -> str:
     """Generate log filename based on model name and timestamp"""
     model_name = Path(model_file_path).stem  # Get filename without extension
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{model_name}_{timestamp}.log"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    return str(LOG_DIR / f"{model_name}_{timestamp}.log")
 
 
 def log_debug(msg):
@@ -220,7 +227,9 @@ def log_error(msg):
 def log(msg, error=False):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_msg = f"{timestamp} {msg}"
-    with open(LOG_FILE, "a") as f:
+    log_path = Path(LOG_FILE)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as f:
         f.write(full_msg + "\n")
     print(full_msg, file=sys.stderr if error else sys.stdout)
 
@@ -370,13 +379,14 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
     """Execute BIDSPM using the Python CLI (fast and reliable)"""
     print(f"🔧 Running BIDSPM Python CLI for action: {action}")
 
-    repo_root = Path(__file__).resolve().parent
+    repo_root = REPO_ROOT
     bidspm_root = repo_root / "local_src" / "bidspm_local"
     bidspm_src = bidspm_root / "src"
     bidspm_lib = bidspm_root / "lib"
     spm_root = repo_root / "external" / "spm12_standalone"
-    octave_startup = repo_root / "octave_startup.m"
-    octave_minimal = repo_root / "octave_minimal.m"
+    octave_dir = repo_root / "octave"
+    octave_startup = octave_dir / "octave_startup.m"
+    octave_minimal = octave_dir / "octave_minimal.m"
 
     search_paths = [bidspm_root, bidspm_src, bidspm_lib, spm_root]
 

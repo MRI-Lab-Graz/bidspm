@@ -17,8 +17,8 @@ if [ -d "$PROJECT_ROOT/local_src/bidspm_local/src" ]; then
     export OCTAVE_PATH="$PROJECT_ROOT/local_src/bidspm_local:$PROJECT_ROOT/local_src/bidspm_local/src:$PROJECT_ROOT/local_src/bidspm_local/lib:$PROJECT_ROOT/external/spm12_standalone:${OCTAVE_PATH}"
 fi
 
-if [ -f "$PROJECT_ROOT/octave_startup.m" ]; then
-    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave_startup.m"
+if [ -f "$PROJECT_ROOT/octave/octave_startup.m" ]; then
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave/octave_startup.m"
 fi
 
 # Add local Octave to PATH if available
