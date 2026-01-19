@@ -25,7 +25,7 @@ CONFIG_FILE = "config/config.json"
 CONTAINER_CONFIG_FILE = "containers/container.json"
 LOG_DIR = Path("logs")
 LOG_FILE = str(LOG_DIR / "run_bidspm.log")
-DEBUG = True  # Set to False to suppress debug output
+DEBUG = False  # Set to False to suppress debug output
 
 
 @dataclass
@@ -42,6 +42,8 @@ class Config:
     SUBJECTS: Optional[List[str]] = None
     ROI: Optional[bool] = None
     ROI_CONFIG: Optional[dict] = None
+    SKIP_VALIDATION: Optional[bool] = False
+    CONTAINER_TYPE: Optional[str] = "docker"
 
 
 def load_config(config_file: str) -> Config:
@@ -94,7 +96,9 @@ def load_config(config_file: str) -> Config:
         VERBOSITY=verbosity,
         SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
         ROI=data.get("ROI"),
-        ROI_CONFIG=data.get("ROI_CONFIG")
+        ROI_CONFIG=data.get("ROI_CONFIG"),
+        SKIP_VALIDATION=data.get("skip_validation", False),
+        CONTAINER_TYPE=data.get("container_type", "docker")
     )
 
 
@@ -410,10 +414,17 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
         print(f">>> {action.title()} for subject: {subject}, task: {task}")
         
         try:
+            # Determine input directory based on action
+            # For smoothing, we input the fMRIPrep derivatives
+            # For stats/others, we input the Raw BIDS dataset
+            input_dir = config.BIDS_DIR
+            if action == "smooth":
+                input_dir = config.FMRIPREP_DIR
+
             # Build the bidspm command
             cmd = [
                 str(Path(".bidspm/bin/bidspm")),
-                str(config.BIDS_DIR),
+                str(input_dir),
                 str(config.DERIVATIVES_DIR),
                 "subject",
                 action
@@ -427,11 +438,27 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
                 "--verbosity", str(config.VERBOSITY)
             ])
             
+            # Always skip validation as requested (but only for actions that support it)
+            if action in ["stats", "contrasts", "results", "bms"]:
+                cmd.append("--skip_validation")
+            
             # Add action-specific arguments
             if action == "smooth":
                 cmd.extend(["--fwhm", str(config.FWHM)])
-            elif action in ["stats", "contrasts", "results"]:
+            elif action in ["stats", "contrasts", "results", "bms"]:
+                cmd.extend(["--fwhm", str(config.FWHM)])
                 cmd.extend(["--model_file", str(model_file_path)])
+                
+                # Check for bidspm-preproc directory (created by smooth action)
+                bidspm_preproc = config.DERIVATIVES_DIR / "bidspm-preproc"
+                if bidspm_preproc.exists():
+                    cmd.extend(["--preproc_dir", str(bidspm_preproc)])
+                    log_debug(f"Using preproc_dir: {bidspm_preproc}")
+                else:
+                    # Fallback to FMRIPREP_DIR if bidspm-preproc doesn't exist
+                    # This happens if skipping smoothing or if smoothing hasn't run yet
+                    cmd.extend(["--preproc_dir", str(config.FMRIPREP_DIR)])
+                    log_debug(f"Using preproc_dir: {config.FMRIPREP_DIR} (bidspm-preproc not found)")
             
             # Run the command with timeout
             # We use Popen to stream output to stdout (for web interface) while capturing it for the log file
@@ -657,6 +684,16 @@ catch
 end
 
 try
+    % Check for preproc dir
+    preproc_dir = '{config.FMRIPREP_DIR}';
+    bidspm_preproc = fullfile('{config.DERIVATIVES_DIR}', 'bidspm-preproc');
+    if exist(bidspm_preproc, 'dir')
+        preproc_dir = bidspm_preproc;
+        fprintf('Using preproc_dir: %s\\n', preproc_dir);
+    else
+        fprintf('Using fallback preproc_dir: %s\\n', preproc_dir);
+    end
+
     bidspm('{config.BIDS_DIR}', ...
            '{config.DERIVATIVES_DIR}', ...
            'subject', ...
@@ -666,6 +703,7 @@ try
            'space', {{'{config.SPACE}'}}, ...
            'fwhm', {config.FWHM}, ...
            'model_file', '{model_file_path.absolute()}', ...
+           'preproc_dir', preproc_dir, ...
            'verbosity', {config.VERBOSITY});
     fprintf('✅ Stats completed successfully\\n');
     exit(0);
@@ -1311,7 +1349,8 @@ def main():
                 try:
                     with open(config_file, 'r') as f:
                         data = json.load(f)
-                        if "container_type" in data and ("docker_image" in data or "apptainer_image" in data):
+                        # Honor any explicit container_type in the main config (even if images are empty)
+                        if "container_type" in data:
                             log_debug(f"Detected container settings in main config file: {config_file}")
                             container_config_file = config_file
                         else:
@@ -1319,12 +1358,12 @@ def main():
                             auto_selected = auto_select_container_config()
                             container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
                 except Exception:
-                     # If main config is invalid (will be caught later), just fallback
+                    # If main config is invalid (will be caught later), just fallback
                     auto_selected = auto_select_container_config()
                     container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
             else:
-                 auto_selected = auto_select_container_config()
-                 container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
+                auto_selected = auto_select_container_config()
+                container_config_file = auto_selected if auto_selected else CONTAINER_CONFIG_FILE
     else:
         # For local execution, container config is not required
         container_config_file = None
@@ -1372,6 +1411,11 @@ def main():
 
     # Load configurations
     config = load_config(config_file)
+    
+    # Respect container_type from config if not overridden by args
+    if not args.local and config.CONTAINER_TYPE == "local":
+        print(f"🔧 Using local execution as specified in {config_file}")
+        args.local = True
     
     # Only load container config if not using local execution
     if not args.local:

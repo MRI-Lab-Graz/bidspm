@@ -131,7 +131,7 @@ def stream_output(execution_id):
         idx = 0
         while True:
             if idx < len(executions[execution_id]['output']):
-                line = executions[execution_id]['output'][idx]
+                line = executions[execution_id]['output'][idx].rstrip("\n")
                 yield f"data: {line}\n\n"
                 idx += 1
             elif executions[execution_id]['finished']:
@@ -215,7 +215,8 @@ def load_config_file():
         return jsonify({
             "WD": "", "BIDS_DIR": "", "DERIVATIVES_DIR": "", "FMRIPREP_DIR": "",
             "SPACE": "MNI152NLin2009cAsym", "FWHM": 6, "MODELS_FILE": "models/model-001_sct.json",
-            "TASKS": ["taskname"], "VERBOSITY": 3
+            "TASKS": ["taskname"], "VERBOSITY": 3,
+            "container_type": "docker", "docker_image": "", "apptainer_image": ""
         })
     with open(path, 'r') as f:
         return jsonify(json.load(f))

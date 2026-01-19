@@ -80,9 +80,10 @@
                                 <input class="form-check-input" type="checkbox" id="pilot" name="pilot">
                                 <label class="form-check-label" for="pilot">Pilot Mode</label>
                             </div>
+                            <!-- Validation is now always skipped backend-side -->
                             <div class="form-check form-switch mb-1">
-                                <input class="form-check-input" type="checkbox" id="skip_validation" name="skip_validation" checked>
-                                <label class="form-check-label" for="skip_validation">Skip Validation</label>
+                                <input class="form-check-input" type="checkbox" id="skip_validation" name="skip_validation" checked disabled>
+                                <label class="form-check-label" for="skip_validation">Skip Validation (Always On)</label>
                             </div>
                         </div>
                     </div>
@@ -468,6 +469,7 @@ Ready for command.</div>
         
         unifiedStudyConfig.docker_image = document.getElementById('input-docker_image').value;
         unifiedStudyConfig.apptainer_image = document.getElementById('input-apptainer_image').value;
+        unifiedStudyConfig.skip_validation = document.getElementById('skip_validation').checked;
         
         validationResult.innerHTML = '';
     }
@@ -501,6 +503,10 @@ Ready for command.</div>
         }
         document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
         document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';
+
+        // Skip validation
+        const skipVal = document.getElementById('skip_validation');
+        if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
     }
 
     // --- API CALLS ---

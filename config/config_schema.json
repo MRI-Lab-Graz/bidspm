@@ -23,6 +23,7 @@
       "items": {"type": "string"}
     },
     "container_type": {"type": "string", "enum": ["docker", "apptainer", "local"]},
+    "skip_validation": {"type": "boolean"},
     "docker_image": {"type": "string"},
     "apptainer_image": {"type": "string"},
     "ROI": {"type": "boolean"},
