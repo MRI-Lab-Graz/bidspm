@@ -652,7 +652,16 @@ Ready for command.</div>
     };
 
     document.getElementById('btn-save-start').onclick = async () => {
+        // Force update to capture current form state including container_type
         updateInternalState();
+        
+        // Double-check container_type is captured from radio buttons
+        const selectedContainer = document.querySelector('input[name="container_type"]:checked');
+        if (selectedContainer) {
+            unifiedStudyConfig.container_type = selectedContainer.value;
+            console.log('Saving with container_type:', unifiedStudyConfig.container_type);
+        }
+        
         const data = getFullFormData();
         const folder = data.config_folder;
         const study_path = folder + data.study_filename;

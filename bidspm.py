@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 
 from docs.json_validator import JSONValidator
+from lib.config import Config, ContainerConfig, load_config, load_container_config
+from lib.config import detect_platform_and_suggest_container, auto_select_container_config
+from lib.utils import (
+    log, log_debug, log_error, log_error_non_fatal,
+    generate_log_filename, check_command, check_docker_availability,
+    run_command, validate_space_availability,
+    ensure_derivatives_dataset_description, cleanup_tmp_directories,
+    get_container_model_path
+)
 import json
 import os
 import subprocess
@@ -10,10 +19,8 @@ import argparse
 import random
 import re
 import shlex
-import platform
 from pathlib import Path
 from datetime import datetime
-from dataclasses import dataclass
 from typing import List, Optional
 
 
@@ -21,328 +28,8 @@ from typing import List, Optional
 # Configuration
 # ------------------------------
 
-CONFIG_FILE = "config/config.json"
 CONTAINER_CONFIG_FILE = "containers/container.json"
-LOG_DIR = Path("logs")
-LOG_FILE = str(LOG_DIR / "run_bidspm.log")
 DEBUG = False  # Set to False to suppress debug output
-
-
-@dataclass
-class Config:
-    WD: Path
-    BIDS_DIR: Path
-    DERIVATIVES_DIR: Path
-    SPACE: str
-    FWHM: float
-    MODELS_FILE: str
-    TASKS: List[str]
-    FMRIPREP_DIR: Path
-    VERBOSITY: int
-    SUBJECTS: Optional[List[str]] = None
-    ROI: Optional[bool] = None
-    ROI_CONFIG: Optional[dict] = None
-    SKIP_VALIDATION: Optional[bool] = False
-    CONTAINER_TYPE: Optional[str] = "docker"
-
-
-def load_config(config_file: str) -> Config:
-    """Load configuration from JSON file."""
-    if not Path(config_file).exists():
-        log_error(f"Config file '{config_file}' not found.")
-
-    with open(config_file) as f:
-        data = json.load(f)
-
-    # SESSION support: if present, generate selection.json
-    session = data.get("SESSION")
-    if session:
-        selection = {
-            "bold": {
-                "datatype": "func",
-                "suffix": "bold",
-                "ses": session
-            }
-        }
-        # Optional: additional restrictions (e.g. run) from config
-        # Example: if RUNS in config is present
-        runs = data.get("RUNS")
-        if runs:
-            selection["bold"]["run"] = runs
-        # Write selection.json to working directory
-        try:
-            with open("selection.json", "w") as sel_f:
-                json.dump(selection, sel_f, indent=2)
-            print(f"✅ selection.json generated for session {session}.")
-        except Exception as e:
-            print(f"⚠️  Could not write selection.json: {e}")
-
-    # Derive paths
-    wd = Path(data["WD"])
-    bids_dir = Path(data["BIDS_DIR"])
-    derivatives_dir = Path(data["DERIVATIVES_DIR"])
-    fmriprep_dir = Path(data["FMRIPREP_DIR"])
-    verbosity = data.get("VERBOSITY", 3)
-    container_type = str(data.get("container_type", "docker")).lower()
-
-    return Config(
-        WD=wd,
-        BIDS_DIR=bids_dir,
-        DERIVATIVES_DIR=derivatives_dir,
-        SPACE=data["SPACE"],
-        FWHM=data["FWHM"],
-        MODELS_FILE=data.get("MODELS_FILE", None),
-        TASKS=data["TASKS"],
-        FMRIPREP_DIR=fmriprep_dir,
-        VERBOSITY=verbosity,
-        SUBJECTS=data.get("SUBJECTS"),  # Optional field, defaults to None
-        ROI=data.get("ROI"),
-        ROI_CONFIG=data.get("ROI_CONFIG"),
-        SKIP_VALIDATION=data.get("skip_validation", False),
-        CONTAINER_TYPE=container_type
-    )
-
-
-@dataclass
-class ContainerConfig:
-    container_type: str  # "docker" or "apptainer"
-    docker_image: str = ""
-    apptainer_image: str = ""
-
-
-def load_container_config(config_file: str) -> ContainerConfig:
-    if not Path(config_file).exists():
-        log_error(f"Container config file '{config_file}' not found.")
-
-    with open(config_file) as f:
-        data = json.load(f)
-
-    container_type = data.get("container_type", "docker").lower()
-    if container_type not in ["docker", "apptainer"]:
-        log_error(f"Invalid container_type '{container_type}'. Must be 'docker' or 'apptainer'.")
-
-    return ContainerConfig(
-        container_type=container_type,
-        docker_image=data.get("docker_image", ""),
-        apptainer_image=data.get("apptainer_image", "")
-    )
-
-
-def detect_platform_and_suggest_container():
-    """Detect platform and suggest appropriate container configuration."""
-    system = platform.system().lower()
-    
-    if system == "darwin":  # macOS
-        return "docker", "Docker recommended for macOS (Apptainer not supported)."
-    elif system == "linux":
-        # Check what's available - prefer what user has configured
-        docker_available = False
-        apptainer_available = False
-        
-        try:
-            subprocess.run(["docker", "--version"], capture_output=True, check=True)
-            docker_available = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-            
-        try:
-            subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
-            apptainer_available = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-        
-        # HPC systems often only have Apptainer
-        if apptainer_available and not docker_available:
-            return "apptainer", "HPC environment detected - using Apptainer (Docker not available)."
-        elif docker_available and not apptainer_available:
-            return "docker", "Docker detected on Linux."
-        elif docker_available and apptainer_available:
-            return "docker", "Both Docker and Apptainer available - using Docker for consistency."
-        else:
-            return None, "Neither Docker nor Apptainer found on Linux system."
-    else:
-        return "docker", f"Unknown platform ({system}), Docker recommended."
-
-
-def auto_select_container_config():
-    """Automatically select container configuration based on platform."""
-    detected_type, message = detect_platform_and_suggest_container()
-    
-    print(f"🔍 Platform detection: {message}")
-    
-    # Try to find appropriate container config
-    config_candidates = []
-    
-    if detected_type == "docker":
-        config_candidates = ["containers/container.json", "containers/container_docker.json", "containers/container_dev.json"]
-    elif detected_type == "apptainer":
-        config_candidates = ["containers/container_production.json", "containers/container_apptainer.json", "containers/container.json"]
-    
-    for candidate in config_candidates:
-        if Path(candidate).exists():
-            try:
-                with open(candidate, 'r') as f:
-                    config = json.load(f)
-                if config.get("container_type") == detected_type:
-                    print(f"✅ Auto-selected container config: {candidate}")
-                    return candidate
-            except Exception:
-                continue
-    
-    return None
-
-
-# ------------------------------
-# Logging & Utilities
-# ------------------------------
-
-def get_container_model_path(model_file_path: Path, derivatives_dir: Path) -> str:
-    """Get the correct model file path within the container"""
-    try:
-        # If model file is inside derivatives directory, use relative path
-        relative_path = model_file_path.relative_to(derivatives_dir)
-        return f"/derivatives/{relative_path}"
-    except ValueError:
-        # Model file is outside derivatives, use mounted path
-        return "/models/smdl.json"
-
-
-def generate_log_filename(model_file_path: str) -> str:
-    """Generate log filename based on model name and timestamp"""
-    model_name = Path(model_file_path).stem  # Get filename without extension
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    return str(LOG_DIR / f"{model_name}_{timestamp}.log")
-
-
-def log_debug(msg):
-    if DEBUG:
-        log(f"[DEBUG] {msg}")
-
-
-def log_error(msg):
-    log(f"[ERROR] {msg}", error=True)
-    sys.exit(1)
-
-
-def log(msg, error=False):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    full_msg = f"{timestamp} {msg}"
-    log_path = Path(LOG_FILE)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "a") as f:
-        f.write(full_msg + "\n")
-    print(full_msg, file=sys.stderr if error else sys.stdout)
-
-
-def validate_space_availability(config: Config, subjects_to_process: List[str], task: str) -> bool:
-    """Validate that the specified SPACE exists in fMRIPrep derivatives for the given subjects and task"""
-    log_debug(f"Validating SPACE '{config.SPACE}' for task '{task}'")
-    
-    found_subjects = []
-    missing_subjects = []
-    available_spaces = set()
-    
-    for subject_label in subjects_to_process:
-        subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
-        if not subject_dir.is_dir():
-            missing_subjects.append(subject_label)
-            continue
-            
-        # Look for BOLD files with the specified task
-        pattern = f"sub-{subject_label}_*task-{task}_*space-*_desc-preproc_bold.nii.gz"
-        bold_files = list(subject_dir.rglob(pattern))
-        
-        # Extract available spaces for this subject/task
-        subject_spaces = set()
-        space_found = False
-        
-        for bold_file in bold_files:
-            # Extract space from filename using regex
-            space_match = re.search(r'space-([^_]+)', bold_file.name)
-            if space_match:
-                space_name = space_match.group(1)
-                subject_spaces.add(space_name)
-                available_spaces.add(space_name)
-                
-                if space_name == config.SPACE:
-                    space_found = True
-        
-        if space_found:
-            found_subjects.append(subject_label)
-            log_debug(f"Subject {subject_label}: SPACE '{config.SPACE}' found")
-        else:
-            missing_subjects.append(subject_label)
-            if subject_spaces:
-                log_debug(f"Subject {subject_label}: SPACE '{config.SPACE}' NOT found. Available spaces: {sorted(subject_spaces)}")
-            else:
-                log_debug(f"Subject {subject_label}: No BOLD files found for task '{task}'")
-    
-    # Report results
-    if missing_subjects:
-        print("❌ SPACE validation failed!")
-        print(f"   Specified SPACE: '{config.SPACE}'")
-        print(f"   Task: '{task}'")
-        print(f"   Subjects missing SPACE '{config.SPACE}': {missing_subjects}")
-        if available_spaces:
-            print(f"   Available spaces found: {sorted(available_spaces)}")
-            print("   💡 Suggestion: Update SPACE in config/config.json to one of the available spaces")
-        else:
-            print(f"   ⚠️  No BOLD files found for task '{task}' in any subject")
-        return False
-    
-    print(f"✅ SPACE validation passed: '{config.SPACE}' found for all {len(found_subjects)} subjects")
-    return True
-
-
-def check_command(cmd):
-    if not shutil.which(cmd):
-        log_error(f"'{cmd}' is required but not installed or in PATH.")
-
-
-def check_docker_availability():
-    """Check if Docker is installed and running."""
-    # First check if docker command exists
-    if not shutil.which("docker"):
-        log_error("Docker is required but not installed or in PATH.")
-    
-    # Check if Docker daemon is running
-    try:
-        result = subprocess.run(["docker", "info"], 
-                              capture_output=True, text=True, timeout=10)
-        if result.returncode != 0:
-            log_error("Docker is installed but not running. Please start Docker and try again.")
-    except subprocess.TimeoutExpired:
-        log_error("Docker command timed out. Docker daemon may not be running.")
-    except Exception as e:
-        log_error(f"Failed to check Docker status: {e}")
-
-
-def run_command(cmd_list, capture_output=False):
-    log_debug(f"Running command: {' '.join(cmd_list)}")
-    
-    try:
-        result = subprocess.run(cmd_list, check=True, text=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        if capture_output:
-            log(result.stdout)
-        else:
-            # If not capturing for internal use, still print to stdout so it shows in logs
-            print(result.stdout)
-        return True  # Success
-    except subprocess.CalledProcessError as e:
-        log_error_non_fatal(f"Command failed with exit code {e.returncode}: {' '.join(cmd_list)}")
-        if e.stdout:
-            print(f"Command output:\n{e.stdout}")
-            # Also log to file explicitly
-            log(f"Command failed output:\n{e.stdout}")
-        return False  # Failure
-
-
-def log_error_non_fatal(msg):
-    """Log non-fatal error that doesn't stop execution"""
-    print(f"⚠️  {msg}", file=sys.stderr)
 
 
 def check_local_bidspm_installation():
@@ -1035,13 +722,8 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         runtime_bind_path = "/opt/bidspm_runtime"
         
         octave_wrapper_content = f"""#!/bin/bash
-# Octave wrapper to ensure BIDSPM paths are available
+# Octave wrapper to ensure BIDSPM paths are available before any octave execution
 export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12:$MATLABPATH"
-
-# Copy atlas functions to tmp to fix path resolution issues
-mkdir -p /tmp/atlas_functions 2>/dev/null || true
-cp /home/neuro/bidspm/lib/CPP_ROI/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
-cp /home/neuro/bidspm/lib/CPP_ROI/src/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
 
 # Find the real octave executable (prefer octave over octave-cli)
 if [ -f /usr/bin/octave ]; then 
@@ -1054,8 +736,14 @@ else
     REAL_OCTAVE=octave
 fi
 
-# Just pass through all arguments - let bidspm handle initialization
-exec "$REAL_OCTAVE" "$@"
+# Create a startup file that adds all bidspm paths
+OCTAVE_INIT="/tmp/octave_init_$$.m"
+cat > "$OCTAVE_INIT" << 'EOF'
+addpath(genpath('/home/neuro/bidspm'));
+EOF
+
+# Execute octave with the initialization file prepended to any user commands
+exec "$REAL_OCTAVE" --eval "run('$OCTAVE_INIT');" "$@"
 """
         
         with open(octave_wrapper, 'w') as f:
@@ -1100,7 +788,7 @@ exec "$REAL_OCTAVE" "$@"
             "--env", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
             "--env", "BIDSPM_SKIP_ATLAS_INIT=1",  # Try to skip problematic atlas initialization
             "--env", f"OCTAVE_EXECUTABLE={runtime_bind_path}/octave",  # Use our custom Octave wrapper
-            "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
+            "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm12",  # Include src and src/atlas directories
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
             "--env", "CPP_ROI_SKIP_ATLAS_INIT=1",  # Additional skip flag
             "--env", "CPP_ROI_ATLAS_SKIP=1",  # Another possible skip flag
@@ -1117,7 +805,7 @@ exec "$REAL_OCTAVE" "$@"
         quoted_args = " ".join(shlex.quote(str(arg)) for arg in args)
         
         # PATH must include:
-        # 1. runtime_bind_path (for our custom 'octave' wrapper)
+        # 1. runtime_bind_path (for our custom 'octave' wrapper with path pre-init)
         # 2. /usr/local/bin (where 'bidspm' executable lives)
         # 3. /usr/bin, /bin (standard system tools)
         shell_cmd = f"export PATH={runtime_bind_path}:/usr/local/bin:/usr/bin:/bin; exec bidspm {quoted_args}"
