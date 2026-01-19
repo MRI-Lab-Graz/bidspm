@@ -234,7 +234,7 @@ def load_config_file():
             "WD": "", "BIDS_DIR": "", "DERIVATIVES_DIR": "", "FMRIPREP_DIR": "",
             "SPACE": "MNI152NLin2009cAsym", "FWHM": 6, "MODELS_FILE": "models/model-001_sct.json",
             "TASKS": ["taskname"], "VERBOSITY": 3,
-            "container_type": "docker", "docker_image": "", "apptainer_image": ""
+            "container_type": "local", "docker_image": "", "apptainer_image": ""
         })
     with open(path, 'r') as f:
         return jsonify(json.load(f))
@@ -290,7 +290,7 @@ def load_container_file():
     path = request.args.get('path', 'containers/container.json')
     if not os.path.exists(path):
         return jsonify({
-            "container_type": "docker",
+            "container_type": "local",
             "docker_image": "bidspm/bidspm:latest",
             "apptainer_image": ""
         })

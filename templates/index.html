@@ -198,7 +198,7 @@
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
                                             <div class="d-flex gap-4 mb-3">
                                                 <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" checked>
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker">
                                                     <label class="form-check-label" for="type-docker">Docker</label>
                                                 </div>
                                                 <div class="form-check">
@@ -206,7 +206,7 @@
                                                     <label class="form-check-label" for="type-apptainer">Apptainer</label>
                                                 </div>
                                                 <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local">
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" checked>
                                                     <label class="form-check-label" for="type-local">Local (No Container)</label>
                                                 </div>
                                             </div>
@@ -330,7 +330,7 @@ Ready for command.</div>
     // --- FORM DATA HANDLERS ---
     function getFullFormData() {
         const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
-        const containerType = document.querySelector('input[name="container_type"]:checked').value;
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
         return {
             actions: actions,
             model: document.getElementById('model').value,
@@ -464,7 +464,7 @@ Ready for command.</div>
         }
 
         // Container info
-        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'docker';
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
         unifiedStudyConfig.container_type = containerType;
         
         unifiedStudyConfig.docker_image = document.getElementById('input-docker_image').value;
@@ -493,13 +493,20 @@ Ready for command.</div>
             }
         }
         
-        // Container info
-        const type = unifiedStudyConfig.container_type || 'docker';
+        // Container info - ensure we read from the loaded config
+        const type = unifiedStudyConfig.container_type || 'local';
+        console.log('Loading container_type:', type, 'from config:', unifiedStudyConfig);
         const radio = document.getElementById(`type-${type}`);
         if (radio) {
+            console.log('Setting radio button:', radio.id, 'to checked');
             radio.checked = true;
-            // Trigger change event to update UI state (the event handler will toggle classes)
-            radio.dispatchEvent(new Event('change'));
+            // Manually trigger UI updates instead of relying on event
+            document.getElementById('docker-options').classList.toggle('d-none', type !== 'docker');
+            document.getElementById('apptainer-options').classList.toggle('d-none', type !== 'apptainer');
+            // Now trigger the event to update internal state
+            updateInternalState();
+        } else {
+            console.error('Radio button not found for type:', type);
         }
         document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
         document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';

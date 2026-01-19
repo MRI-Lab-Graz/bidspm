@@ -1007,6 +1007,7 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         cmd = [
             "apptainer", "exec",
             "--writable-tmpfs",  # Allow writing to /tmp and other temp locations
+            "--no-home",  # Don't bind home directory (avoid permission issues)
             "--bind", f"{config.BIDS_DIR}:/raw",
             "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
         ]
@@ -1037,39 +1038,24 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
 # Octave wrapper to ensure BIDSPM paths are available
 export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12:$MATLABPATH"
 
-# Copy ALL the atlas-related functions to tmp to fix path resolution issues
-# /tmp should be writable due to --writable-tmpfs
-mkdir -p /tmp/atlas_functions
+# Copy atlas functions to tmp to fix path resolution issues
+mkdir -p /tmp/atlas_functions 2>/dev/null || true
 cp /home/neuro/bidspm/lib/CPP_ROI/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
 cp /home/neuro/bidspm/lib/CPP_ROI/src/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
 
-# Create init file to add paths and fix function resolution
-cat > /tmp/octave_init_runtime.m << 'EOF'
-% Runtime Octave initialization for BIDSPM
-warning('off', 'all');
-addpath('/tmp/atlas_functions');  % Add copied functions first
-addpath('/tmp');  
-addpath('{runtime_bind_path}');   % Add runtime path
-addpath('/home/neuro/bidspm');
-addpath('/home/neuro/bidspm/lib/CPP_ROI');
-addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
-addpath('/home/neuro/bidspm/lib/CPP_ROI/src');
-addpath('/home/neuro/bidspm/lib/CPP_ROI/src/atlas');
-addpath('/opt/spm12');
-fprintf('Runtime paths added with atlas functions copied\\n');
-EOF
-
-# Find the real octave executable (avoiding this script)
-REAL_OCTAVE=$(which octave 2>/dev/null)
-if [[ "$REAL_OCTAVE" == "{runtime_bind_path}/octave" ]] || [[ "$REAL_OCTAVE" == "/tmp/octave" ]] || [[ -z "$REAL_OCTAVE" ]]; then
-    # Try common locations if 'which' returned us or nothing
-    if [ -f /usr/bin/octave ]; then REAL_OCTAVE=/usr/bin/octave;
-    elif [ -f /usr/local/bin/octave ]; then REAL_OCTAVE=/usr/local/bin/octave;
-    else REAL_OCTAVE=octave; fi
+# Find the real octave executable (prefer octave over octave-cli)
+if [ -f /usr/bin/octave ]; then 
+    REAL_OCTAVE=/usr/bin/octave
+elif [ -f /usr/local/bin/octave ]; then 
+    REAL_OCTAVE=/usr/local/bin/octave
+elif [ -f /usr/bin/octave-cli ]; then 
+    REAL_OCTAVE=/usr/bin/octave-cli
+else 
+    REAL_OCTAVE=octave
 fi
 
-# Run octave with the init file
-exec "$REAL_OCTAVE" --init-file /tmp/octave_init_runtime.m "$@"
+# Just pass through all arguments - let bidspm handle initialization
+exec "$REAL_OCTAVE" "$@"
 """
         
         with open(octave_wrapper, 'w') as f:
@@ -1108,8 +1094,6 @@ exec "$REAL_OCTAVE" --init-file /tmp/octave_init_runtime.m "$@"
         
         # Set important environment variables for the container
         cmd.extend([
-            "--env", "HOME=/tmp",  # Set HOME to tmp directory
-            # "--env", f"PATH={runtime_bind_path}:$PATH", # REMOVED: potentially dangerous with literal expansion
             "--env", "TMPDIR=/tmp",  # Set TMPDIR
             "--env", "TMP=/tmp",     # Set TMP
             "--env", "MATLAB_LOG_DIR=/tmp",  # MATLAB logs to tmp
