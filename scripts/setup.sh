@@ -877,8 +877,8 @@ install_dependencies() {
     # Install dependencies from build/pyproject.toml using UV with the virtual environment
     if [ -f "build/pyproject.toml" ]; then
         # Install dependencies specified in pyproject.toml
-        print_status "Installing dependencies: requests, jsonschema..."
-        ./build/uv pip install --python .bidspm/bin/python requests jsonschema
+        print_status "Installing dependencies: requests, jsonschema, flask, waitress, flask-socketio, eventlet..."
+        ./build/uv pip install --python .bidspm/bin/python requests jsonschema flask waitress flask-socketio eventlet
         print_success "Dependencies installed successfully"
     else
         print_error "build/pyproject.toml not found in current directory"

@@ -947,22 +947,32 @@ def build_container_command(container_config: ContainerConfig, config: Config, a
         run_tmp_dir.mkdir(parents=True, exist_ok=True)
         
         # Create a custom Octave wrapper script in the tmp directory
-        octave_wrapper = run_tmp_dir / "octave_wrapper.sh"
+        # Create a custom Octave wrapper script in the tmp directory
+        # Named 'octave' so it can be picked up if /tmp is in PATH
+        octave_wrapper = run_tmp_dir / "octave"
+        
+        # We bind the wrapper to a dedicated path in the container to avoid binding /tmp
+        # This allows --writable-tmpfs to function correctly
+        runtime_bind_path = "/opt/bidspm_runtime"
+        
         octave_wrapper_content = f"""#!/bin/bash
 # Octave wrapper to ensure BIDSPM paths are available
 export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12:$MATLABPATH"
 
 # Copy ALL the atlas-related functions to tmp to fix path resolution issues
+# /tmp should be writable due to --writable-tmpfs
 mkdir -p /tmp/atlas_functions
 cp /home/neuro/bidspm/lib/CPP_ROI/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
 cp /home/neuro/bidspm/lib/CPP_ROI/src/atlas/*.m /tmp/atlas_functions/ 2>/dev/null || true
 
 # Create init file to add paths and fix function resolution
+# Write to /tmp which is writable
 cat > /tmp/octave_init_runtime.m << 'EOF'
 % Runtime Octave initialization for BIDSPM
 warning('off', 'all');
 addpath('/tmp/atlas_functions');  % Add copied functions first
 addpath('/tmp');  
+addpath('{runtime_bind_path}');   % Add runtime path
 addpath('/home/neuro/bidspm');
 addpath('/home/neuro/bidspm/lib/CPP_ROI');
 addpath('/home/neuro/bidspm/lib/CPP_ROI/atlas');
@@ -972,15 +982,25 @@ addpath('/opt/spm12');
 fprintf('Runtime paths added with atlas functions copied\\n');
 EOF
 
+# Find the real octave executable (avoiding this script)
+REAL_OCTAVE=$(which octave 2>/dev/null)
+if [[ "$REAL_OCTAVE" == "{runtime_bind_path}/octave" ]] || [[ "$REAL_OCTAVE" == "/tmp/octave" ]] || [[ -z "$REAL_OCTAVE" ]]; then
+    # Try common locations if 'which' returned us or nothing
+    if [ -f /usr/bin/octave ]; then REAL_OCTAVE=/usr/bin/octave;
+    elif [ -f /usr/local/bin/octave ]; then REAL_OCTAVE=/usr/local/bin/octave;
+    else REAL_OCTAVE=octave; fi
+fi
+
 # Run octave with the init file
-exec /usr/bin/octave --init-file /tmp/octave_init_runtime.m "$@"
+exec "$REAL_OCTAVE" --init-file /tmp/octave_init_runtime.m "$@"
 """
         
         with open(octave_wrapper, 'w') as f:
             f.write(octave_wrapper_content)
         octave_wrapper.chmod(0o755)
         
-        cmd.extend(["--bind", f"{run_tmp_dir}:/tmp"])
+        # Bind the runtime directory to a distinct location, NOT /tmp
+        cmd.extend(["--bind", f"{run_tmp_dir}:{runtime_bind_path}"])
         
         # Add additional bind mounts for writable directories to solve "Read-only file system" issues
         atlas_dir = config.WD / "atlas"
@@ -1004,15 +1024,19 @@ exec /usr/bin/octave --init-file /tmp/octave_init_runtime.m "$@"
             "--bind", f"{matlab_cache_dir}:/home/neuro/.matlab"  # MATLAB cache
         ])
         
+        # Prepend the runtime path to PATH using APPTAINERENV_PREPEND_PATH
+        prefix_cmd = ["env", f"APPTAINERENV_PREPEND_PATH={runtime_bind_path}"]
+
         # Set important environment variables for the container
         cmd.extend([
             "--env", "HOME=/tmp",  # Set HOME to tmp directory
+            # "--env", f"PATH={runtime_bind_path}:$PATH", # REMOVED: potentially dangerous with literal expansion
             "--env", "TMPDIR=/tmp",  # Set TMPDIR
             "--env", "TMP=/tmp",     # Set TMP
             "--env", "MATLAB_LOG_DIR=/tmp",  # MATLAB logs to tmp
             "--env", "SPM_HTML_BROWSER=0",   # Disable SPM browser for headless operation
             "--env", "BIDSPM_SKIP_ATLAS_INIT=1",  # Try to skip problematic atlas initialization
-            "--env", "OCTAVE_EXECUTABLE=/tmp/octave_wrapper.sh",  # Use our custom Octave wrapper
+            "--env", f"OCTAVE_EXECUTABLE={runtime_bind_path}/octave",  # Use our custom Octave wrapper
             "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/opt/spm12",  # Explicit MATLAB path with atlas directory
             "--env", "CPP_ROI_SKIP_ATLAS=1",  # Skip CPP_ROI atlas operations if supported
             "--env", "CPP_ROI_SKIP_ATLAS_INIT=1",  # Additional skip flag
@@ -1025,6 +1049,10 @@ exec /usr/bin/octave --init-file /tmp/octave_init_runtime.m "$@"
 
         cmd.append(container_config.apptainer_image)
         cmd.extend(args)
+        
+        # Prepend the env command
+        cmd = prefix_cmd + cmd
+
         return cmd, model_container_path
     
     else:
@@ -1261,11 +1289,11 @@ def main():
         print("\nPlease check and fix the JSON syntax errors.")
         sys.exit(1)
 
-    # Validate config.json against schema (if jsonschema is available)
+    # Validate config file against schema (if jsonschema is available)
     try:
         if not JSONValidator.validate_with_schema(config_file, "config/config_schema.json"):
-            print("❌ config/config.json does not match the required schema (config/config_schema.json)!")
-            print("   Please check your config/config.json and compare it to config/config_schema.json.")
+            print(f"❌ {config_file} does not match the required schema (config/config_schema.json)!")
+            print(f"   Please check your {config_file} and compare it to config/config_schema.json.")
             sys.exit(1)
     except ImportError:
         print("⚠️  Skipping schema validation: jsonschema package is not installed.")
@@ -1301,24 +1329,31 @@ def main():
         log("🔧 Setting up Octave compatibility...")
         setup_octave_compatibility(container_config)
 
+    # Model file is only strictly required if 'stats' is being performed
+    needs_model = 'stats' in args.action
+    
     # Validate MODELS_FILE or -m
-    if not args.model and not config.MODELS_FILE:
-        log_error("No model file specified! Please provide MODELS_FILE in config or use -m.")
+    if needs_model and not args.model and not config.MODELS_FILE:
+        log_error("No model file specified! Please provide MODELS_FILE in config or use -m for 'stats' action.")
 
     # Determine model file path - command line argument overrides config
-    if args.model:
-        model_file_path = Path(args.model)
-        if not model_file_path.is_absolute():
-            # If relative path, make it relative to derivatives directory
-            model_file_path = config.DERIVATIVES_DIR / "models" / model_file_path
-        models_file_name = model_file_path.name
-    else:
-        # If MODELS_FILE is absolute path, use it directly
-        if config.MODELS_FILE and Path(config.MODELS_FILE).is_absolute():
-            model_file_path = Path(config.MODELS_FILE)
-        else:
-            model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
-        models_file_name = model_file_path.name
+    model_file_path = None
+    models_file_name = "unknown"
+    
+    if args.model or config.MODELS_FILE:
+        if args.model:
+            model_file_path = Path(args.model)
+            if not model_file_path.is_absolute():
+                # If relative path, make it relative to derivatives directory
+                model_file_path = config.DERIVATIVES_DIR / "models" / model_file_path
+            models_file_name = model_file_path.name
+        elif config.MODELS_FILE:
+            # If MODELS_FILE is absolute path, use it directly
+            if Path(config.MODELS_FILE).is_absolute():
+                model_file_path = Path(config.MODELS_FILE)
+            else:
+                model_file_path = config.DERIVATIVES_DIR / "models" / config.MODELS_FILE
+            models_file_name = model_file_path.name
 
     # Set up log file with model name and timestamp
     global LOG_FILE
@@ -1329,38 +1364,34 @@ def main():
         log_debug(f"Using container configuration: {container_config_file}")
     else:
         log_debug("Using local BIDSPM execution (no container)")
-    log_debug(f"Using model file: {model_file_path}")
+    
+    if model_file_path:
+        log_debug(f"Using model file: {model_file_path}")
     log_debug(f"Log file: {LOG_FILE}")
     
-    # Handle local execution
-    if args.local:
-        print("🔧 Using local BIDSPM installation...")
-        if not setup_local_environment():
-            log_error("Local BIDSPM environment setup failed. Use containers or run: ./setup.sh --local-install")
-        # Skip container checks for local execution
-    else:
-        # Check container runtime availability
-        if container_config.container_type == "docker":
-            check_docker_availability()
-            log_debug(f"Using Docker with image: {container_config.docker_image}")
-        elif container_config.container_type == "apptainer":
-            check_command("apptainer")
-            log_debug(f"Using Apptainer with image: {container_config.apptainer_image}")
-        
-        # Setup Octave compatibility for older containers (only for container execution)
-        log("🔧 Setting up Octave compatibility...")
-        setup_octave_compatibility(container_config)
+    # Check model file exists if we need it
+    if needs_model:
+        if not model_file_path:
+             log_error("Model file path could not be determined.")
+        if not model_file_path.exists():
+            log_error(f"Model file '{models_file_name}' not found at '{model_file_path}'.")
 
-    if not model_file_path.exists():
-        log_error(f"Model file '{models_file_name}' not found at '{model_file_path}'.")
-
-    if not args.skip_modelvalidation:
-        log_debug("Validating model JSON against BIDS Stats Model schema")
-        venv_python = Path(".bidspm/bin/python")
-        python_cmd = str(venv_python) if venv_python.exists() else "python3"
-        run_command([python_cmd, "docs/validate_bids_model.py", str(model_file_path)], capture_output=True)
+        if not args.skip_modelvalidation:
+            log_debug("Validating model JSON against BIDS Stats Model schema")
+            venv_python = Path(".bidspm/bin/python")
+            python_cmd = str(venv_python) if venv_python.exists() else "python3"
+            run_command([python_cmd, "docs/validate_bids_model.py", str(model_file_path)], capture_output=True)
+        else:
+            print("⚠️  Skipping BIDS-StatsModel JSON validation (--skip-modelvalidation flag used)")
+    elif model_file_path and model_file_path.exists():
+        # Even if not strict, validate if it exists and we're not skipping
+        if not args.skip_modelvalidation:
+            log_debug("Validating model JSON against BIDS Stats Model schema (optional)")
+            venv_python = Path(".bidspm/bin/python")
+            python_cmd = str(venv_python) if venv_python.exists() else "python3"
+            run_command([python_cmd, "docs/validate_bids_model.py", str(model_file_path)], capture_output=True)
     else:
-        print("⚠️  Skipping BIDS-StatsModel JSON validation (--skip-modelvalidation flag used)")
+        log_debug("Skipping model validation (not performing 'stats' action)")
 
     # Path validations
     if not config.WD.is_dir():
@@ -1378,13 +1409,12 @@ def main():
     # Ensure derivatives directory has dataset_description.json to suppress BIDSPM warnings
     ensure_derivatives_dataset_description(config.DERIVATIVES_DIR)
 
-    # Processing loop
-    for task in config.TASKS:
-        print("---------------------------------------------------")
-        print(f">>> Processing task: {task}")
-        print("---------------------------------------------------")
-
-        # Get list of subjects to process
+    try:
+        # ---------------------------------------------------
+        # Determine subjects to process (once for all tasks)
+        # ---------------------------------------------------
+        subjects_to_process = []
+        
         if args.pilot:
             # Pilot mode: use one random subject
             all_subjects = []
@@ -1397,18 +1427,23 @@ def main():
                     if sub_dir.is_dir():
                         subject_label = sub_dir.name.replace("sub-", "")
                         all_subjects.append(subject_label)
+            
             if not all_subjects:
                 log_error("No subjects found for pilot mode.")
-            # Select random subject
+                return 
+                
+            # Select random subject (fixed for all tasks)
             pilot_subject = random.choice(all_subjects)
             subjects_to_process = [pilot_subject]
             log_debug(f"Pilot mode: selected random subject {pilot_subject}")
-            print(f">>> PILOT MODE: Processing random subject: {pilot_subject}")
+            print(f">>> PILOT MODE: Selected random subject: {pilot_subject}")
+            
         elif config.SUBJECTS:
             # Use specific subjects from config
             subjects_to_process = config.SUBJECTS
             log_debug(f"Processing specific subjects: {', '.join(subjects_to_process)}")
             print(f">>> Processing specific subjects: {', '.join(subjects_to_process)}")
+            
         else:
             # Auto-discover all subjects from fmriprep derivatives
             subjects_to_process = []
@@ -1418,207 +1453,218 @@ def main():
                     subjects_to_process.append(subject_label)
             log_debug(f"Auto-discovered subjects: {', '.join(subjects_to_process)}")
             print(f">>> Auto-discovered {len(subjects_to_process)} subjects")
+            
+        if not subjects_to_process:
+            print("❌ No subjects found to process.")
+            return
 
-        # Validate SPACE availability before processing
-        if not validate_space_availability(config, subjects_to_process, task):
-            print(f"⚠️  Skipping task '{task}' due to SPACE validation failure")
-            continue
+        # Processing loop
+        for task in config.TASKS:
+            print("---------------------------------------------------")
+            print(f">>> Processing task: {task}")
+            print("---------------------------------------------------")
 
-        # Process each subject
-        for subject_label in subjects_to_process:
-            # Check if subject directory exists in fmriprep derivatives
-            subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
-            if not subject_dir.is_dir():
-                print(f">>> WARNING: Subject directory not found for {subject_label}, skipping...")
-                log_debug(f"Subject directory not found: {subject_dir}")
+            # Validate SPACE availability before processing
+            if not validate_space_availability(config, subjects_to_process, task):
+                print(f"⚠️  Skipping task '{task}' due to SPACE validation failure")
                 continue
-            log_debug(f"Processing subject: {subject_label}, task: {task}")
 
-
-            # ROI analysis block
-            if hasattr(config, "ROI") and config.ROI:
-                roi_config = config.ROI_CONFIG
-                preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
-                
-                # Check if preproc directory exists
-                if not preproc_dir.exists():
-                    print(f"❌ Preprocessing directory not found: {preproc_dir}")
-                    print("   ROI analysis requires smoothed data. Please run smoothing first using the --action smooth option.")
+            # Process each subject
+            for subject_label in subjects_to_process:
+                # Check if subject directory exists in fmriprep derivatives
+                subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
+                if not subject_dir.is_dir():
+                    print(f">>> WARNING: Subject directory not found for {subject_label}, skipping...")
+                    log_debug(f"Subject directory not found: {subject_dir}")
                     continue
-                
-                # Check for smoothed data for each required space
-                missing_spaces = []
-                for roi_space in roi_config["space"]:
+                log_debug(f"Processing subject: {subject_label}, task: {task}")
+
+                # 1. First, smoothing (if requested)
+                if 'smooth' in args.action:
+                    print(f">>> Smoothing for subject: {subject_label}, task: {task}")
+                    
+                    if args.local:
+                        # Local execution
+                        success = run_local_bidspm(config, "smooth", [subject_label], task, model_file_path)
+                    else:
+                        # Container execution
+                        # Calculate the container path for fmriprep
+                        # If FMRIPREP_DIR is inside DERIVATIVES_DIR, we can use the /derivatives mapping
+                        try:
+                            fmriprep_rel = config.FMRIPREP_DIR.relative_to(config.DERIVATIVES_DIR)
+                            fmriprep_container_path = f"/derivatives/{fmriprep_rel}"
+                        except ValueError:
+                            # Fallback to standard location if not relative
+                            fmriprep_container_path = "/derivatives/fmriprep"
+                            print(f"⚠️  FMRIPREP_DIR ({config.FMRIPREP_DIR}) is not within DERIVATIVES_DIR ({config.DERIVATIVES_DIR})")
+                            print(f"   Using default container path: {fmriprep_container_path}")
+                        
+                        smooth_args = [
+                            fmriprep_container_path, "/derivatives", "subject", "smooth",
+                            "--participant_label", subject_label,
+                            "--task", task,
+                            "--space", config.SPACE,
+                            "--fwhm", str(config.FWHM),
+                            "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
+                        ]
+                        cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
+                        log_debug(f"Full container command: {' '.join(cmd)}")
+                        success = run_command(cmd)
+                    
+                    if not success:
+                        print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
+                        log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
+                    else:
+                        print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
+
+                # 2. ROI analysis block
+                if hasattr(config, "ROI") and config.ROI:
+                    roi_config = config.ROI_CONFIG
+                    preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
+                    
+                    # Check if preproc directory exists
+                    if not preproc_dir.exists():
+                        print(f"❌ Preprocessing directory not found: {preproc_dir}")
+                        print("   ROI analysis requires smoothed data. Please run smoothing first using the --action smooth option.")
+                    else:
+                        # Check for smoothed data for each required space
+                        missing_spaces = []
+                        for roi_space in roi_config["space"]:
+                            found = False
+                            for ses_dir in (preproc_dir.glob(f"sub-{subject_label}/ses-*/func") if (preproc_dir / f"sub-{subject_label}").exists() else []):
+                                if any(ses_dir.glob(f"*_space-{roi_space}*.nii*")):
+                                    found = True
+                                    break
+                            if not found:
+                                missing_spaces.append(roi_space)
+                        if missing_spaces:
+                            print(f"❌ Smoothed data for ROI space(s) {missing_spaces} not found in {preproc_dir}.")
+                            print(f"   Please run smoothing for space(s) {missing_spaces} first using the --action smooth option and update 'SPACE' in config if needed.")
+                        else:
+                            # Create ROI
+                            roi_args = [
+                                "/raw", "/derivatives", "subject", "create_roi",
+                                "--participant_label", subject_label,
+                                "--preproc_dir", "/derivatives/bidspm-preproc",
+                                "--roi_atlas", roi_config["roi_atlas"],
+                                "--roi_name"
+                            ]
+                            # Add each ROI name as a separate argument
+                            roi_args.extend(roi_config["roi_name"])
+                            roi_args.extend(["--space", ",".join(roi_config["space"])])
+                            cmd, _ = build_container_command(container_config, config, roi_args, model_file_path)
+                            success = run_command(cmd)
+                            if not success:
+                                print(f"⚠️  ROI creation failed for subject {subject_label}, task {task}.")
+                            else:
+                                # Run ROI-based GLM
+                                temp_args = []
+                                _, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                                stats_args = [
+                                    "/raw", "/derivatives", "subject", "stats",
+                                    "--participant_label", subject_label,
+                                    "--preproc_dir", "/derivatives/bidspm-preproc",
+                                    "--model_file", model_container_path,
+                                    "--roi_based",
+                                    "--roi_name"
+                                ]
+                                # Add each ROI name as a separate argument  
+                                stats_args.extend(roi_config["roi_name"])
+                                stats_args.extend([
+                                    "--roi_dir", "/derivatives/bidspm-roi",
+                                    "--space", ",".join(roi_config["space"]),
+                                    "--fwhm", "0"
+                                ])
+                                cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
+                                success = run_command(cmd)
+                                if not success:
+                                    print(f"⚠️  ROI stats failed for subject {subject_label}, task {task}.")
+                                else:
+                                    print(f"✅ ROI stats completed for subject {subject_label}, task {task}")
+
+                # 3. Check for smoothed data for main SPACE before stats
+                if 'stats' in args.action:
+                    main_space = config.SPACE
                     found = False
+                    preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
                     for ses_dir in (preproc_dir.glob(f"sub-{subject_label}/ses-*/func") if (preproc_dir / f"sub-{subject_label}").exists() else []):
-                        if any(ses_dir.glob(f"*_space-{roi_space}*.nii*")):
+                        if any(ses_dir.glob(f"*_space-{main_space}*.nii*")):
                             found = True
                             break
                     if not found:
-                        missing_spaces.append(roi_space)
-                if missing_spaces:
-                    print(f"❌ Smoothed data for ROI space(s) {missing_spaces} not found in {preproc_dir}.")
-                    print(f"   Please run smoothing for space(s) {missing_spaces} first using the --action smooth option and update 'SPACE' in config if needed.")
-                    continue
+                        print(f"❌ Smoothed data for main SPACE '{main_space}' not found in {preproc_dir}. Run smoothing first!")
+                    else:
+                        print(f">>> Running stats for subject: {subject_label}, task: {task}")
+                        
+                        if args.local:
+                            # Local execution
+                            success = run_local_bidspm(config, "stats", [subject_label], task, model_file_path)
+                        else:
+                            # Container execution
+                            # First build container command to get the correct model file path
+                            temp_args = []
+                            cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
+                            stats_args = [
+                                "/raw", "/derivatives", "subject", "stats",
+                                "--participant_label", subject_label,
+                                "--task", task,
+                                "--space", config.SPACE,
+                                "--preproc_dir", "/derivatives/bidspm-preproc",
+                                "--model_file", model_container_path,
+                                "--fwhm", str(config.FWHM),
+                                "--verbosity", str(config.VERBOSITY)
+                            ]
+                            cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
+                            success = run_command(cmd)
+                        
+                        if not success:
+                            print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
+                            log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
+                        else:
+                            print(f"✅ Stats completed for subject {subject_label}, task {task}")
 
-                # Create ROI
-                roi_args = [
-                    "/raw", "/derivatives", "subject", "create_roi",
-                    "--participant_label", subject_label,
-                    "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--roi_atlas", roi_config["roi_atlas"],
-                    "--roi_name"
-                ]
-                # Add each ROI name as a separate argument
-                roi_args.extend(roi_config["roi_name"])
-                roi_args.extend(["--space", ",".join(roi_config["space"])])
-                cmd, _ = build_container_command(container_config, config, roi_args, model_file_path)
-                success = run_command(cmd)
-                if not success:
-                    print(f"⚠️  ROI creation failed for subject {subject_label}, task {task}.")
-                    continue
-
-                # Run ROI-based GLM
-                # roi_dir is no longer needed
-                temp_args = []
-                _, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
-                stats_args = [
-                    "/raw", "/derivatives", "subject", "stats",
-                    "--participant_label", subject_label,
-                    "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--model_file", model_container_path,
-                    "--roi_based",
-                    "--roi_name"
-                ]
-                # Add each ROI name as a separate argument  
-                stats_args.extend(roi_config["roi_name"])
-                stats_args.extend([
-                    "--roi_dir", "/derivatives/bidspm-roi",
-                    "--space", ",".join(roi_config["space"]),
-                    "--fwhm", "0"
-                ])
-                cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
-                success = run_command(cmd)
-                if not success:
-                    print(f"⚠️  ROI stats failed for subject {subject_label}, task {task}.")
-                else:
-                    print(f"✅ ROI stats completed for subject {subject_label}, task {task}")
-
-            # Check for smoothed data for main SPACE before stats
-            if 'stats' in args.action:
-                main_space = config.SPACE
-                found = False
-                preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
-                for ses_dir in (preproc_dir.glob(f"sub-{subject_label}/ses-*/func") if (preproc_dir / f"sub-{subject_label}").exists() else []):
-                    if any(ses_dir.glob(f"*_space-{main_space}*.nii*")):
-                        found = True
-                        break
-                if not found:
-                    print(f"❌ Smoothed data for main SPACE '{main_space}' not found in {preproc_dir}. Run smoothing first!")
-                    continue
-
-            if 'smooth' in args.action:
-                print(f">>> Smoothing for subject: {subject_label}, task: {task}")
+            if 'dataset' in args.action:
+                print(f">>> Running stats on dataset: task: {task}")
                 
                 if args.local:
-                    # Local execution
-                    success = run_local_bidspm(config, "smooth", [subject_label], task, model_file_path)
-                else:
-                    # Container execution
-                    # For smoothing, use the original fMRIPrep directory, not bidspm-preproc
-                    # BIDSPM needs access to the raw fMRIPrep output for smoothing
-                    fmriprep_source = config.DERIVATIVES_DIR / "fmriprep"
-                    if not fmriprep_source.exists():
-                        print(f"⚠️  fMRIPrep directory not found at {fmriprep_source}")
-                        print(f"   Current FMRIPREP_DIR setting: {config.FMRIPREP_DIR}")
-                        print("   For smoothing, BIDSPM needs the original fMRIPrep output")
+                    # Local execution - run for all subjects at dataset level
+                    all_subjects = []
+                    if config.SUBJECTS:
+                        all_subjects = config.SUBJECTS
+                    else:
+                        # Auto-discover all subjects
+                        for sub_dir in config.FMRIPREP_DIR.glob("sub-*"):
+                            if sub_dir.is_dir():
+                                subject_label = sub_dir.name.replace("sub-", "")
+                                all_subjects.append(subject_label)
                     
-                    smooth_args = [
-                        "/derivatives/fmriprep", "/derivatives", "subject", "smooth",
-                        "--participant_label", subject_label,
-                        "--task", task,
-                        "--space", config.SPACE,
-                        "--fwhm", str(config.FWHM),
-                        "--verbosity", str(max(0, config.VERBOSITY - 1))  # Reduce verbosity to minimize warnings
-                    ]
-                    cmd, _ = build_container_command(container_config, config, smooth_args, model_file_path)
-                    log_debug(f"Full container command: {' '.join(cmd)}")
-                    success = run_command(cmd)
-                
-                if not success:
-                    print(f"⚠️  Smoothing failed for subject {subject_label}, task {task}. Continuing with next step.")
-                    log_error_non_fatal(f"Smoothing failed for subject {subject_label}, task {task}")
-                else:
-                    print(f"✅ Smoothing completed for subject {subject_label}, task {task}")
-
-            if 'stats' in args.action:
-                print(f">>> Running stats for subject: {subject_label}, task: {task}")
-                
-                if args.local:
-                    # Local execution
-                    success = run_local_bidspm(config, "stats", [subject_label], task, model_file_path)
+                    success = run_local_bidspm(config, "dataset", all_subjects, task, model_file_path)
                 else:
                     # Container execution
                     # First build container command to get the correct model file path
                     temp_args = []
                     cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
-                    stats_args = [
-                        "/raw", "/derivatives", "subject", "stats",
+                    dataset_args = [
+                        "/raw", "/derivatives", "dataset", "stats",
                         "--preproc_dir", "/derivatives/bidspm-preproc",
                         "--model_file", model_container_path,
-                        "--participant_label", subject_label,
                         "--task", task,
                         "--space", config.SPACE,
                         "--fwhm", str(config.FWHM),
                         "--verbosity", str(config.VERBOSITY)
                     ]
-                    cmd, _ = build_container_command(container_config, config, stats_args, model_file_path)
+                    cmd, _ = build_container_command(container_config, config, dataset_args, model_file_path)
                     success = run_command(cmd)
                 
                 if not success:
-                    print(f"⚠️  Stats failed for subject {subject_label}, task {task}. Continuing with next step.")
-                    log_error_non_fatal(f"Stats failed for subject {subject_label}, task {task}")
+                    print(f"⚠️  Dataset stats failed for task {task}. Check logs for details.")
+                    log_error_non_fatal(f"Dataset stats failed for task {task}")
                 else:
-                    print(f"✅ Stats completed for subject {subject_label}, task {task}")
+                    print(f"✅ Dataset stats completed for task {task}")
 
-        if 'dataset' in args.action:
-            print(f">>> Running stats on dataset: task: {task}")
-            
-            if args.local:
-                # Local execution - run for all subjects at dataset level
-                all_subjects = []
-                if config.SUBJECTS:
-                    all_subjects = config.SUBJECTS
-                else:
-                    # Auto-discover all subjects
-                    for sub_dir in config.FMRIPREP_DIR.glob("sub-*"):
-                        if sub_dir.is_dir():
-                            subject_label = sub_dir.name.replace("sub-", "")
-                            all_subjects.append(subject_label)
-                
-                success = run_local_bidspm(config, "dataset", all_subjects, task, model_file_path)
-            else:
-                # Container execution
-                # First build container command to get the correct model file path
-                temp_args = []
-                cmd, model_container_path = build_container_command(container_config, config, temp_args, model_file_path)
-                dataset_args = [
-                    "/raw", "/derivatives", "dataset", "stats",
-                    "--preproc_dir", "/derivatives/bidspm-preproc",
-                    "--model_file", model_container_path,
-                    "--task", task,
-                    "--space", config.SPACE,
-                    "--fwhm", str(config.FWHM),
-                    "--verbosity", str(config.VERBOSITY)
-                ]
-                cmd, _ = build_container_command(container_config, config, dataset_args, model_file_path)
-                success = run_command(cmd)
-            
-            if not success:
-                print(f"⚠️  Dataset stats failed for task {task}. Check logs for details.")
-                log_error_non_fatal(f"Dataset stats failed for task {task}")
-            else:
-                print(f"✅ Dataset stats completed for task {task}")
+    except KeyboardInterrupt:
+        print("\n\n🛑 Process interrupted by user. Exiting...")
+        sys.exit(1)
 
     # Clean up old temporary directories
     cleanup_tmp_directories(config)

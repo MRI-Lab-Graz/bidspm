@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "required": [
-    "WD", "BIDS_DIR", "DERIVATIVES_DIR", "FMRIPREP_DIR", "SPACE", "FWHM", "MODELS_FILE", "TASKS"
+    "WD", "BIDS_DIR", "DERIVATIVES_DIR", "FMRIPREP_DIR", "SPACE", "FWHM", "TASKS"
   ],
   "properties": {
     "WD": {"type": "string"},
@@ -22,6 +22,9 @@
       "type": "array",
       "items": {"type": "string"}
     },
+    "container_type": {"type": "string", "enum": ["docker", "apptainer", "local"]},
+    "docker_image": {"type": "string"},
+    "apptainer_image": {"type": "string"},
     "ROI": {"type": "boolean"},
     "ROI_CONFIG": {
       "type": "object",
@@ -39,5 +42,5 @@
       "required": ["roi_atlas", "roi_name", "space"]
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
