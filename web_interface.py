@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 import signal
+import re
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from waitress import serve
 
@@ -131,7 +132,10 @@ def stream_output(execution_id):
         idx = 0
         while True:
             if idx < len(executions[execution_id]['output']):
-                line = executions[execution_id]['output'][idx].rstrip("\n")
+                line = executions[execution_id]['output'][idx]
+                # Strip control characters/backspaces to keep terminal view readable
+                line = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', line)
+                line = line.rstrip("\n")
                 yield f"data: {line}\n\n"
                 idx += 1
             elif executions[execution_id]['finished']:
@@ -149,11 +153,24 @@ def stop_execution():
         if not exec_info['finished'] and exec_info['process']:
             # Send SIGINT to the process group to ensure children (like containers) are stopped
             try:
-                os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGINT)
-                # Successive signals if it doesn't stop immediately
-                time.sleep(1)
-                if not exec_info['finished']:
-                    os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGTERM)
+                # Check if process is still running
+                if exec_info['process'].poll() is None:
+                    try:
+                        os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGINT)
+                        time.sleep(1)
+                        # If still running, escalate to SIGTERM
+                        if exec_info['process'].poll() is None:
+                            os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGTERM)
+                            time.sleep(0.5)
+                    except ProcessLookupError:
+                        # Process already terminated
+                        pass
+                    except Exception as e:
+                        print(f"Error with killpg, trying terminate: {e}")
+                        exec_info['process'].terminate()
+                        time.sleep(0.5)
+                        if exec_info['process'].poll() is None:
+                            exec_info['process'].kill()
             except Exception as e:
                 print(f"Error stopping process: {e}")
                 try:
@@ -161,7 +178,8 @@ def stop_execution():
                 except:
                     pass
             
-            exec_info['output'].append("\n--- Execution stopped by user (SIGINT) ---\n")
+            exec_info['output'].append("\n--- Execution stopped by user ---\n")
+            exec_info['finished'] = True
             return jsonify({"status": "stopped"})
     return jsonify({"status": "no process running"})
 

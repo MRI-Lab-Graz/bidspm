@@ -498,8 +498,8 @@ Ready for command.</div>
         const radio = document.getElementById(`type-${type}`);
         if (radio) {
             radio.checked = true;
-            document.getElementById('docker-options').classList.toggle('d-none', type !== 'docker');
-            document.getElementById('apptainer-options').classList.toggle('d-none', type !== 'apptainer');
+            // Trigger change event to update UI state (the event handler will toggle classes)
+            radio.dispatchEvent(new Event('change'));
         }
         document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
         document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';
@@ -746,7 +746,8 @@ Ready for command.</div>
         if (eventSource) eventSource.close();
         eventSource = new EventSource(`/stream/${result.execution_id}`);
         eventSource.onmessage = e => {
-            terminal.innerText += e.data;
+            // Ensure each streamed line lands on its own line for readability
+            terminal.innerText += e.data + '\n';
             terminal.scrollTop = terminal.scrollHeight;
             if (e.data.includes('Process finished') || e.data.includes('Execution stopped')) resetStatus();
         };

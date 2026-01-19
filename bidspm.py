@@ -83,6 +83,7 @@ def load_config(config_file: str) -> Config:
     derivatives_dir = Path(data["DERIVATIVES_DIR"])
     fmriprep_dir = Path(data["FMRIPREP_DIR"])
     verbosity = data.get("VERBOSITY", 3)
+    container_type = str(data.get("container_type", "docker")).lower()
 
     return Config(
         WD=wd,
@@ -98,7 +99,7 @@ def load_config(config_file: str) -> Config:
         ROI=data.get("ROI"),
         ROI_CONFIG=data.get("ROI_CONFIG"),
         SKIP_VALIDATION=data.get("skip_validation", False),
-        CONTAINER_TYPE=data.get("container_type", "docker")
+        CONTAINER_TYPE=container_type
     )
 
 
@@ -1411,6 +1412,7 @@ def main():
 
     # Load configurations
     config = load_config(config_file)
+    print(f"📦 container_type from {config_file}: {config.CONTAINER_TYPE}")
     
     # Respect container_type from config if not overridden by args
     if not args.local and config.CONTAINER_TYPE == "local":
@@ -1420,6 +1422,14 @@ def main():
     # Only load container config if not using local execution
     if not args.local:
         container_config = load_container_config(container_config_file)
+
+        # If apptainer is requested but no image was set, fall back to the default apptainer config file
+        if container_config.container_type == "apptainer" and not container_config.apptainer_image:
+            fallback_cfg = Path("containers/container_apptainer.json")
+            if fallback_cfg.exists() and str(fallback_cfg) != str(container_config_file):
+                log_debug(f"Apptainer image missing in {container_config_file}, falling back to {fallback_cfg}")
+                container_config = load_container_config(str(fallback_cfg))
+                container_config_file = str(fallback_cfg)
     else:
         container_config = None
 
