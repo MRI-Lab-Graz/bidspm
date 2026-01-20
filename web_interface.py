@@ -87,12 +87,15 @@ def run_bidspm():
         global current_execution_id
         current_execution_id = execution_id
         
+        # Ensure log dir exists
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
+            bufsize=0,  # Unbuffered for immediate output
             universal_newlines=True,
             start_new_session=True
         )
@@ -101,15 +104,20 @@ def run_bidspm():
         msg = f"Executing: {' '.join(command)}\n"
         executions[execution_id]['output'].append(msg)
         
-        # Ensure log dir exists
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         with open(LOG_FILE, "a") as log:
             log.write(f"\n[{execution_id}] {msg}")
 
-        for line in process.stdout:
-            executions[execution_id]['output'].append(line)
-            with open(LOG_FILE, "a") as log:
-                log.write(line)
+        try:
+            for line in process.stdout:
+                executions[execution_id]['output'].append(line)
+                # Batch file writes for better performance
+        except:
+            pass
+        
+        # Write accumulated output to log file
+        with open(LOG_FILE, "a") as log:
+            for line in executions[execution_id]['output'][1:]:
+                log.write(str(line))
 
         process.wait()
         finish_msg = f"\nProcess finished with exit code {process.returncode}\n"
@@ -141,7 +149,7 @@ def stream_output(execution_id):
             elif executions[execution_id]['finished']:
                 break
             else:
-                time.sleep(0.1)
+                time.sleep(0.05)  # Reduced from 0.1 for faster updates
                 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
