@@ -14,12 +14,25 @@ SETUP_APPTAINER=false
 SETUP_OCTAVE=false
 FORCE_PLATFORM=""
 CHECK_DEPS_ONLY=false
+SKIP_OCTAVE=false
+FORCE_INSTALL=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --force)
+            FORCE_INSTALL=true
+            shift
+            ;;
         --local-install)
             LOCAL_INSTALL=true
+            # Enable Octave by default for local install (can be skipped with --skip-octave)
+            SETUP_OCTAVE=true
+            shift
+            ;;
+        --skip-octave)
+            SKIP_OCTAVE=true
+            SETUP_OCTAVE=false
             shift
             ;;
         --containers-only)
@@ -52,9 +65,9 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Installation Options:"
-            echo "  --local-install       Install BIDSPM locally (no containers)"
+            echo "  --local-install       Install BIDSPM locally with Octave 9.1.0+ (recommended)"
+            echo "  --skip-octave         Skip Octave installation (use system Octave)"
             echo "  --containers-only     Setup only container support (default)"
-            echo "  --octave-local        Install Octave locally in repository"
             echo ""
             echo "Container Options:"
             echo "  --apptainer          Setup Apptainer with custom cache directories"
@@ -62,14 +75,15 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Utility Options:"
             echo "  --check-octave-deps  Check if dependencies for local Octave compilation are available"
+            echo "  --force              Force installation even if locked"
             echo ""
             echo "General Options:"
             echo "  -h, --help           Show this help message"
             echo ""
             echo "Examples:"
             echo "  $0                               # Standard container setup"
-            echo "  $0 --local-install               # Local BIDSPM with system Octave"
-            echo "  $0 --local-install --octave-local  # Full local install with Octave"
+            echo "  $0 --local-install               # Local BIDSPM with Octave 9.1.0+ (recommended)"
+            echo "  $0 --local-install --skip-octave # Local BIDSPM with system Octave"
             echo "  $0 --apptainer                   # Container setup optimized for HPC"
             echo "  $0 --platform docker             # Force Docker container setup"
             exit 0
@@ -132,7 +146,7 @@ check_octave_dependencies() {
         MISSING_DEPS+=("make")
     fi
     
-    # Check libraries
+    # Check libraries - CRITICAL for SPM12 compatibility
     if pkg-config --exists blas 2>/dev/null; then
         AVAILABLE_DEPS+=("BLAS library found")
     else
@@ -151,11 +165,25 @@ check_octave_dependencies() {
         MISSING_DEPS+=("libpcre3-dev")
     fi
     
+    # CRITICAL: CHOLMOD support for SPM12 ReML estimation
+    if pkg-config --exists cholmod 2>/dev/null; then
+        AVAILABLE_DEPS+=("CHOLMOD library found (✓ SPM12 will work)")
+    else
+        MISSING_DEPS+=("libsuitesparse-dev")
+    fi
+    
     # Additional useful dependencies
     if pkg-config --exists zlib 2>/dev/null; then
         AVAILABLE_DEPS+=("zlib found")
     else
         MISSING_DEPS+=("zlib1g-dev")
+    fi
+    
+    # UMFPACK is also useful for sparse matrices
+    if pkg-config --exists umfpack 2>/dev/null; then
+        AVAILABLE_DEPS+=("UMFPACK library found")
+    else
+        MISSING_DEPS+=("libsuitesparse-dev")
     fi
     
     # Show results
@@ -403,7 +431,7 @@ install_local_octave() {
     cd external
     
     # Download Octave source with multiple fallback mirrors
-    OCTAVE_VERSION="8.4.0"
+    OCTAVE_VERSION="9.1.0"
     OCTAVE_MIRRORS=(
         "http://ftp.gnu.org/gnu/octave/octave-${OCTAVE_VERSION}.tar.gz"
         "https://ftpmirror.gnu.org/octave/octave-${OCTAVE_VERSION}.tar.gz"
@@ -453,28 +481,68 @@ install_local_octave() {
     if ! command -v gfortran &> /dev/null; then
         MISSING_DEPS+=("gfortran")
     fi
-    if ! pkg-config --exists blas 2>/dev/null; then
+    
+    # Check for BLAS libraries (multiple possible locations)
+    if ! pkg-config --exists blas 2>/dev/null && ! find /usr -name "libblas*" 2>/dev/null | grep -q .; then
         MISSING_DEPS+=("libopenblas-dev")
     fi
-    if ! pkg-config --exists lapack 2>/dev/null; then
+    
+    # Check for LAPACK
+    if ! pkg-config --exists lapack 2>/dev/null && ! find /usr -name "liblapack*" 2>/dev/null | grep -q .; then
         MISSING_DEPS+=("liblapack-dev")
     fi
-    if ! pkg-config --exists libpcre 2>/dev/null; then
+    
+    # Check for PCRE
+    if ! pkg-config --exists libpcre 2>/dev/null && ! find /usr -name "libpcre*" 2>/dev/null | grep -q .; then
         MISSING_DEPS+=("libpcre3-dev")
+    fi
+    
+    # CRITICAL: CHOLMOD for SPM12 ReML estimation
+    if ! pkg-config --exists cholmod 2>/dev/null && ! find /usr -name "*cholmod*" 2>/dev/null | grep -q .; then
+        MISSING_DEPS+=("libsuitesparse-dev")
     fi
     
     if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
         print_error "Missing build dependencies: ${MISSING_DEPS[*]}"
-        print_status "Install them with: sudo apt-get install ${MISSING_DEPS[*]}"
-        print_status "Or use system Octave instead: sudo apt-get install octave"
+        print_error "⚠️  CRITICAL: libsuitesparse-dev is required for SPM12 compatibility!"
+        print_status "Install all missing dependencies with:"
+        print_status "   sudo apt-get update && sudo apt-get install ${MISSING_DEPS[*]}"
+        print_status ""
+        print_status "After installing dependencies, re-run setup:"
+        print_status "   ./scripts/setup.sh --local-install"
+        print_status ""
+        print_status "Alternative: use system Octave instead (faster):"
+        print_status "   sudo apt-get install octave libsuitesparse-dev"
+        print_status "   ./scripts/setup.sh --local-install --skip-octave"
         cd ../..
         return 1
     fi
     
     # Configure for local installation
     print_status "Configuring Octave build (this may take a while)..."
-    if ! ./configure --prefix="$(pwd)/../octave" --disable-docs --disable-gui --disable-java; then
+    
+    # ENVIRONMENT SANITIZATION
+    # Temporarily remove FSL and Conda from PATH/LD_LIBRARY_PATH to avoid compiler/linker conflicts
+    # This specifically addresses issues where /usr/local/fsl/bin/ld is used instead of system ld
+    print_status "Sanitizing environment to remove FSL/Conda conflicts..."
+    OLD_PATH="$PATH"
+    OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+    
+    # Filter out paths containing "fsl" or "conda"
+    export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -i "fsl" | grep -v -i "conda" | tr '\n' ':' | sed 's/:$//')
+    export LD_LIBRARY_PATH=$(echo "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v -i "fsl" | grep -v -i "conda" | tr '\n' ':' | sed 's/:$//')
+    
+    print_status "Temporary build PATH: $PATH"
+    
+    # Use system compilers to avoid conflicts with other tools
+    # Also disable Qt completely to avoid FSL's uic causing build errors
+    if ! CC=/usr/bin/gcc CXX=/usr/bin/g++ F77=/usr/bin/gfortran ./configure --prefix="$(pwd)/../octave" --disable-docs --disable-gui --disable-java --without-qt --without-fltk --without-opengl; then
         print_error "Octave configuration failed."
+        # Restore environment
+        export PATH="$OLD_PATH"
+        export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
+        
+        print_status "💡 Consider using system Octave instead:"
         print_status "💡 Consider using system Octave instead:"
         print_status "   sudo apt-get install octave"
         print_status "   Then run: ./scripts/setup.sh --local-install"
@@ -877,7 +945,8 @@ install_dependencies() {
     # Install dependencies from build/pyproject.toml using UV with the virtual environment
     if [ -f "build/pyproject.toml" ]; then
         # Install dependencies specified in pyproject.toml
-        print_status "Installing dependencies: requests, jsonschema, flask, waitress, flask-socketio, eventlet..."
+        # These include: requests, jsonschema (for model validation), flask, waitress, flask-socketio, eventlet (for web interface)
+        print_status "Installing dependencies from pyproject.toml..."
         ./build/uv pip install --python .bidspm/bin/python requests jsonschema flask waitress flask-socketio eventlet
         print_success "Dependencies installed successfully"
     else
@@ -1090,5 +1159,17 @@ main() {
     echo ""
 }
 
+# Check for lock file
+if [ -f ".install.lock" ] && [ "$FORCE_INSTALL" = false ] && [ "$CHECK_DEPS_ONLY" = false ]; then
+    print_status "🔒 Installation is locked to prevent accidental overwritting."
+    print_status "   The setup has already completed successfully."
+    print_status "   Use --force to override, or remove '.install.lock'."
+    exit 0
+fi
+
 # Run main function
-main "$@"
+if main "$@"; then
+    # Lock the installation on success
+    touch .install.lock
+    print_status "🔒 Installation locked. (Created .install.lock)"
+fi

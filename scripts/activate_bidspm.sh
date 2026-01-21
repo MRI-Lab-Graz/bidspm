@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ ! -d "$PROJECT_ROOT/.bidspm" ]; then
-	echo "❌ Virtual environment not found. Please run ./scripts/setup.sh first."
-	return 1 2>/dev/null || exit 1
+    echo "❌ Virtual environment not found. Please run ./scripts/setup.sh first."
+    return 1 2>/dev/null || exit 1
 fi
 
 source "$PROJECT_ROOT/.bidspm/bin/activate"
@@ -24,11 +24,19 @@ export TMPDIR="/data/local/apptainer_tmp"
 echo "📦 Apptainer cache configured: $APPTAINER_CACHEDIR"
 
 # Local Octave installation
-if [ -d "$PROJECT_ROOT/external/octave/bin" ]; then
-	export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
-	export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/8.4.0:$LD_LIBRARY_PATH"
-	echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
+export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
+if [ -d "$PROJECT_ROOT/external/octave/lib" ]; then
+    # Dynamically find the Octave version directory
+    OCTAVE_LIB_DIR=$(find "$PROJECT_ROOT/external/octave/lib/octave" -maxdepth 1 -type d -name "[0-9]*" | head -n 1)
+    if [ -n "$OCTAVE_LIB_DIR" ]; then
+        OCTAVE_VERSION_DIR=$(basename "$OCTAVE_LIB_DIR")
+        export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/$OCTAVE_VERSION_DIR:$LD_LIBRARY_PATH"
+    else
+         # Fallback to general lib
+        export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$LD_LIBRARY_PATH"
+    fi
 fi
+echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
 
 # Local BIDSPM environment
 export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
@@ -38,12 +46,12 @@ export SPM_STANDALONE_HOME="$SPM12_PATH"
 export BIDSPM_SKIP_OCTAVE_FORGE=1
 
 if [ -d "$BIDSPM_PATH/src" ]; then
-	export MATLABPATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$SPM12_PATH:${MATLABPATH}"
-	export OCTAVE_PATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$BIDSPM_PATH/lib:$SPM12_PATH:${OCTAVE_PATH}"
+    export MATLABPATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$SPM12_PATH:${MATLABPATH}"
+    export OCTAVE_PATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$BIDSPM_PATH/lib:$SPM12_PATH:${OCTAVE_PATH}"
 fi
 
 if [ -f "$PROJECT_ROOT/octave/octave_startup.m" ]; then
-	export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave/octave_startup.m"
+    export OCTAVE_SITE_INITFILE="$PROJECT_ROOT/octave/octave_startup.m"
 fi
 
 echo "🧠 BIDSPM local environment configured"

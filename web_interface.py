@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import subprocess
 import threading
@@ -24,6 +26,34 @@ LOG_FILE = os.path.abspath("logs/run_bidspm.log")
 executions = {}
 current_execution_id = None
 
+def check_empty_contrasts(model):
+    """Check for empty or missing contrast definitions."""
+    issues = []
+    
+    if 'Steps' not in model:
+        return issues
+    
+    for step_idx, step in enumerate(model.get('Steps', [])):
+        if 'Level' not in step:
+            continue
+            
+        for contrast in step.get('Contrasts', []):
+            # Check for missing name
+            if 'Name' not in contrast or not contrast.get('Name', '').strip():
+                issues.append(f"Step {step_idx}: Contrast missing or empty 'Name' field")
+            
+            # Check for missing or empty condition list
+            if 'ConditionList' not in contrast or not contrast.get('ConditionList'):
+                contrast_name = contrast.get('Name', 'unnamed')
+                issues.append(f"Step {step_idx}: Contrast '{contrast_name}' has empty or missing 'ConditionList'")
+            
+            # Check for empty Weights if ConditionList exists
+            if 'Weights' in contrast and not contrast.get('Weights'):
+                contrast_name = contrast.get('Name', 'unnamed')
+                issues.append(f"Step {step_idx}: Contrast '{contrast_name}' has empty 'Weights' vector")
+    
+    return issues
+
 def find_free_port(start_port=5000, max_tries=100):
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -47,6 +77,17 @@ def get_model_tasks():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/file_content')
+def file_content():
+    path = request.args.get('path')
+    if not path or not os.path.isfile(path):
+        return "File not found", 404
+    try:
+        with open(path, 'r') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {str(e)}", 500
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -59,6 +100,45 @@ def run_bidspm():
     
     if not actions:
         return jsonify({"error": "No actions selected"}), 400
+    
+    # Auto-validate model if provided and stats action is requested
+    model_file = data.get('model')
+    if model_file and any('stats' in action.lower() for action in actions):
+        # Only validate if not explicitly skipped
+        if not data.get('skip_validation'):
+            try:
+                if not os.path.isfile(model_file):
+                    return jsonify({"error": f"Model file not found: {model_file}"}), 400
+                
+                # Load and validate the model
+                with open(model_file, 'r') as f:
+                    model_content = json.load(f)
+                
+                # Use the validation function from validate_model endpoint
+                import requests
+                from jsonschema import validate, ValidationError
+                
+                schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
+                schema = requests.get(schema_url, timeout=10).json()
+                validate(instance=model_content, schema=schema)
+                
+                # Check for semantic issues (empty contrasts)
+                contrast_issues = check_empty_contrasts(model_content)
+                if contrast_issues:
+                    return jsonify({
+                        "error": f"Model validation failed - Empty contrast issues: {'; '.join(contrast_issues)}"
+                    }), 400
+                
+            except json.JSONDecodeError as e:
+                return jsonify({"error": f"Invalid JSON in model file: {str(e)}"}), 400
+            except ValidationError as e:
+                # Allow non-standard transformer warnings
+                if "'pybids-transforms-v1' was expected" not in e.message and "transformer" not in e.message.lower():
+                    return jsonify({"error": f"Model validation failed: {e.message}"}), 400
+            except requests.RequestException as e:
+                return jsonify({"error": f"Could not fetch validation schema: {str(e)}"}), 503
+            except Exception as e:
+                return jsonify({"error": f"Model validation error: {str(e)}"}), 400
 
     command = [PYTHON_EXE, BIDSPM_SCRIPT]
     command.extend(['--action'] + actions)
@@ -404,6 +484,65 @@ def validate_config():
                 return jsonify({"valid": False, "error": "Validation failed (non-specific error)"})
         except Exception as e:
             return jsonify({"valid": False, "error": str(e)})
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+@app.route('/validate_model', methods=['POST'])
+def validate_model():
+    """Validate a BIDS stats model JSON against the official schema.
+    Ignores non-standard transformer warnings (e.g., 'bidspm', 'pybids-transforms-v1')."""
+    data = request.json
+    content = data.get('content')
+    
+    if not content:
+        return jsonify({"valid": False, "error": "No content provided"}), 400
+    
+    try:
+        import requests
+        from jsonschema import validate, ValidationError, RefResolver
+    except ImportError:
+        return jsonify({"valid": False, "error": "Required modules missing: install jsonschema and requests"}), 500
+    
+    schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
+    temp_path = f"config/temp_model_{secrets.token_hex(4)}.json"
+    
+    try:
+        # Write content to temporary file
+        with open(temp_path, 'w') as f:
+            json.dump(content, f)
+        
+        # Fetch and validate against schema
+        schema = requests.get(schema_url, timeout=10).json()
+        validate(instance=content, schema=schema)
+        
+        # Check for semantic issues (empty contrasts, etc.)
+        contrast_issues = check_empty_contrasts(content)
+        if contrast_issues:
+            return jsonify({"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"})
+        
+        return jsonify({"valid": True})
+    
+    except ValidationError as e:
+        # Allow non-standard transformer warnings
+        if "'pybids-transforms-v1' was expected" in e.message or "transformer" in e.message.lower():
+            # Still check for semantic issues even with transformer warning
+            contrast_issues = check_empty_contrasts(content)
+            if contrast_issues:
+                return jsonify({"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"})
+            return jsonify({"valid": True, "warning": f"Non-standard transformer used: {e.message}"})
+        else:
+            return jsonify({"valid": False, "error": f"Validation error: {e.message}"})
+    
+    except requests.RequestException as e:
+        return jsonify({"valid": False, "error": f"Could not fetch schema: {str(e)}"}), 503
+    
+    except json.JSONDecodeError as e:
+        return jsonify({"valid": False, "error": f"Invalid JSON: {str(e)}"})
+    
+    except Exception as e:
+        return jsonify({"valid": False, "error": f"Validation error: {str(e)}"})
+    
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)

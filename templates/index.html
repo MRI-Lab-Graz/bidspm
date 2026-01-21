@@ -146,6 +146,13 @@
                                                 <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="MODELS_FILE" id="input-MODELS_FILE">
                                                 <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="MODELS_FILE" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
                                             </div>
+                                            <!-- Model Validation Status -->
+                                            <div id="model-validation-status" class="mt-2" style="display:none;">
+                                                <small class="d-flex align-items-center gap-2">
+                                                    <span id="model-validation-icon"></span>
+                                                    <span id="model-validation-message"></span>
+                                                </small>
+                                            </div>
                                         </div>
                                         <!-- SPACE / FWHM / VERBOSITY -->
                                         <div class="col-md-5">
@@ -539,9 +546,69 @@ Ready for command.</div>
         } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
     }
 
+    async function validateModel() {
+        const modelPath = document.getElementById('input-MODELS_FILE')?.value;
+        const statusDiv = document.getElementById('model-validation-status');
+        const icon = document.getElementById('model-validation-icon');
+        const message = document.getElementById('model-validation-message');
+        
+        if (!modelPath) {
+            statusDiv.style.display = 'none';
+            return;
+        }
+        
+        try {
+            // Read the model file
+            const response = await fetch(`/file_content?path=${encodeURIComponent(modelPath)}`);
+            if (!response.ok) {
+                statusDiv.style.display = 'block';
+                icon.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i>';
+                message.textContent = 'Model file not found';
+                return;
+            }
+            
+            const modelText = await response.text();
+            const modelContent = JSON.parse(modelText);
+            
+            // Call validation endpoint
+            const validateResponse = await fetch('/validate_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: modelContent })
+            });
+            
+            const result = await validateResponse.json();
+            statusDiv.style.display = 'block';
+            
+            if (result.valid) {
+                icon.innerHTML = '<i class="fas fa-check-circle text-success"></i>';
+                if (result.warning) {
+                    message.textContent = `✓ Valid (${result.warning})`;
+                    message.classList.add('text-warning');
+                } else {
+                    message.textContent = '✓ Model is valid';
+                    message.classList.remove('text-warning');
+                    message.classList.add('text-success');
+                }
+            } else {
+                icon.innerHTML = '<i class="fas fa-times-circle text-danger"></i>';
+                message.textContent = `✗ ${result.error}`;
+                message.classList.add('text-danger');
+            }
+        } catch (e) {
+            statusDiv.style.display = 'block';
+            icon.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i>';
+            message.textContent = `Error validating model: ${e.message}`;
+            console.error('Model validation error:', e);
+        }
+    }
+
     async function refreshModelTasks() {
         const modelPath = document.getElementById('input-MODELS_FILE')?.value;
         if (!modelPath) return;
+        
+        // Validate the model
+        await validateModel();
         
         try {
             const res = await fetch(`/get_model_tasks?path=${encodeURIComponent(modelPath)}`);
