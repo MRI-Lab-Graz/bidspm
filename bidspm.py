@@ -55,6 +55,59 @@ def check_local_bidspm_installation():
     return False
 
 
+def get_local_execution_env():
+    """Get environment variables for local MATLAB/Octave execution"""
+    env = os.environ.copy()
+    project_root = Path.cwd().absolute()
+    
+    # BIDSPM environment
+    env["BIDSPM_PROJECT_ROOT"] = str(project_root)
+    env["SPM12_PATH"] = str(project_root / "external" / "spm12_standalone")
+    env["BIDSPM_PATH"] = str(project_root / "local_src" / "bidspm_local")
+    env["SPM_HOME"] = env["SPM12_PATH"]
+    env["SPM_STANDALONE_HOME"] = env["SPM12_PATH"]
+    
+    # Virtualenv bin (if it exists) to provide tools like validate_model
+    venv_bin = project_root / ".bidspm" / "bin"
+    if venv_bin.exists():
+        env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
+    
+    # Octave environment
+    local_octave_root = project_root / "external" / "octave"
+    local_octave_bin_dir = local_octave_root / "bin"
+    if local_octave_bin_dir.exists():
+        env["OCTAVE_HOME"] = str(local_octave_root)
+        env["PATH"] = f"{local_octave_bin_dir}:{env.get('PATH', '')}"
+        
+        # Library path
+        local_octave_lib = local_octave_root / "lib"
+        if local_octave_lib.exists():
+            ld_paths = [str(local_octave_lib)]
+            # Find version specific lib dir
+            octave_lib_dir = local_octave_lib / "octave"
+            if octave_lib_dir.exists():
+                try:
+                    for sub in octave_lib_dir.iterdir():
+                        if sub.is_dir() and re.match(r'[0-9].*', sub.name):
+                            ld_paths.append(str(sub))
+                            break
+                except Exception:
+                    pass
+            
+            existing_ld_path = env.get("LD_LIBRARY_PATH", "")
+            if existing_ld_path:
+                env["LD_LIBRARY_PATH"] = f"{':'.join(ld_paths)}:{existing_ld_path}"
+            else:
+                env["LD_LIBRARY_PATH"] = ":".join(ld_paths)
+    
+    # Ensure Octave Forge can install if needed (or follows user preference)
+    # We default to allowing it if not set, but respect existing environment
+    if "BIDSPM_SKIP_OCTAVE_FORGE" not in env:
+        env["BIDSPM_SKIP_OCTAVE_FORGE"] = "0"
+        
+    return env
+
+
 def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
     """Execute BIDSPM locally using MATLAB/Octave directly"""
     print(f"🔧 Running BIDSPM locally for action: {action}")
@@ -72,10 +125,23 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
     """Execute BIDSPM directly using MATLAB/Octave"""
     print(f"🔧 Running BIDSPM directly using MATLAB/Octave for action: {action}")
     
+    # Get local execution environment
+    local_env = get_local_execution_env()
+    
     # Check if MATLAB or Octave is available
     matlab_cmd = None
+    local_octave_bin = Path("external/octave/bin")
+    
+    # Prefer local octave-cli if it exists
+    local_cli = local_octave_bin / "octave-cli"
+    local_octave_wrap = local_octave_bin / "octave"
+    
     if shutil.which("matlab"):
         matlab_cmd = "matlab"
+    elif local_cli.exists():
+        matlab_cmd = str(local_cli.absolute())
+    elif local_octave_wrap.exists():
+        matlab_cmd = str(local_octave_wrap.absolute())
     elif shutil.which("octave"):
         matlab_cmd = "octave"
     else:
@@ -97,16 +163,10 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
             if action == "smooth":
                 # Create MATLAB/Octave script for smoothing
                 script_content = f"""
-% BIDSPM Local Execution Script for Smoothing - MINIMAL MODE
+% BIDSPM Local Execution Script for Smoothing
 % HPC-compatible setup with SPM12 and BIDSPM paths
 
-% Configure local package installation directory
-if exist('pkg', 'builtin')
-    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
-    fprintf('Octave package directory set to local folder\\n');
-end
-
-% Set warning level to reduce verbose output and ignore dependency errors
+% Set warning level to reduce verbose output
 warning('off', 'all');
 
 % Add SPM12 standalone if available
@@ -116,13 +176,16 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path manually (complete offline mode)
+% Add BIDSPM to path and initialize
 bidspm_path = '{local_bidspm_dir.absolute()}';
-addpath(bidspm_path);
-addpath(fullfile(bidspm_path, 'src'));
-addpath(genpath(fullfile(bidspm_path, 'lib')));
-addpath(genpath(fullfile(bidspm_path, 'src')));
-fprintf('BIDSPM paths added manually (minimal mode)\\n');
+if exist(bidspm_path, 'dir')
+    addpath(bidspm_path);
+    fprintf('Initializing BIDSPM from: %s\\n', bidspm_path);
+    % Initialize BIDSPM (this will load necessary packages like statistics, datatypes)
+    if exist('bidspm', 'file')
+        bidspm('init');
+    end
+end
 
 % Try to initialize SPM if available
 try
@@ -133,19 +196,6 @@ try
     end
 catch
     fprintf('SPM initialization skipped\\n');
-end
-
-% Override pkg function to ignore statistics package errors
-function pkg(varargin)
-    try
-        builtin('pkg', varargin{{:}});
-    catch ME
-        if ~isempty(strfind(ME.message, 'statistics')) || ~isempty(strfind(ME.message, 'octave >= 8.1.0')) || ~isempty(strfind(ME.message, 'image')) || ~isempty(strfind(ME.message, 'octave >= 7.2'))
-            fprintf('Warning: Ignoring package dependency (incompatible Octave version): %s\\n', ME.message);
-        else
-            rethrow(ME);
-        end
-    end
 end
 
 try
@@ -168,14 +218,8 @@ end
             elif action == "stats":
                 # Create MATLAB/Octave script for stats
                 script_content = f"""
-% BIDSPM Local Execution Script for Stats - OFFLINE MODE
+% BIDSPM Local Execution Script for Stats
 % HPC-compatible setup with SPM12 and BIDSPM paths
-
-% Configure local package installation directory to avoid disk space issues
-if exist('pkg', 'builtin')
-    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
-    fprintf('Octave package directory set to local folder\\n');
-end
 
 % Set warning level to reduce verbose output
 warning('off', 'all');
@@ -187,13 +231,16 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path manually (skip bidspm('init') to avoid package downloads)
+% Add BIDSPM to path and initialize
 bidspm_path = '{local_bidspm_dir.absolute()}';
-addpath(bidspm_path);
-addpath(fullfile(bidspm_path, 'src'));
-addpath(genpath(fullfile(bidspm_path, 'lib')));
-addpath(genpath(fullfile(bidspm_path, 'src')));
-fprintf('BIDSPM paths added manually (offline mode)\\n');
+if exist(bidspm_path, 'dir')
+    addpath(bidspm_path);
+    fprintf('Initializing BIDSPM from: %s\\n', bidspm_path);
+    % Initialize BIDSPM (this will load necessary packages like statistics, datatypes)
+    if exist('bidspm', 'file')
+        bidspm('init');
+    end
+end
 
 % Try to initialize SPM if available
 try
@@ -238,14 +285,8 @@ end
             elif action == "dataset":
                 # Create MATLAB/Octave script for dataset level stats
                 script_content = f"""
-% BIDSPM Local Execution Script for Dataset Stats - OFFLINE MODE
+% BIDSPM Local Execution Script for Dataset Stats
 % HPC-compatible setup with SPM12 and BIDSPM paths
-
-% Configure local package installation directory to avoid disk space issues
-if exist('pkg', 'builtin')
-    pkg('prefix', fullfile(pwd, 'octave_packages'), fullfile(pwd, 'octave_packages'));
-    fprintf('Octave package directory set to local folder\\n');
-end
 
 % Set warning level to reduce verbose output
 warning('off', 'all');
@@ -257,13 +298,16 @@ if exist(spm12_path, 'dir')
     fprintf('SPM12 standalone added to path\\n');
 end
 
-% Add BIDSPM to path manually (skip bidspm('init') to avoid package downloads)
+% Add BIDSPM to path and initialize
 bidspm_path = '{local_bidspm_dir.absolute()}';
-addpath(bidspm_path);
-addpath(fullfile(bidspm_path, 'src'));
-addpath(genpath(fullfile(bidspm_path, 'lib')));
-addpath(genpath(fullfile(bidspm_path, 'src')));
-fprintf('BIDSPM paths added manually (offline mode)\\n');
+if exist(bidspm_path, 'dir')
+    addpath(bidspm_path);
+    fprintf('Initializing BIDSPM from: %s\\n', bidspm_path);
+    % Initialize BIDSPM (this will load necessary packages like statistics, datatypes)
+    if exist('bidspm', 'file')
+        bidspm('init');
+    end
+end
 
 % Try to initialize SPM if available
 try
@@ -307,12 +351,13 @@ end
                 if matlab_cmd == "matlab":
                     cmd = ["matlab", "-nodisplay", "-nosplash", "-nodesktop", "-r", f"run('{script_file.stem}')"]
                 else:  # octave
-                    cmd = ["octave", "--no-gui", "--eval", f"run('{script_file.stem}')"]
+                    cmd = [matlab_cmd, "--no-gui", "--eval", f"run('{script_file.stem}')"]
                 
                 log_debug(f"Local BIDSPM command: {' '.join(cmd)}")
                 
                 result = subprocess.run(cmd, check=True, text=True, 
-                                      capture_output=True, timeout=1800)  # 30 minute timeout
+                                      capture_output=True, timeout=1800,
+                                      env=local_env)  # 30 minute timeout
                 
                 print(f"✅ Local {action} completed successfully for subject {subject}")
                 
@@ -344,11 +389,19 @@ def setup_local_environment():
     
     # Check for MATLAB/Octave
     matlab_available = shutil.which("matlab") is not None
-    octave_available = shutil.which("octave") is not None
+    local_octave_bin = Path("external/octave/bin")
+    local_octave = local_octave_bin / "octave"
+    local_cli = local_octave_bin / "octave-cli"
+    
+    octave_available = (shutil.which("octave") is not None) or local_octave.exists() or local_cli.exists()
     mcr_available = Path("/usr/local/freesurfer/MCRv97").exists()
     
     if matlab_available:
         print("✅ MATLAB found in PATH")
+    elif local_cli.exists():
+        print(f"✅ Local Octave-CLI found at {local_cli}")
+    elif local_octave.exists():
+        print(f"✅ Local Octave found at {local_octave}")
     elif octave_available:
         print("✅ Octave found in PATH")
     elif mcr_available:

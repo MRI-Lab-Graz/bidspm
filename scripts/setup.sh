@@ -1001,9 +1001,18 @@ EOF
         cat >> scripts/activate_bidspm.sh << 'EOF'
 
 # Local Octave installation
+export OCTAVE_HOME="$PROJECT_ROOT/external/octave"
 export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
 if [ -d "$PROJECT_ROOT/external/octave/lib" ]; then
-    export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/8.4.0:$LD_LIBRARY_PATH"
+    # Dynamically find the Octave version directory
+    OCTAVE_LIB_DIR=$(find "$PROJECT_ROOT/external/octave/lib/octave" -maxdepth 1 -type d -name "[0-9]*" | head -n 1)
+    if [ -n "$OCTAVE_LIB_DIR" ]; then
+        OCTAVE_VERSION_DIR=$(basename "$OCTAVE_LIB_DIR")
+        export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$PROJECT_ROOT/external/octave/lib/octave/$OCTAVE_VERSION_DIR:$LD_LIBRARY_PATH"
+    else
+         # Fallback to general lib
+        export LD_LIBRARY_PATH="$PROJECT_ROOT/external/octave/lib:$LD_LIBRARY_PATH"
+    fi
 fi
 echo "🔧 Local Octave added to PATH: $PROJECT_ROOT/external/octave/bin"
 EOF
@@ -1018,7 +1027,7 @@ export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
 export BIDSPM_PATH="$PROJECT_ROOT/local_src/bidspm_local"
 export SPM_HOME="$SPM12_PATH"
 export SPM_STANDALONE_HOME="$SPM12_PATH"
-export BIDSPM_SKIP_OCTAVE_FORGE=1
+export BIDSPM_SKIP_OCTAVE_FORGE=0
 
 if [ -d "$BIDSPM_PATH/src" ]; then
     export MATLABPATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$SPM12_PATH:${MATLABPATH}"

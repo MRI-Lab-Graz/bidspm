@@ -24,6 +24,7 @@ export TMPDIR="/data/local/apptainer_tmp"
 echo "📦 Apptainer cache configured: $APPTAINER_CACHEDIR"
 
 # Local Octave installation
+export OCTAVE_HOME="$PROJECT_ROOT/external/octave"
 export PATH="$PROJECT_ROOT/external/octave/bin:$PATH"
 if [ -d "$PROJECT_ROOT/external/octave/lib" ]; then
     # Dynamically find the Octave version directory
@@ -43,7 +44,7 @@ export SPM12_PATH="$PROJECT_ROOT/external/spm12_standalone"
 export BIDSPM_PATH="$PROJECT_ROOT/local_src/bidspm_local"
 export SPM_HOME="$SPM12_PATH"
 export SPM_STANDALONE_HOME="$SPM12_PATH"
-export BIDSPM_SKIP_OCTAVE_FORGE=1
+export BIDSPM_SKIP_OCTAVE_FORGE=0
 
 if [ -d "$BIDSPM_PATH/src" ]; then
     export MATLABPATH="$BIDSPM_PATH:$BIDSPM_PATH/src:$SPM12_PATH:${MATLABPATH}"
