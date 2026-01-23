@@ -108,6 +108,38 @@ def get_local_execution_env():
     return env
 
 
+def check_subject_processed(config: Config, subject_label: str, task: str, action: str) -> bool:
+    """Check if a subject has already been processed for the given action"""
+    if action == "smooth":
+        # Check for smoothed outputs in bidspm-preproc
+        preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc" / f"sub-{subject_label}"
+        if not preproc_dir.exists():
+            return False
+        # Check for smoothed bold files with the correct space
+        pattern = f"*task-{task}*space-{config.SPACE}*desc-preproc_bold.nii*"
+        smoothed_files = list(preproc_dir.rglob(pattern))
+        return len(smoothed_files) > 0
+    
+    elif action == "stats":
+        # Check for stats outputs in bidspm-stats
+        stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / f"sub-{subject_label}"
+        if not stats_dir.exists():
+            return False
+        # Check for subject-level stats directory
+        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}_node-subjectLevel"
+        stats_subdirs = list(stats_dir.glob(pattern))
+        if not stats_subdirs:
+            return False
+        # Check if it contains beta files
+        for stats_subdir in stats_subdirs:
+            beta_files = list(stats_subdir.glob("beta_*.nii*"))
+            if beta_files:
+                return True
+        return False
+    
+    return False
+
+
 def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
     """Execute BIDSPM locally using MATLAB/Octave directly"""
     print(f"🔧 Running BIDSPM locally for action: {action}")
@@ -798,6 +830,7 @@ OPTIONAL ARGUMENTS:
     --skip-modelvalidation
                          Skip validation of BIDS-StatsModel JSON
     --local              Use local BIDSPM installation instead of containers
+    --force              Force reprocessing even if output already exists
 
 EXAMPLES:
     # Get help and usage information
@@ -817,6 +850,12 @@ EXAMPLES:
     
     # Use local BIDSPM installation (no containers)
     python bidspm.py --local --action smooth --pilot
+    
+    # Force reprocessing of all subjects (even if already processed)
+    python bidspm.py --action smooth stats --force
+    
+    # Continue processing - skip already completed subjects
+    python bidspm.py --action smooth stats
 
 WORKFLOW:
     1. Validates configuration files and dependencies
@@ -870,6 +909,8 @@ def parse_arguments():
                        help='Skip BIDS-StatsModel JSON validation')
     parser.add_argument('--local', action='store_true',
                        help='Use local BIDSPM installation instead of containers')
+    parser.add_argument('--force', action='store_true',
+                       help='Force reprocessing of subjects even if output already exists')
     parser.add_argument('--action', nargs='+', choices=['smooth', 'stats', 'dataset'],
                        help='Actions to perform: smooth, stats, dataset (at least one required)')
     return parser.parse_args()
@@ -1147,19 +1188,33 @@ def main():
             print(f">>> Processing task: {task}")
             print("---------------------------------------------------")
 
-            # Validate SPACE availability before processing
-            if not validate_space_availability(config, subjects_to_process, task):
-                print(f"⚠️  Skipping task '{task}' due to SPACE validation failure")
-                continue
-
             # Process each subject
             for subject_label in subjects_to_process:
+                # Validate SPACE availability per subject so failures don't stop the pipeline
+                if not validate_space_availability(config, [subject_label], task):
+                    continue
                 # Check if subject directory exists in fmriprep derivatives
                 subject_dir = config.FMRIPREP_DIR / f"sub-{subject_label}"
                 if not subject_dir.is_dir():
                     print(f">>> WARNING: Subject directory not found for {subject_label}, skipping...")
                     log_debug(f"Subject directory not found: {subject_dir}")
                     continue
+                
+                # Check if subject already processed (unless --force is used)
+                if not args.force:
+                    already_processed_smooth = 'smooth' in args.action and check_subject_processed(config, subject_label, task, "smooth")
+                    already_processed_stats = 'stats' in args.action and check_subject_processed(config, subject_label, task, "stats")
+                    
+                    if already_processed_smooth and already_processed_stats:
+                        print(f"⏭️  Subject {subject_label} already processed (smooth + stats). Use --force to reprocess.")
+                        continue
+                    elif already_processed_smooth and 'smooth' in args.action and 'stats' not in args.action:
+                        print(f"⏭️  Subject {subject_label} already smoothed. Use --force to reprocess.")
+                        continue
+                    elif already_processed_stats and 'stats' in args.action and 'smooth' not in args.action:
+                        print(f"⏭️  Subject {subject_label} already has stats. Use --force to reprocess.")
+                        continue
+                
                 log_debug(f"Processing subject: {subject_label}, task: {task}")
 
                 # 1. First, smoothing (if requested)
