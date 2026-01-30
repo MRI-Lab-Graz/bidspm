@@ -170,14 +170,19 @@ def run_bidspm():
         # Ensure log dir exists
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         
+        # Set environment to disable Python output buffering
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+        
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=0,  # Unbuffered for immediate output
+            bufsize=1,  # Line buffered
             universal_newlines=True,
-            start_new_session=True
+            start_new_session=True,
+            env=env
         )
         executions[execution_id]['process'] = process
 
@@ -190,14 +195,14 @@ def run_bidspm():
         try:
             for line in process.stdout:
                 executions[execution_id]['output'].append(line)
-                # Batch file writes for better performance
-        except:
-            pass
-        
-        # Write accumulated output to log file
-        with open(LOG_FILE, "a") as log:
-            for line in executions[execution_id]['output'][1:]:
-                log.write(str(line))
+                # Write to log file immediately for real-time debugging
+                with open(LOG_FILE, "a") as log:
+                    log.write(line)
+        except Exception as e:
+            error_msg = f"\nError reading output: {str(e)}\n"
+            executions[execution_id]['output'].append(error_msg)
+            with open(LOG_FILE, "a") as log:
+                log.write(error_msg)
 
         process.wait()
         finish_msg = f"\nProcess finished with exit code {process.returncode}\n"
