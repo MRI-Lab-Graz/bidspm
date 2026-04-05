@@ -10,28 +10,10 @@
 
 {% block content %}
 <div class="container-fluid">
-    <!-- Project Selector / Top Bar -->
+    <!-- Top Action Bar -->
     <div class="row mb-4">
         <div class="col-12">
             <div class="d-flex flex-wrap gap-2 p-3 bg-white border rounded shadow-sm align-items-center">
-                <!-- Project Selector -->
-                <div class="d-flex align-items-center gap-2">
-                    <label class="small fw-bold text-muted text-uppercase mb-0">Project:</label>
-                    <select id="project-selector" class="form-select form-select-sm" style="width: 250px;">
-                        <option value="">-- No Project Selected --</option>
-                        {% for p in projects %}
-                        <option value="{{ p.id }}" {% if current_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-                        {% endfor %}
-                    </select>
-                    {% if project %}
-                    <a href="{{ url_for('projects_page') }}" class="btn btn-sm btn-outline-secondary">
-                        <i class="fas fa-list me-1"></i>All Projects
-                    </a>
-                    {% endif %}
-                </div>
-                
-                <div class="vr mx-2"></div>
-                
                 <button type="button" class="btn btn-outline-secondary" id="btn-load-config">
                     <i class="fas fa-folder-open me-2"></i>Load
                 </button>
@@ -48,18 +30,7 @@
                     <i class="fas fa-stop me-2"></i>Stop
                 </button>
                 
-                {% if project %}
-                <div class="ms-auto d-flex align-items-center gap-3">
-                    <span class="badge bg-info">
-                        <i class="fas fa-folder-open me-1"></i>{{ project.name }}
-                    </span>
-                    {% if project.last_run %}
-                    <span class="badge bg-secondary" title="Last run: {{ project.last_run }}">
-                        <i class="fas fa-clock me-1"></i>{{ project.last_run[:10] }}
-                    </span>
-                    {% endif %}
-                </div>
-                {% else %}
+                {% if not project %}
                 <div class="ms-auto d-flex align-items-center gap-3">
                     <div class="d-flex align-items-center gap-2">
                         <label class="small fw-bold text-muted text-uppercase mb-0">Config Folder:</label>
@@ -366,16 +337,6 @@
     let eventSource = null;
     let schema = {};
     let unifiedStudyConfig = {};
-
-    // Project selector change
-    document.getElementById('project-selector')?.addEventListener('change', function() {
-        const projectId = this.value;
-        if (projectId) {
-            window.location.href = `/analysis/${projectId}`;
-        } else {
-            window.location.href = '/analysis';
-        }
-    });
 
     // --- FORM DATA HANDLERS ---
     function getFullFormData() {

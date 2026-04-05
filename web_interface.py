@@ -157,7 +157,41 @@ def analysis_page(project_id: Optional[str] = None):
     return render_template('analysis.html', 
                           project=project,
                           projects=projects,
-                          current_project_id=project_id)
+                          current_project_id=project_id,
+                          current_project=project)
+
+
+# =============================================================================
+# Utility API Endpoints
+# =============================================================================
+
+@app.route('/api/detect-spaces', methods=['POST'])
+def api_detect_spaces():
+    """Detect available spaces from fMRIPrep folder."""
+    try:
+        data = request.json or {}
+        fmriprep_path = data.get('path', '').strip()
+        
+        if not fmriprep_path:
+            return jsonify({"spaces": [], "error": "No path provided"})
+        
+        path = Path(fmriprep_path)
+        if not path.exists():
+            return jsonify({"spaces": [], "error": "Path not found"})
+        
+        # Detect spaces from file names
+        available_spaces = []
+        space_patterns = ['MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'MNI152NLin2009cSym', 
+                          'MNI152NLin6Sym', 'MNIPediatricAsym', 'T1w', 'fsaverage', 
+                          'fsLR', 'fsnative', 'anat']
+        
+        for space in space_patterns:
+            if list(path.glob(f'**/*space-{space}*.nii*')):
+                available_spaces.append(space)
+        
+        return jsonify({"spaces": available_spaces})
+    except Exception as e:
+        return jsonify({"spaces": [], "error": str(e)})
 
 
 # =============================================================================
@@ -184,11 +218,12 @@ def api_create_project():
         data = request.json or {}
         name = data.get('name', '').strip()
         description = data.get('description', '').strip()
+        config = data.get('config', None)
         
         if not name:
             return jsonify({"error": "Project name is required"}), 400
         
-        project = project_manager.create_project(name, description)
+        project = project_manager.create_project(name, description, config)
         return jsonify({
             "project": project.to_dict(),
             "message": f"Project '{name}' created successfully"
@@ -224,7 +259,10 @@ def api_update_project(project_id: str):
         if 'description' in data:
             project.description = data['description']
         if 'config' in data:
-            project.config = ProjectConfig.from_dict(data['config'])
+            # Merge new config with existing config
+            existing_config = project.config.to_dict()
+            existing_config.update(data['config'])
+            project.config = ProjectConfig.from_dict(existing_config)
         
         project_manager.save_project(project)
         return jsonify({
@@ -265,6 +303,91 @@ def api_duplicate_project(project_id: str):
             "project": new_project.to_dict(),
             "message": f"Project duplicated as '{new_project.name}'"
         }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/preflight', methods=['GET'])
+def api_preflight_check(project_id: str):
+    """Run preflight checks for a project."""
+    try:
+        project = project_manager.load_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        
+        config = project.config
+        results = {}
+        
+        # Check BIDS folder
+        bids_path = Path(config.bids_folder) if config.bids_folder else None
+        if not bids_path or not config.bids_folder:
+            results['bids_folder'] = {'status': 'na', 'message': 'Not configured'}
+        elif bids_path.exists():
+            # Check for dataset_description.json
+            if (bids_path / 'dataset_description.json').exists():
+                results['bids_folder'] = {'status': 'ok', 'message': 'Valid BIDS folder'}
+            else:
+                results['bids_folder'] = {'status': 'warning', 'message': 'Folder exists but no dataset_description.json'}
+        else:
+            results['bids_folder'] = {'status': 'error', 'message': 'Folder not found'}
+        
+        # Check fMRIPrep folder
+        fmriprep_path = Path(config.fmriprep_folder) if config.fmriprep_folder else None
+        if not fmriprep_path or not config.fmriprep_folder:
+            results['fmriprep_folder'] = {'status': 'na', 'message': 'Not configured'}
+        elif fmriprep_path.exists():
+            # Check for dataset_description.json
+            if (fmriprep_path / 'dataset_description.json').exists():
+                results['fmriprep_folder'] = {'status': 'ok', 'message': 'Valid fMRIPrep folder'}
+            else:
+                results['fmriprep_folder'] = {'status': 'warning', 'message': 'Folder exists but no dataset_description.json'}
+        else:
+            results['fmriprep_folder'] = {'status': 'error', 'message': 'Folder not found'}
+        
+        # Check for event files
+        if bids_path and bids_path.exists():
+            import glob
+            event_files = list(bids_path.glob('**/*_events.tsv'))
+            if event_files:
+                results['events'] = {'status': 'ok', 'message': f'{len(event_files)} event files found', 'value': str(len(event_files))}
+            else:
+                results['events'] = {'status': 'warning', 'message': 'No event files found'}
+        else:
+            results['events'] = {'status': 'na', 'message': 'BIDS folder not available'}
+        
+        # Check space availability
+        space = config.space or 'MNI152NLin2009cAsym'
+        available_spaces = []
+        if fmriprep_path and fmriprep_path.exists():
+            # Look for space patterns in file names
+            for space_name in ['MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'T1w']:
+                if list(fmriprep_path.glob(f'**/*space-{space_name}*.nii*')):
+                    available_spaces.append(space_name)
+            
+            if space in available_spaces:
+                results['space'] = {'status': 'ok', 'message': f'{space} available', 'value': space}
+            elif available_spaces:
+                results['space'] = {'status': 'warning', 'message': f'{space} not found. Available: {", ".join(available_spaces)}', 'value': available_spaces[0]}
+            else:
+                results['space'] = {'status': 'warning', 'message': 'No spaces detected'}
+        else:
+            results['space'] = {'status': 'na', 'message': 'fMRIPrep folder not available', 'value': space}
+        
+        # Check if smoothing is done
+        output_path = Path(config.output_folder) if config.output_folder else None
+        if output_path and output_path.exists():
+            smooth_files = list(output_path.glob('**/*desc-smth*')) + list(output_path.glob('**/smooth/**/*.nii*'))
+            if smooth_files:
+                results['smooth'] = {'status': 'ok', 'message': f'Smoothing done ({len(smooth_files)} files)', 'value': 'Yes'}
+            else:
+                results['smooth'] = {'status': 'na', 'message': 'No smoothed files found', 'value': 'No'}
+        else:
+            results['smooth'] = {'status': 'na', 'message': 'Output folder not available', 'value': 'No'}
+        
+        # Include available spaces for dropdown
+        results['available_spaces'] = available_spaces
+        
+        return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

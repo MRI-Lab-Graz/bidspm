@@ -65,22 +65,48 @@
                         <div class="small text-muted mb-3">
                             {% if project.config.bids_folder %}
                             <div class="text-truncate mb-1">
-                                <i class="fas fa-database me-1"></i>
+                                <i class="fas fa-database me-1 text-primary"></i>
                                 <span title="{{ project.config.bids_folder }}">{{ project.config.bids_folder | truncate(40) }}</span>
                             </div>
                             {% endif %}
-                            {% if project.config.tasks %}
+                            {% if project.config.output_folder %}
+                            <div class="text-truncate mb-1">
+                                <i class="fas fa-folder-open me-1 text-success"></i>
+                                <span title="{{ project.config.output_folder }}">{{ project.config.output_folder | truncate(40) }}</span>
+                            </div>
+                            {% endif %}
+                            {% if project.config.container_type and project.config.container_type != 'local' %}
                             <div class="mb-1">
-                                <i class="fas fa-tasks me-1"></i>
-                                Tasks: {{ project.config.tasks | join(', ') }}
+                                <i class="fas fa-box me-1 text-info"></i>
+                                {{ project.config.container_type | capitalize }}
                             </div>
                             {% endif %}
-                            {% if project.config.actions %}
-                            <div>
-                                <i class="fas fa-play-circle me-1"></i>
-                                Actions: {{ project.config.actions | join(', ') }}
+                        </div>
+                        
+                        <!-- Preflight Checks -->
+                        <div class="preflight-checks border rounded p-2 mb-3 bg-light" data-project-id="{{ project.id }}">
+                            <div class="d-flex flex-wrap gap-2 align-items-center x-small">
+                                <span class="preflight-item" data-check="bids_folder" title="BIDS Folder">
+                                    <i class="fas fa-spinner fa-spin text-muted"></i>
+                                    <span class="ms-1">BIDS</span>
+                                </span>
+                                <span class="preflight-item" data-check="fmriprep_folder" title="fMRIPrep Folder">
+                                    <i class="fas fa-spinner fa-spin text-muted"></i>
+                                    <span class="ms-1">fMRIPrep</span>
+                                </span>
+                                <span class="preflight-item" data-check="events" title="Event Files">
+                                    <i class="fas fa-spinner fa-spin text-muted"></i>
+                                    <span class="ms-1">Events</span>
+                                </span>
+                                <span class="preflight-item" data-check="space" title="Space Available">
+                                    <i class="fas fa-spinner fa-spin text-muted"></i>
+                                    <span class="ms-1">Space</span>
+                                </span>
+                                <span class="preflight-item" data-check="smooth" title="Smoothing Status">
+                                    <i class="fas fa-spinner fa-spin text-muted"></i>
+                                    <span class="ms-1">Smooth</span>
+                                </span>
                             </div>
-                            {% endif %}
                         </div>
                         
                         <!-- Timestamps -->
@@ -128,7 +154,7 @@
 
 <!-- New Project Modal -->
 <div class="modal fade" id="newProjectModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-folder-plus me-2"></i>New Project</h5>
@@ -136,13 +162,66 @@
             </div>
             <div class="modal-body">
                 <form id="new-project-form">
-                    <div class="mb-3">
-                        <label for="project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="project-name" required placeholder="e.g., Study 107 Analysis">
+                    <!-- Basic Info -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3"><i class="fas fa-info-circle me-2"></i>Basic Information</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="project-name" required placeholder="e.g., Study 107 Analysis">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="project-description" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="project-description" placeholder="Brief description...">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="project-description" class="form-label">Description</label>
-                        <textarea class="form-control" id="project-description" rows="3" placeholder="Brief description of your analysis project..."></textarea>
+                    
+                    <!-- Folders -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3 mt-4"><i class="fas fa-folder me-2"></i>Folders</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="project-bids-folder" class="form-label">BIDS Folder <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="project-bids-folder" placeholder="/path/to/bids/dataset">
+                            <small class="text-muted">Path to raw BIDS data</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="project-output-folder" class="form-label">Output Folder</label>
+                            <input type="text" class="form-control" id="project-output-folder" placeholder="/path/to/output">
+                            <small class="text-muted">Where to write results</small>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="project-fmriprep-folder" class="form-label">fMRIPrep Folder</label>
+                            <input type="text" class="form-control" id="project-fmriprep-folder" placeholder="/path/to/fmriprep">
+                            <small class="text-muted">Existing preprocessed data (optional)</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="project-space" class="form-label">Space <span class="space-loader d-none"><i class="fas fa-spinner fa-spin text-muted"></i></span></label>
+                            <select class="form-select" id="project-space">
+                                <option value="MNI152NLin2009cAsym" selected>MNI152NLin2009cAsym</option>
+                                <option value="MNI152NLin6Asym">MNI152NLin6Asym</option>
+                                <option value="T1w">T1w (native)</option>
+                            </select>
+                            <small class="text-muted">Auto-detected from fMRIPrep folder</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Container -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3 mt-4"><i class="fas fa-box me-2"></i>Container Settings</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Container Type</label>
+                            <select class="form-select" id="project-container-type">
+                                <option value="local" selected>Local (No Container)</option>
+                                <option value="apptainer">Apptainer</option>
+                                <option value="docker">Docker</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label for="project-container-image" class="form-label">Container Image</label>
+                            <input type="text" class="form-control" id="project-container-image" placeholder="Path to .sif or Docker image name" disabled>
+                            <small class="text-muted">Apptainer: path to .sif file | Docker: image name</small>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -158,7 +237,7 @@
 
 <!-- Edit Project Modal -->
 <div class="modal fade" id="editProjectModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Edit Project</h5>
@@ -167,13 +246,67 @@
             <div class="modal-body">
                 <form id="edit-project-form">
                     <input type="hidden" id="edit-project-id">
-                    <div class="mb-3">
-                        <label for="edit-project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="edit-project-name" required>
+                    
+                    <!-- Basic Info -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3"><i class="fas fa-info-circle me-2"></i>Basic Information</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit-project-name" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-project-description" class="form-label">Description</label>
+                            <input type="text" class="form-control" id="edit-project-description">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="edit-project-description" class="form-label">Description</label>
-                        <textarea class="form-control" id="edit-project-description" rows="3"></textarea>
+                    
+                    <!-- Folders -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3 mt-4"><i class="fas fa-folder me-2"></i>Folders</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-bids-folder" class="form-label">BIDS Folder <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit-bids-folder" placeholder="/path/to/bids/dataset">
+                            <small class="text-muted">Path to raw BIDS data</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-output-folder" class="form-label">Output Folder</label>
+                            <input type="text" class="form-control" id="edit-output-folder" placeholder="/path/to/output">
+                            <small class="text-muted">Where to write results</small>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="edit-fmriprep-folder" class="form-label">fMRIPrep Folder</label>
+                            <input type="text" class="form-control" id="edit-fmriprep-folder" placeholder="/path/to/fmriprep">
+                            <small class="text-muted">Existing preprocessed data (optional)</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-space" class="form-label">Space <span class="edit-space-loader d-none"><i class="fas fa-spinner fa-spin text-muted"></i></span></label>
+                            <select class="form-select" id="edit-space">
+                                <option value="MNI152NLin2009cAsym">MNI152NLin2009cAsym</option>
+                                <option value="MNI152NLin6Asym">MNI152NLin6Asym</option>
+                                <option value="T1w">T1w (native)</option>
+                            </select>
+                            <small class="text-muted">Auto-detected from fMRIPrep folder</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Container -->
+                    <h6 class="text-muted text-uppercase small fw-bold mb-3 mt-4"><i class="fas fa-box me-2"></i>Container Settings</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Container Type</label>
+                            <select class="form-select" id="edit-container-type">
+                                <option value="local">Local (No Container)</option>
+                                <option value="apptainer">Apptainer</option>
+                                <option value="docker">Docker</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label for="edit-container-image" class="form-label">Container Image</label>
+                            <input type="text" class="form-control" id="edit-container-image" placeholder="Path to .sif or Docker image name">
+                            <small class="text-muted">Apptainer: path to .sif file | Docker: image name</small>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -233,27 +366,214 @@
     .card-header h5 {
         font-size: 1.1rem;
     }
+    .preflight-item {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: #fff;
+        border: 1px solid #dee2e6;
+    }
+    .preflight-item.ok {
+        border-color: #198754;
+        background: #d1e7dd;
+    }
+    .preflight-item.warning {
+        border-color: #ffc107;
+        background: #fff3cd;
+    }
+    .preflight-item.error {
+        border-color: #dc3545;
+        background: #f8d7da;
+    }
+    .preflight-item.na {
+        border-color: #6c757d;
+        background: #e9ecef;
+    }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Fetch preflight checks for all projects
+    async function fetchPreflightChecks() {
+        const preflightContainers = document.querySelectorAll('.preflight-checks');
+        for (const container of preflightContainers) {
+            const projectId = container.dataset.projectId;
+            try {
+                const response = await fetch(`/api/projects/${projectId}/preflight`);
+                const data = await response.json();
+                updatePreflightIcons(container, data);
+            } catch (error) {
+                console.error(`Failed to fetch preflight for ${projectId}:`, error);
+                // Show error state
+                container.querySelectorAll('.preflight-item').forEach(item => {
+                    item.classList.add('na');
+                    item.querySelector('i').className = 'fas fa-question text-muted';
+                });
+            }
+        }
+    }
+    
+    function updatePreflightIcons(container, data) {
+        const checks = {
+            bids_folder: data.bids_folder,
+            fmriprep_folder: data.fmriprep_folder,
+            events: data.events,
+            space: data.space,
+            smooth: data.smooth
+        };
+        
+        for (const [key, check] of Object.entries(checks)) {
+            const item = container.querySelector(`[data-check="${key}"]`);
+            if (!item) continue;
+            
+            const icon = item.querySelector('i');
+            const label = item.querySelector('span');
+            
+            item.classList.remove('ok', 'warning', 'error', 'na');
+            
+            if (check.status === 'ok') {
+                item.classList.add('ok');
+                icon.className = 'fas fa-check text-success';
+            } else if (check.status === 'warning') {
+                item.classList.add('warning');
+                icon.className = 'fas fa-exclamation-triangle text-warning';
+            } else if (check.status === 'error') {
+                item.classList.add('error');
+                icon.className = 'fas fa-times text-danger';
+            } else {
+                item.classList.add('na');
+                icon.className = 'fas fa-minus text-muted';
+            }
+            
+            item.title = check.message || key;
+            
+            // Update label with extra info if available
+            if (check.value) {
+                label.textContent = check.value;
+            }
+        }
+    }
+    
+    // Fetch preflight checks on page load
+    fetchPreflightChecks();
+    
+    // Auto-detect spaces from fMRIPrep folder
+    async function detectSpaces(fmriprepPath, selectElement, loaderElement) {
+        if (!fmriprepPath) return;
+        
+        loaderElement?.classList.remove('d-none');
+        try {
+            const response = await fetch('/api/detect-spaces', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: fmriprepPath })
+            });
+            const data = await response.json();
+            
+            if (data.spaces && data.spaces.length > 0) {
+                const currentValue = selectElement.value;
+                selectElement.innerHTML = '';
+                data.spaces.forEach(space => {
+                    const option = document.createElement('option');
+                    option.value = space;
+                    option.textContent = space;
+                    if (space === currentValue || (data.spaces.length === 1)) {
+                        option.selected = true;
+                    }
+                    selectElement.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Failed to detect spaces:', error);
+        } finally {
+            loaderElement?.classList.add('d-none');
+        }
+    }
+    
+    // Detect spaces when fMRIPrep folder changes (new project)
+    let newProjectSpaceTimeout;
+    document.getElementById('project-fmriprep-folder')?.addEventListener('input', function() {
+        clearTimeout(newProjectSpaceTimeout);
+        newProjectSpaceTimeout = setTimeout(() => {
+            detectSpaces(
+                this.value.trim(),
+                document.getElementById('project-space'),
+                document.querySelector('.space-loader')
+            );
+        }, 500);
+    });
+    
+    // Detect spaces when fMRIPrep folder changes (edit project)
+    let editProjectSpaceTimeout;
+    document.getElementById('edit-fmriprep-folder')?.addEventListener('input', function() {
+        clearTimeout(editProjectSpaceTimeout);
+        editProjectSpaceTimeout = setTimeout(() => {
+            detectSpaces(
+                this.value.trim(),
+                document.getElementById('edit-space'),
+                document.querySelector('.edit-space-loader')
+            );
+        }, 500);
+    });
+    
+    // Container type toggle for new project
+    document.getElementById('project-container-type')?.addEventListener('change', function() {
+        const imageInput = document.getElementById('project-container-image');
+        if (this.value === 'local') {
+            imageInput.disabled = true;
+            imageInput.value = '';
+        } else {
+            imageInput.disabled = false;
+            imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
+        }
+    });
+    
+    // Container type toggle for edit project
+    document.getElementById('edit-container-type')?.addEventListener('change', function() {
+        const imageInput = document.getElementById('edit-container-image');
+        if (this.value === 'local') {
+            imageInput.disabled = true;
+            imageInput.value = '';
+        } else {
+            imageInput.disabled = false;
+            imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
+        }
+    });
+    
     // New Project
     document.getElementById('btn-create-project')?.addEventListener('click', async function() {
         const name = document.getElementById('project-name').value.trim();
         const description = document.getElementById('project-description').value.trim();
+        const bidsFolder = document.getElementById('project-bids-folder').value.trim();
+        const outputFolder = document.getElementById('project-output-folder').value.trim();
+        const fmriprepFolder = document.getElementById('project-fmriprep-folder').value.trim();
+        const space = document.getElementById('project-space').value;
+        const containerType = document.getElementById('project-container-type').value;
+        const containerImage = document.getElementById('project-container-image').value.trim();
         
         if (!name) {
             alert('Project name is required');
             return;
         }
         
+        const config = {
+            bids_folder: bidsFolder,
+            output_folder: outputFolder,
+            fmriprep_folder: fmriprepFolder,
+            space: space,
+            container_type: containerType,
+            apptainer_image: containerType === 'apptainer' ? containerImage : '',
+            docker_image: containerType === 'docker' ? containerImage : 'bidspm/bidspm:latest'
+        };
+        
         try {
             const response = await fetch('/api/projects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, description })
+                body: JSON.stringify({ name, description, config })
             });
             
             const result = await response.json();
@@ -279,10 +599,21 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const response = await fetch(`/api/projects/${projectId}`);
                 const project = await response.json();
+                const config = project.config || {};
                 
                 document.getElementById('edit-project-id').value = projectId;
                 document.getElementById('edit-project-name').value = project.name;
                 document.getElementById('edit-project-description').value = project.description || '';
+                document.getElementById('edit-bids-folder').value = config.bids_folder || '';
+                document.getElementById('edit-output-folder').value = config.output_folder || '';
+                document.getElementById('edit-fmriprep-folder').value = config.fmriprep_folder || '';
+                document.getElementById('edit-space').value = config.space || 'MNI152NLin2009cAsym';
+                document.getElementById('edit-container-type').value = config.container_type || 'local';
+                
+                const containerImage = config.container_type === 'apptainer' ? config.apptainer_image : 
+                                       config.container_type === 'docker' ? config.docker_image : '';
+                document.getElementById('edit-container-image').value = containerImage || '';
+                document.getElementById('edit-container-image').disabled = config.container_type === 'local';
                 
                 new bootstrap.Modal(document.getElementById('editProjectModal')).show();
             } catch (error) {
@@ -296,17 +627,33 @@ document.addEventListener('DOMContentLoaded', function() {
         const projectId = document.getElementById('edit-project-id').value;
         const name = document.getElementById('edit-project-name').value.trim();
         const description = document.getElementById('edit-project-description').value.trim();
+        const bidsFolder = document.getElementById('edit-bids-folder').value.trim();
+        const outputFolder = document.getElementById('edit-output-folder').value.trim();
+        const fmriprepFolder = document.getElementById('edit-fmriprep-folder').value.trim();
+        const space = document.getElementById('edit-space').value;
+        const containerType = document.getElementById('edit-container-type').value;
+        const containerImage = document.getElementById('edit-container-image').value.trim();
         
         if (!name) {
             alert('Project name is required');
             return;
         }
         
+        const config = {
+            bids_folder: bidsFolder,
+            output_folder: outputFolder,
+            fmriprep_folder: fmriprepFolder,
+            space: space,
+            container_type: containerType,
+            apptainer_image: containerType === 'apptainer' ? containerImage : '',
+            docker_image: containerType === 'docker' ? containerImage : 'bidspm/bidspm:latest'
+        };
+        
         try {
             const response = await fetch(`/api/projects/${projectId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, description })
+                body: JSON.stringify({ name, description, config })
             });
             
             if (response.ok) {
