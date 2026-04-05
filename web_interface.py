@@ -1,60 +1,85 @@
 #!/usr/bin/env python3
+"""
+BIDSPM Web Interface - Visual/API Layer Only
+
+This module provides the Flask web interface for BIDSPM.
+All business logic is delegated to lib/core.py to avoid code duplication.
+
+The web interface handles:
+- API endpoints for frontend communication
+- Project management
+- File browsing
+- Streaming output to clients
+- Visual configuration
+
+Structure aligned with bids_apps_runner:
+- /projects - Project management page
+- /analysis - Analysis/execution page (with project context)
+
+It does NOT handle:
+- Model validation logic (use lib.core.validate_bids_model)
+- Pipeline execution logic (use lib.core.Pipeline)
+- MATLAB detection (use lib.core.detect_matlab_environment)
+"""
 
 import os
-import subprocess
-import threading
 import json
 import secrets
 import socket
-import sys
-import time
+import subprocess
 import signal
+import threading
+import time
 import re
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, redirect, url_for
 from waitress import serve
+
+# Import all business logic from core
+from lib import (
+    Pipeline, PipelineOptions, PipelineResult,
+    detect_matlab_environment, check_feature_availability,
+    discover_subjects, discover_tasks, discover_spaces,
+    validate_bids_model, estimate_processing_time,
+    load_config
+)
+from lib.config import auto_select_container_config
+from lib.project_manager import ProjectManager, Project, ProjectConfig, project_manager
+
+
+# =============================================================================
+# App Configuration
+# =============================================================================
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
-# Path to the main script
+# Version info
+__version__ = "2.0.0"
+app.config['APP_VERSION'] = __version__
+
+# Execution state
 BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
 PYTHON_EXE = os.path.abspath(".bidspm/bin/python")
-LOG_FILE = os.path.abspath("logs/run_bidspm.log")
+LOG_DIR = Path("logs")
 
-# Store outputs for streaming
-# Key: execution_id, Value: dict with output list and status
-executions = {}
-current_execution_id = None
+# Store running executions (with periodic cleanup)
+executions: Dict[str, Dict[str, Any]] = {}
+current_execution_id: Optional[str] = None
+current_project_id: Optional[str] = None
+MAX_EXECUTIONS = 50  # Cleanup threshold
 
-def check_empty_contrasts(model):
-    """Check for empty or missing contrast definitions."""
-    issues = []
-    
-    if 'Steps' not in model:
-        return issues
-    
-    for step_idx, step in enumerate(model.get('Steps', [])):
-        if 'Level' not in step:
-            continue
-            
-        for contrast in step.get('Contrasts', []):
-            # Check for missing name
-            if 'Name' not in contrast or not contrast.get('Name', '').strip():
-                issues.append(f"Step {step_idx}: Contrast missing or empty 'Name' field")
-            
-            # Check for missing or empty condition list
-            if 'ConditionList' not in contrast or not contrast.get('ConditionList'):
-                contrast_name = contrast.get('Name', 'unnamed')
-                issues.append(f"Step {step_idx}: Contrast '{contrast_name}' has empty or missing 'ConditionList'")
-            
-            # Check for empty Weights if ConditionList exists
-            if 'Weights' in contrast and not contrast.get('Weights'):
-                contrast_name = contrast.get('Name', 'unnamed')
-                issues.append(f"Step {step_idx}: Contrast '{contrast_name}' has empty 'Weights' vector")
-    
-    return issues
 
-def find_free_port(start_port=5000, max_tries=100):
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def find_free_port(start_port: int = 5000, max_tries: int = 100) -> Optional[int]:
+    """Find an available port."""
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -64,83 +89,306 @@ def find_free_port(start_port=5000, max_tries=100):
                 continue
     return None
 
-@app.route('/get_model_tasks')
-def get_model_tasks():
-    path = request.args.get('path')
-    if not path or not os.path.isfile(path):
-        return jsonify({"error": "Invalid file path"})
-    try:
-        with open(path, 'r') as f:
-            data = json.load(f)
-            tasks = data.get('Input', {}).get('task', [])
-            return jsonify({"tasks": tasks})
-    except Exception as e:
-        return jsonify({"error": str(e)})
 
-@app.route('/file_content')
-def file_content():
-    path = request.args.get('path')
-    if not path or not os.path.isfile(path):
-        return "File not found", 404
-    try:
-        with open(path, 'r') as f:
-            return f.read()
-    except Exception as e:
-        return f"Error reading file: {str(e)}", 500
+def cleanup_old_executions():
+    """Remove old completed executions to prevent memory growth."""
+    global executions
+    if len(executions) <= MAX_EXECUTIONS:
+        return
+    
+    # Remove oldest finished executions
+    finished = [(eid, e) for eid, e in executions.items() if e.get('finished')]
+    finished.sort(key=lambda x: x[1].get('start_time', 0))
+    
+    to_remove = len(executions) - MAX_EXECUTIONS
+    for eid, _ in finished[:to_remove]:
+        del executions[eid]
+
+
+# =============================================================================
+# Main Pages
+# =============================================================================
+
+@app.route('/test')
+def test_page():
+    """Simple test page to verify server is working."""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head><title>BIDSPM Test</title></head>
+    <body style="font-family: sans-serif; padding: 20px;">
+        <h1>BIDSPM Web Interface - Test Page</h1>
+        <p>If you see this, the server is working correctly.</p>
+        <p><a href="/">Go to main interface</a></p>
+        <h2>System Info:</h2>
+        <ul>
+            <li>Server: Flask + Waitress</li>
+            <li>Templates: Jinja2</li>
+        </ul>
+    </body>
+    </html>
+    """
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    """Redirect to projects page."""
+    return redirect(url_for('projects_page'))
+
+
+@app.route('/projects')
+def projects_page():
+    """Render projects management page."""
+    projects = project_manager.list_projects()
+    return render_template('projects.html', 
+                          projects=projects,
+                          project_count=len(projects))
+
+
+@app.route('/analysis')
+@app.route('/analysis/<project_id>')
+def analysis_page(project_id: Optional[str] = None):
+    """Render analysis page, optionally with a project loaded."""
+    project = None
+    projects = project_manager.list_projects()
+    
+    if project_id:
+        project = project_manager.load_project(project_id)
+    
+    return render_template('analysis.html', 
+                          project=project,
+                          projects=projects,
+                          current_project_id=project_id)
+
+
+# =============================================================================
+# Project Management API
+# =============================================================================
+
+@app.route('/api/projects', methods=['GET'])
+def api_list_projects():
+    """List all projects."""
+    try:
+        projects = project_manager.list_projects()
+        return jsonify({
+            "projects": [p.to_dict() for p in projects],
+            "count": len(projects)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects', methods=['POST'])
+def api_create_project():
+    """Create a new project."""
+    try:
+        data = request.json or {}
+        name = data.get('name', '').strip()
+        description = data.get('description', '').strip()
+        
+        if not name:
+            return jsonify({"error": "Project name is required"}), 400
+        
+        project = project_manager.create_project(name, description)
+        return jsonify({
+            "project": project.to_dict(),
+            "message": f"Project '{name}' created successfully"
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>', methods=['GET'])
+def api_get_project(project_id: str):
+    """Get a project by ID."""
+    try:
+        project = project_manager.load_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        return jsonify(project.to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>', methods=['PUT'])
+def api_update_project(project_id: str):
+    """Update a project."""
+    try:
+        project = project_manager.load_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        
+        data = request.json or {}
+        
+        if 'name' in data:
+            project.name = data['name']
+        if 'description' in data:
+            project.description = data['description']
+        if 'config' in data:
+            project.config = ProjectConfig.from_dict(data['config'])
+        
+        project_manager.save_project(project)
+        return jsonify({
+            "project": project.to_dict(),
+            "message": "Project updated successfully"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>', methods=['DELETE'])
+def api_delete_project(project_id: str):
+    """Delete a project."""
+    try:
+        project = project_manager.load_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        
+        name = project.name
+        project_manager.delete_project(project_id)
+        return jsonify({"message": f"Project '{name}' deleted successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/duplicate', methods=['POST'])
+def api_duplicate_project(project_id: str):
+    """Duplicate a project."""
+    try:
+        data = request.json or {}
+        new_name = data.get('name')
+        
+        new_project = project_manager.duplicate_project(project_id, new_name)
+        if not new_project:
+            return jsonify({"error": "Project not found"}), 404
+        
+        return jsonify({
+            "project": new_project.to_dict(),
+            "message": f"Project duplicated as '{new_project.name}'"
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/config', methods=['GET'])
+def api_get_project_config(project_id: str):
+    """Get project configuration."""
+    try:
+        project = project_manager.load_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        return jsonify(project.config.to_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/config', methods=['PUT'])
+def api_update_project_config(project_id: str):
+    """Update project configuration."""
+    try:
+        data = request.json or {}
+        success = project_manager.update_project_config(project_id, data)
+        if not success:
+            return jsonify({"error": "Project not found"}), 404
+        return jsonify({"message": "Configuration updated successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/import', methods=['POST'])
+def api_import_config(project_id: str):
+    """Import configuration from existing config file."""
+    try:
+        data = request.json or {}
+        config_path = data.get('path')
+        
+        if not config_path or not os.path.exists(config_path):
+            return jsonify({"error": "Config file not found"}), 400
+        
+        success = project_manager.import_config(project_id, Path(config_path))
+        if not success:
+            return jsonify({"error": "Failed to import configuration"}), 500
+        
+        return jsonify({"message": "Configuration imported successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/export', methods=['GET'])
+def api_export_config(project_id: str):
+    """Export project configuration in BIDSPM format."""
+    try:
+        format_type = request.args.get('format', 'bidspm')
+        config = project_manager.export_config(project_id, format_type)
+        
+        if not config:
+            return jsonify({"error": "Project not found"}), 404
+        
+        return jsonify(config)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/projects/<project_id>/logs', methods=['GET'])
+def api_get_project_logs(project_id: str):
+    """Get project execution logs."""
+    try:
+        logs_dir = project_manager.get_project_logs_dir(project_id)
+        
+        if not logs_dir.exists():
+            return jsonify({"logs": []})
+        
+        logs = []
+        for log_file in sorted(logs_dir.glob("*.log"), reverse=True):
+            stat = log_file.stat()
+            logs.append({
+                "name": log_file.name,
+                "path": str(log_file),
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+        
+        return jsonify({"logs": logs})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# Pipeline Execution
+# =============================================================================
 
 @app.route('/run', methods=['POST'])
 def run_bidspm():
+    """
+    Start pipeline execution.
+    Delegates to lib.core.Pipeline but runs in subprocess for isolation.
+    Supports project context for organized log storage.
+    """
+    global current_project_id
+    
     data = request.json
     actions = data.get('actions', [])
-    execution_id = secrets.token_hex(8)
+    project_id = data.get('project_id')
     
     if not actions:
         return jsonify({"error": "No actions selected"}), 400
     
-    # Auto-validate model if provided and stats action is requested
+    execution_id = secrets.token_hex(8)
+    current_project_id = project_id
+    
+    # Pre-validate model if provided (uses core module)
     model_file = data.get('model')
     if model_file and any('stats' in action.lower() for action in actions):
-        # Only validate if not explicitly skipped
         if not data.get('skip_validation'):
-            try:
-                if not os.path.isfile(model_file):
-                    return jsonify({"error": f"Model file not found: {model_file}"}), 400
-                
-                # Load and validate the model
-                with open(model_file, 'r') as f:
-                    model_content = json.load(f)
-                
-                # Use the validation function from validate_model endpoint
-                import requests
-                from jsonschema import validate, ValidationError
-                
-                schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
-                schema = requests.get(schema_url, timeout=10).json()
-                validate(instance=model_content, schema=schema)
-                
-                # Check for semantic issues (empty contrasts)
-                contrast_issues = check_empty_contrasts(model_content)
-                if contrast_issues:
-                    return jsonify({
-                        "error": f"Model validation failed - Empty contrast issues: {'; '.join(contrast_issues)}"
-                    }), 400
-                
-            except json.JSONDecodeError as e:
-                return jsonify({"error": f"Invalid JSON in model file: {str(e)}"}), 400
-            except ValidationError as e:
-                # Allow non-standard transformer warnings
-                if "'pybids-transforms-v1' was expected" not in e.message and "transformer" not in e.message.lower():
-                    return jsonify({"error": f"Model validation failed: {e.message}"}), 400
-            except requests.RequestException as e:
-                return jsonify({"error": f"Could not fetch validation schema: {str(e)}"}), 503
-            except Exception as e:
-                return jsonify({"error": f"Model validation error: {str(e)}"}), 400
+            if not os.path.isfile(model_file):
+                return jsonify({"error": f"Model file not found: {model_file}"}), 400
+            
+            result = validate_bids_model(Path(model_file))
+            if not result["valid"]:
+                return jsonify({"error": f"Model validation failed: {result.get('error', 'Unknown error')}"}), 400
 
-    command = [PYTHON_EXE, BIDSPM_SCRIPT]
+    # Build command
+    python_exe = PYTHON_EXE if os.path.exists(PYTHON_EXE) else "python3"
+    command = [python_exe, BIDSPM_SCRIPT]
     command.extend(['--action'] + actions)
     
     if data.get('settings'):
@@ -155,22 +403,36 @@ def run_bidspm():
         command.append('--skip-modelvalidation')
     if data.get('local'):
         command.append('--local')
+    if data.get('force'):
+        command.append('--force')
 
+    cleanup_old_executions()
+    
     executions[execution_id] = {
         'command': command,
         'output': [],
         'finished': False,
-        'process': None
+        'process': None,
+        'start_time': time.time(),
+        'project_id': project_id
     }
 
     def execute():
         global current_execution_id
         current_execution_id = execution_id
         
-        # Ensure log dir exists
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        # Use project-specific log directory if available
+        if project_id:
+            log_dir = project_manager.get_project_logs_dir(project_id)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"run_{timestamp}.log"
+            log_file = log_dir / log_filename
+        else:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            log_file = LOG_DIR / "web_run.log"
+            log_filename = "web_run.log"
         
-        # Set environment to disable Python output buffering
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
         
@@ -179,44 +441,56 @@ def run_bidspm():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,  # Line buffered
+            bufsize=1,
             universal_newlines=True,
             start_new_session=True,
             env=env
         )
         executions[execution_id]['process'] = process
+        executions[execution_id]['log_file'] = str(log_file)
 
-        msg = f"Executing: {' '.join(command)}\n"
+        msg = f"[{datetime.now().isoformat()}] Executing: {' '.join(command)}\n"
         executions[execution_id]['output'].append(msg)
         
-        with open(LOG_FILE, "a") as log:
-            log.write(f"\n[{execution_id}] {msg}")
+        with open(log_file, "a") as log:
+            log.write(f"\n{'='*80}\n")
+            log.write(msg)
+            log.write(f"{'='*80}\n\n")
 
         try:
             for line in process.stdout:
                 executions[execution_id]['output'].append(line)
-                # Write to log file immediately for real-time debugging
-                with open(LOG_FILE, "a") as log:
+                with open(log_file, "a") as log:
                     log.write(line)
         except Exception as e:
             error_msg = f"\nError reading output: {str(e)}\n"
             executions[execution_id]['output'].append(error_msg)
-            with open(LOG_FILE, "a") as log:
-                log.write(error_msg)
 
         process.wait()
-        finish_msg = f"\nProcess finished with exit code {process.returncode}\n"
+        finish_msg = f"\n[{datetime.now().isoformat()}] Process finished with exit code {process.returncode}\n"
         executions[execution_id]['output'].append(finish_msg)
         executions[execution_id]['finished'] = True
+        executions[execution_id]['return_code'] = process.returncode
+        
+        with open(log_file, "a") as log:
+            log.write(finish_msg)
+        
+        # Update project's last log reference
+        if project_id:
+            project_manager.update_project_log(project_id, log_filename)
 
-    thread = threading.Thread(target=execute)
-    thread.daemon = True
+    thread = threading.Thread(target=execute, daemon=True)
     thread.start()
 
-    return jsonify({"execution_id": execution_id})
+    return jsonify({
+        "execution_id": execution_id,
+        "project_id": project_id
+    })
+
 
 @app.route('/stream/<execution_id>')
-def stream_output(execution_id):
+def stream_output(execution_id: str):
+    """Stream execution output to client via SSE."""
     def generate():
         if execution_id not in executions:
             yield "data: Error: Execution not found\n\n"
@@ -226,7 +500,6 @@ def stream_output(execution_id):
         while True:
             if idx < len(executions[execution_id]['output']):
                 line = executions[execution_id]['output'][idx]
-                # Strip control characters/backspaces to keep terminal view readable
                 line = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', line)
                 line = line.rstrip("\n")
                 yield f"data: {line}\n\n"
@@ -234,173 +507,309 @@ def stream_output(execution_id):
             elif executions[execution_id]['finished']:
                 break
             else:
-                time.sleep(0.05)  # Reduced from 0.1 for faster updates
+                time.sleep(0.05)
                 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
+
 @app.route('/stop', methods=['POST'])
 def stop_execution():
+    """Stop current execution."""
     global current_execution_id
-    if current_execution_id and current_execution_id in executions:
-        exec_info = executions[current_execution_id]
-        if not exec_info['finished'] and exec_info['process']:
-            # Send SIGINT to the process group to ensure children (like containers) are stopped
-            try:
-                # Check if process is still running
-                if exec_info['process'].poll() is None:
-                    try:
-                        os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGINT)
-                        time.sleep(1)
-                        # If still running, escalate to SIGTERM
-                        if exec_info['process'].poll() is None:
-                            os.killpg(os.getpgid(exec_info['process'].pid), signal.SIGTERM)
-                            time.sleep(0.5)
-                    except ProcessLookupError:
-                        # Process already terminated
-                        pass
-                    except Exception as e:
-                        print(f"Error with killpg, trying terminate: {e}")
-                        exec_info['process'].terminate()
-                        time.sleep(0.5)
-                        if exec_info['process'].poll() is None:
-                            exec_info['process'].kill()
-            except Exception as e:
-                print(f"Error stopping process: {e}")
-                try:
-                    exec_info['process'].terminate()
-                except:
-                    pass
-            
-            exec_info['output'].append("\n--- Execution stopped by user ---\n")
-            exec_info['finished'] = True
-            return jsonify({"status": "stopped"})
-    return jsonify({"status": "no process running"})
-
-@app.route('/save_config', methods=['POST'])
-def save_config():
-    data = request.json
-    config_data = data.get('config')
-    folder = data.get('folder', 'configs')
-    filename = data.get('filename', f"config_{int(time.time())}.json")
     
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    if not current_execution_id or current_execution_id not in executions:
+        return jsonify({"status": "no process running"})
     
-    filepath = os.path.join(folder, filename)
-    with open(filepath, 'w') as f:
-        json.dump(config_data, f, indent=4)
+    exec_info = executions[current_execution_id]
     
-    return jsonify({"status": "saved", "path": filepath})
-
-@app.route('/configs', methods=['GET'])
-def list_configs():
-    folder = request.args.get('folder', 'configs')
-    if not os.path.exists(folder):
-        return jsonify([])
+    if exec_info['finished'] or not exec_info['process']:
+        return jsonify({"status": "already finished"})
+    
     try:
-        files = [f for f in os.listdir(folder) if f.endswith('.json')]
-        return jsonify(files)
-    except Exception:
-        return jsonify([])
-
-@app.route('/load_config', methods=['GET'])
-def load_config():
-    folder = request.args.get('folder', 'configs')
-    filename = request.args.get('filename')
-    if not filename:
-        return jsonify({"error": "No filename provided"}), 400
-    
-    filepath = os.path.join(folder, filename)
-    if not os.path.exists(filepath):
-        return jsonify({"error": "File not found"}), 404
+        proc = exec_info['process']
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                time.sleep(1)
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                proc.terminate()
+                if proc.poll() is None:
+                    proc.kill()
         
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-    return jsonify(data)
+        exec_info['output'].append("\n--- Execution stopped by user ---\n")
+        exec_info['finished'] = True
+        return jsonify({"status": "stopped"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/load_config_file', methods=['GET'])
+
+# =============================================================================
+# Discovery Endpoints (delegate to core)
+# =============================================================================
+
+@app.route('/get_bids_tasks')
+def get_bids_tasks():
+    """Get tasks from BIDS directory."""
+    path = request.args.get('path')
+    if not path or not os.path.isdir(path):
+        return jsonify([])
+    
+    tasks = discover_tasks(Path(path))
+    return jsonify(tasks)
+
+
+@app.route('/get_fmriprep_spaces')
+def get_fmriprep_spaces():
+    """Get available spaces from fMRIPrep derivatives."""
+    path = request.args.get('path')
+    tasks = request.args.getlist('tasks')
+    
+    if not path or not os.path.isdir(path):
+        return jsonify([])
+    
+    spaces = discover_spaces(Path(path), tasks if tasks else None)
+    return jsonify(spaces)
+
+
+@app.route('/get_subjects')
+def get_subjects():
+    """Get available subjects from config."""
+    config_path = request.args.get('config', 'config/config.json')
+    
+    if not os.path.isfile(config_path):
+        return jsonify([])
+    
+    try:
+        config = load_config(config_path)
+        subjects = discover_subjects(config)
+        return jsonify(subjects)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/estimate_time', methods=['POST'])
+def api_estimate_time():
+    """Estimate processing time."""
+    data = request.json
+    config_path = data.get('config', 'config/config.json')
+    actions = data.get('actions', ['smooth', 'stats'])
+    
+    try:
+        config = load_config(config_path)
+        subjects = config.SUBJECTS or discover_subjects(config)
+        tasks = config.TASKS
+        
+        estimate = estimate_processing_time(subjects, actions, tasks)
+        return jsonify(estimate)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/check_environment')
+def api_check_environment():
+    """Check MATLAB/container environment."""
+    use_local = request.args.get('local', 'false').lower() == 'true'
+    
+    if use_local:
+        caps = detect_matlab_environment()
+        features = check_feature_availability(caps, using_container=False)
+        return jsonify({
+            "environment": caps.to_dict(),
+            "features": {
+                "smooth": features.smooth,
+                "stats_subject": features.stats_subject,
+                "stats_dataset": features.stats_dataset,
+                "roi_analysis": features.roi_analysis,
+                "custom_contrasts": features.custom_contrasts
+            },
+            "unavailable_reasons": features.unavailable_reasons
+        })
+    else:
+        # Container check
+        import shutil
+        docker = shutil.which("docker") is not None
+        apptainer = shutil.which("apptainer") is not None
+        
+        return jsonify({
+            "docker_available": docker,
+            "apptainer_available": apptainer,
+            "all_features_available": docker or apptainer
+        })
+
+
+# =============================================================================
+# Model Validation (delegate to core)
+# =============================================================================
+
+@app.route('/validate_model', methods=['POST'])
+def api_validate_model():
+    """Validate BIDS stats model using core module."""
+    data = request.json
+    content = data.get('content')
+    
+    if not content:
+        return jsonify({"valid": False, "error": "No content provided"}), 400
+    
+    # Write to temp file for validation
+    temp_path = Path(f"config/temp_model_{secrets.token_hex(4)}.json")
+    
+    try:
+        with open(temp_path, 'w') as f:
+            json.dump(content, f)
+        
+        result = validate_bids_model(temp_path)
+        return jsonify(result)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+@app.route('/get_model_tasks')
+def get_model_tasks():
+    """Get tasks defined in a model file."""
+    path = request.args.get('path')
+    if not path or not os.path.isfile(path):
+        return jsonify({"error": "Invalid file path"})
+    
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+            tasks = data.get('Input', {}).get('task', [])
+            return jsonify({"tasks": tasks})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+# =============================================================================
+# Configuration Endpoints
+# =============================================================================
+
+@app.route('/load_config_file')
 def load_config_file():
+    """Load configuration file."""
     path = request.args.get('path', 'config/config.json')
+    
     if not os.path.exists(path):
-        # Return a template based on schema if file doesn't exist
         return jsonify({
             "WD": "", "BIDS_DIR": "", "DERIVATIVES_DIR": "", "FMRIPREP_DIR": "",
-            "SPACE": "MNI152NLin2009cAsym", "FWHM": 6, "MODELS_FILE": "models/model-001_sct.json",
-            "TASKS": ["taskname"], "VERBOSITY": 3,
-            "container_type": "local", "docker_image": "", "apptainer_image": ""
+            "SPACE": "MNI152NLin2009cAsym", "FWHM": 6, "MODELS_FILE": "",
+            "TASKS": [], "VERBOSITY": 3, "container_type": "local"
         })
+    
     with open(path, 'r') as f:
         return jsonify(json.load(f))
 
+
+@app.route('/save_settings', methods=['POST'])
+def save_settings():
+    """Save configuration to file."""
+    data = request.json
+    filepath = data.get('filepath', 'config/config.json')
+    content = data.get('content')
+    
+    os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+    
+    with open(filepath, 'w') as f:
+        json.dump(content, f, indent=4)
+    
+    return jsonify({"status": "success", "path": filepath})
+
+
+@app.route('/validate_config', methods=['POST'])
+def validate_config():
+    """Validate configuration against schema."""
+    data = request.json
+    content = data.get('content')
+    schema_path = 'config/config_schema.json'
+    
+    if not os.path.exists(schema_path):
+        return jsonify({"valid": False, "error": "Schema file not found"}), 404
+    
+    temp_path = f"config/temp_val_{secrets.token_hex(4)}.json"
+    
+    try:
+        with open(temp_path, 'w') as f:
+            json.dump(content, f)
+        
+        from docs.json_validator import JSONValidator
+        is_valid = JSONValidator.validate_with_schema(temp_path, schema_path)
+        
+        if is_valid:
+            return jsonify({"valid": True})
+        else:
+            return jsonify({"valid": False, "error": "Validation failed"})
+    except Exception as e:
+        return jsonify({"valid": False, "error": str(e)})
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 @app.route('/check_paths', methods=['POST'])
 def check_paths():
+    """Check if configuration paths exist."""
     data = request.json
     results = {}
+    
     for key in ['WD', 'BIDS_DIR', 'DERIVATIVES_DIR', 'FMRIPREP_DIR', 'MODELS_FILE']:
         path = data.get(key)
         if path:
             results[key] = os.path.exists(path)
         elif key == 'MODELS_FILE':
-            # Empty models file is allowed now
-            results[key] = True 
+            results[key] = True  # Empty is allowed
+    
     return jsonify(results)
 
-@app.route('/save_settings', methods=['POST'])
-def save_settings():
-    data = request.json
-    filepath = data.get('filepath', 'config/config.json')
-    content = data.get('content')
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-    
-    with open(filepath, 'w') as f:
-        json.dump(content, f, indent=4)
-    return jsonify({"status": "success", "path": filepath})
 
-@app.route('/mkdir', methods=['POST'])
-def create_directory():
-    data = request.json
-    path = data.get('path')
-    if not path:
-        return jsonify({"success": False, "error": "No path provided"}), 400
-    try:
-        os.makedirs(path, exist_ok=True)
-        return jsonify({"success": True, "path": path})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/get_schema', methods=['GET'])
+@app.route('/get_schema')
 def get_schema():
+    """Get configuration schema."""
     schema_path = 'config/config_schema.json'
     if os.path.exists(schema_path):
         with open(schema_path, 'r') as f:
             return jsonify(json.load(f))
     return jsonify({})
 
-@app.route('/load_container_file', methods=['GET'])
+
+# =============================================================================
+# Container Configuration
+# =============================================================================
+
+@app.route('/load_container_file')
 def load_container_file():
+    """Load container configuration."""
     path = request.args.get('path', 'containers/container.json')
+    
     if not os.path.exists(path):
         return jsonify({
             "container_type": "local",
             "docker_image": "bidspm/bidspm:latest",
             "apptainer_image": ""
         })
+    
     with open(path, 'r') as f:
         return jsonify(json.load(f))
 
-@app.route('/browse', methods=['GET'])
+
+# =============================================================================
+# File System Browsing
+# =============================================================================
+
+@app.route('/browse')
 def browse_fs():
+    """Browse filesystem for file/directory selection."""
     path = request.args.get('path', os.getcwd())
     only_dirs = request.args.get('only_dirs', 'false').lower() == 'true'
     
     if not os.path.exists(path):
         path = os.getcwd()
-        
+    
     try:
         items = []
-        # Add parent directory
         parent = os.path.dirname(os.path.abspath(path))
         items.append({'name': '..', 'path': parent, 'type': 'dir'})
         
@@ -409,164 +818,135 @@ def browse_fs():
                 if entry.is_dir():
                     items.append({'name': entry.name, 'path': entry.path, 'type': 'dir'})
                 elif not only_dirs:
-                    # Allow .json and .sif files
-                    if entry.name.endswith('.json') or entry.name.endswith('.sif'):
+                    if entry.name.endswith(('.json', '.sif')):
                         items.append({'name': entry.name, 'path': entry.path, 'type': 'file'})
         
-        return jsonify({'current_path': os.path.abspath(path), 'items': sorted(items, key=lambda x: (x['type'] != 'dir', x['name'].lower()))})
+        items.sort(key=lambda x: (x['type'] != 'dir', x['name'].lower()))
+        return jsonify({'current_path': os.path.abspath(path), 'items': items})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/get_bids_tasks', methods=['GET'])
-def get_bids_tasks():
+
+@app.route('/file_content')
+def file_content():
+    """Get content of a file."""
     path = request.args.get('path')
-    if not path or not os.path.isdir(path):
-        return jsonify([])
-    tasks = set()
-    try:
-        for root, dirs, files in os.walk(path):
-            if 'func' in root:
-                for f in files:
-                    if '_task-' in f:
-                        parts = f.split('_task-')
-                        if len(parts) > 1:
-                            task = parts[1].split('_')[0].split('.')[0]
-                            tasks.add(task)
-    except Exception:
-        pass
-    return jsonify(sorted(list(tasks)))
-
-@app.route('/get_fmriprep_spaces', methods=['GET'])
-def get_fmriprep_spaces():
-    path = request.args.get('path')
-    tasks = request.args.getlist('tasks')
-    if not path or not os.path.isdir(path):
-        return jsonify([])
-    
-    spaces = set()
-    try:
-        # Search for sub directories
-        for root, dirs, files in os.walk(path):
-            if 'func' in root:
-                for f in files:
-                    if '_desc-preproc_bold.nii.gz' in f:
-                        # Check if it matches any of the selected tasks
-                        task_match = True
-                        if tasks:
-                            task_match = any(f'_task-{t}_' in f for t in tasks)
-                        
-                        if task_match and '_space-' in f:
-                            parts = f.split('_space-')
-                            if len(parts) > 1:
-                                space = parts[1].split('_')[0]
-                                spaces.add(space)
-    except Exception:
-        pass
-    return jsonify(sorted(list(spaces)))
-
-@app.route('/validate_config', methods=['POST'])
-def validate_config():
-    data = request.json
-    content = data.get('content')
-    schema_path = 'config/config_schema.json'
-    
-    if not os.path.exists(schema_path):
-        return jsonify({"valid": False, "error": "Schema file not found"}), 404
-        
-    # Temporary file for validation if it's not already on disk
-    temp_path = f"config/temp_val_{secrets.token_hex(4)}.json"
-    try:
-        with open(temp_path, 'w') as f:
-            json.dump(content, f)
-            
-        from docs.json_validator import JSONValidator
-        # We need to wrap this because validate_with_schema might throw or return bool
-        try:
-            is_valid = JSONValidator.validate_with_schema(temp_path, schema_path)
-            if is_valid:
-                return jsonify({"valid": True})
-            else:
-                return jsonify({"valid": False, "error": "Validation failed (non-specific error)"})
-        except Exception as e:
-            return jsonify({"valid": False, "error": str(e)})
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
-@app.route('/validate_model', methods=['POST'])
-def validate_model():
-    """Validate a BIDS stats model JSON against the official schema.
-    Ignores non-standard transformer warnings (e.g., 'bidspm', 'pybids-transforms-v1')."""
-    data = request.json
-    content = data.get('content')
-    
-    if not content:
-        return jsonify({"valid": False, "error": "No content provided"}), 400
+    if not path or not os.path.isfile(path):
+        return "File not found", 404
     
     try:
-        import requests
-        from jsonschema import validate, ValidationError, RefResolver
-    except ImportError:
-        return jsonify({"valid": False, "error": "Required modules missing: install jsonschema and requests"}), 500
-    
-    schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
-    temp_path = f"config/temp_model_{secrets.token_hex(4)}.json"
-    
-    try:
-        # Write content to temporary file
-        with open(temp_path, 'w') as f:
-            json.dump(content, f)
-        
-        # Fetch and validate against schema
-        schema = requests.get(schema_url, timeout=10).json()
-        validate(instance=content, schema=schema)
-        
-        # Check for semantic issues (empty contrasts, etc.)
-        contrast_issues = check_empty_contrasts(content)
-        if contrast_issues:
-            return jsonify({"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"})
-        
-        return jsonify({"valid": True})
-    
-    except ValidationError as e:
-        # Allow non-standard transformer warnings
-        if "'pybids-transforms-v1' was expected" in e.message or "transformer" in e.message.lower():
-            # Still check for semantic issues even with transformer warning
-            contrast_issues = check_empty_contrasts(content)
-            if contrast_issues:
-                return jsonify({"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"})
-            return jsonify({"valid": True, "warning": f"Non-standard transformer used: {e.message}"})
-        else:
-            return jsonify({"valid": False, "error": f"Validation error: {e.message}"})
-    
-    except requests.RequestException as e:
-        return jsonify({"valid": False, "error": f"Could not fetch schema: {str(e)}"}), 503
-    
-    except json.JSONDecodeError as e:
-        return jsonify({"valid": False, "error": f"Invalid JSON: {str(e)}"})
-    
+        with open(path, 'r') as f:
+            return f.read()
     except Exception as e:
-        return jsonify({"valid": False, "error": f"Validation error: {str(e)}"})
+        return f"Error reading file: {str(e)}", 500
+
+
+@app.route('/mkdir', methods=['POST'])
+def create_directory():
+    """Create a directory."""
+    data = request.json
+    path = data.get('path')
     
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    if not path:
+        return jsonify({"success": False, "error": "No path provided"}), 400
+    
+    try:
+        os.makedirs(path, exist_ok=True)
+        return jsonify({"success": True, "path": path})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# =============================================================================
+# Legacy/Compatibility Endpoints
+# =============================================================================
+
+@app.route('/save_config', methods=['POST'])
+def save_config():
+    """Save configuration (legacy endpoint)."""
+    data = request.json
+    config_data = data.get('config')
+    folder = data.get('folder', 'configs')
+    filename = data.get('filename', f"config_{int(time.time())}.json")
+    
+    os.makedirs(folder, exist_ok=True)
+    filepath = os.path.join(folder, filename)
+    
+    with open(filepath, 'w') as f:
+        json.dump(config_data, f, indent=4)
+    
+    return jsonify({"status": "saved", "path": filepath})
+
+
+@app.route('/configs')
+def list_configs():
+    """List configuration files."""
+    folder = request.args.get('folder', 'configs')
+    
+    if not os.path.exists(folder):
+        return jsonify([])
+    
+    try:
+        files = [f for f in os.listdir(folder) if f.endswith('.json')]
+        return jsonify(files)
+    except Exception:
+        return jsonify([])
+
+
+@app.route('/load_config')
+def api_load_config():
+    """Load configuration (legacy endpoint)."""
+    folder = request.args.get('folder', 'configs')
+    filename = request.args.get('filename')
+    
+    if not filename:
+        return jsonify({"error": "No filename provided"}), 400
+    
+    filepath = os.path.join(folder, filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "File not found"}), 404
+    
+    with open(filepath, 'r') as f:
+        return jsonify(json.load(f))
+
+
+# =============================================================================
+# Server Control
+# =============================================================================
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
+    """Shutdown the server."""
     print("Shutdown requested...")
     os._exit(0)
-    return jsonify(success=True)
+
+
+# =============================================================================
+# Main Entry Point
+# =============================================================================
 
 if __name__ == '__main__':
-    port = find_free_port(5000)
+    import argparse
+    parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
+    parser.add_argument('-p', '--port', type=int, default=None, 
+                       help='Port to use (default: auto-select starting from 5000)')
+    args = parser.parse_args()
+    
+    if args.port:
+        port = args.port
+    else:
+        port = find_free_port(5000)
+    
     if not port:
         print("Error: Could not find a free port.")
+        import sys
         sys.exit(1)
-        
-    print(f"\n" + "="*50)
-    print(f"🚀 BIDSPM Web Interface starting...")
-    print(f"🔗 URL: http://0.0.0.0:{port}")
-    print("="*50 + "\n")
+    
+    print(f"\n{'='*50}")
+    print(f"🚀 BIDSPM Web Interface")
+    print(f"{'='*50}")
+    print(f"   Local:   http://localhost:{port}")
+    print(f"   Network: http://0.0.0.0:{port}")
+    print(f"{'='*50}\n")
     
     serve(app, host='0.0.0.0', port=port, threads=10)

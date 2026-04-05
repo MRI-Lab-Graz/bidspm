@@ -1,0 +1,1064 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis{% if project %} - {{ project.name }}{% endif %} - BIDSPM Runner{% endblock %}
+
+{% block navbar_extra %}
+<span class="navbar-text ms-3 text-primary d-none d-lg-block">
+    <i class="fas fa-server me-1"></i> <span id="server-status">Connected</span>
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Project Selector / Top Bar -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex flex-wrap gap-2 p-3 bg-white border rounded shadow-sm align-items-center">
+                <!-- Project Selector -->
+                <div class="d-flex align-items-center gap-2">
+                    <label class="small fw-bold text-muted text-uppercase mb-0">Project:</label>
+                    <select id="project-selector" class="form-select form-select-sm" style="width: 250px;">
+                        <option value="">-- No Project Selected --</option>
+                        {% for p in projects %}
+                        <option value="{{ p.id }}" {% if current_project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if project %}
+                    <a href="{{ url_for('projects_page') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-list me-1"></i>All Projects
+                    </a>
+                    {% endif %}
+                </div>
+                
+                <div class="vr mx-2"></div>
+                
+                <button type="button" class="btn btn-outline-secondary" id="btn-load-config">
+                    <i class="fas fa-folder-open me-2"></i>Load
+                </button>
+                
+                <div class="vr mx-2"></div>
+                
+                <button type="button" class="btn btn-success" id="btn-save-start">
+                    <i class="fas fa-play me-2"></i>Save & Run
+                </button>
+                <button type="button" class="btn btn-warning text-dark" id="btn-run-cached">
+                    <i class="fas fa-redo me-2"></i>Run
+                </button>
+                <button type="button" class="btn btn-danger" id="btn-stop">
+                    <i class="fas fa-stop me-2"></i>Stop
+                </button>
+                
+                {% if project %}
+                <div class="ms-auto d-flex align-items-center gap-3">
+                    <span class="badge bg-info">
+                        <i class="fas fa-folder-open me-1"></i>{{ project.name }}
+                    </span>
+                    {% if project.last_run %}
+                    <span class="badge bg-secondary" title="Last run: {{ project.last_run }}">
+                        <i class="fas fa-clock me-1"></i>{{ project.last_run[:10] }}
+                    </span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="ms-auto d-flex align-items-center gap-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="small fw-bold text-muted text-uppercase mb-0">Config Folder:</label>
+                        <div class="input-group input-group-sm" style="width: 250px;">
+                            <input type="text" id="config-folder" class="form-control" value="studies/107/" placeholder="studies/107/">
+                            <button class="btn btn-outline-secondary btn-browse-folder" type="button"><i class="fas fa-ellipsis-h"></i></button>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="small fw-bold text-muted text-uppercase mb-0">Study:</label>
+                        <div class="input-group input-group-sm" style="width: 200px;">
+                            <input type="text" id="study-filename" class="form-control" placeholder="study_config.json" value="study_config.json">
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Top Section: Form -->
+        <div class="col-12">
+            <div class="p-4 bg-white border rounded shadow-sm">
+                <form id="bidspm-form">
+                    <!-- Actions & Switches -->
+                    <div class="row mb-4">
+                        <div class="col-md-6 border-end">
+                            <label class="form-label small fw-bold text-muted text-uppercase mb-2">Actions</label>
+                            <div class="d-flex flex-column gap-1">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="action" value="smooth" id="smooth" {% if not project or 'smooth' in project.config.actions %}checked{% endif %}>
+                                    <label class="form-check-label" for="smooth">Smooth</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="action" value="stats" id="stats" {% if not project or 'stats' in project.config.actions %}checked{% endif %}>
+                                    <label class="form-check-label" for="stats">Stats</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="action" value="dataset" id="dataset" {% if project and 'dataset' in project.config.actions %}checked{% endif %}>
+                                    <label class="form-check-label" for="dataset">Dataset</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 ps-md-4">
+                            <label class="form-label small fw-bold text-muted text-uppercase mb-2">Execution Options</label>
+                            <div class="form-check form-switch mb-1">
+                                <input class="form-check-input" type="checkbox" id="pilot" name="pilot" {% if project and project.config.pilot %}checked{% endif %}>
+                                <label class="form-check-label" for="pilot">Pilot Mode</label>
+                            </div>
+                            <div class="form-check form-switch mb-1">
+                                <input class="form-check-input" type="checkbox" id="skip_validation" name="skip_validation" checked disabled>
+                                <label class="form-check-label" for="skip_validation">Skip Validation (Always On)</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Model Override -->
+                    <div class="mb-4 pt-3 border-top">
+                        <label class="form-label small fw-bold text-muted text-uppercase mb-1">Model Name Override</label>
+                        <input type="text" id="model" class="form-control form-control-sm" placeholder="e.g. model-001 (leave empty for default)">
+                    </div>
+
+                    <!-- Accordion for Detailed Sections -->
+                    <div class="accordion accordion-flush pt-3 border-top" id="formAccordion">
+                        
+                        <!-- Section: Settings Details -->
+                        <div class="accordion-item shadow-none border-0 mb-2">
+                            <h2 class="accordion-header" id="headingSettings">
+                                <button class="accordion-button bg-light rounded shadow-none py-2 text-secondary text-uppercase fw-bold x-small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings" aria-expanded="true">
+                                    <i class="fas fa-sliders-h me-2"></i> Settings Details
+                                </button>
+                            </h2>
+                            <div id="collapseSettings" class="accordion-collapse collapse show" data-bs-parent="#formAccordion">
+                                <div class="accordion-body px-0 pt-3">
+                                    <div id="settings-form-static" class="row g-3">
+                                        <!-- WD -->
+                                        <div class="col-md-6">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Working Directory</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="WD" id="input-WD" value="{{ project.config.output_folder if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="WD" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                        </div>
+                                        <!-- BIDS_DIR -->
+                                        <div class="col-md-6">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">BIDS Folder</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="BIDS_DIR" id="input-BIDS_DIR" value="{{ project.config.bids_folder if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="BIDS_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                        </div>
+                                        <!-- DERIVATIVES_DIR -->
+                                        <div class="col-md-6">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Derivatives Folder</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="DERIVATIVES_DIR" id="input-DERIVATIVES_DIR" value="{{ project.config.derivatives_folder if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="DERIVATIVES_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                        </div>
+                                        <!-- FMRIPREP_DIR -->
+                                        <div class="col-md-6">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">fMRIPrep Folder</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="FMRIPREP_DIR" id="input-FMRIPREP_DIR" value="{{ project.config.fmriprep_folder if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="FMRIPREP_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                        </div>
+                                        <!-- MODELS_FILE -->
+                                        <div class="col-12">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Models File</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="MODELS_FILE" id="input-MODELS_FILE" value="{{ project.config.models_file if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="MODELS_FILE" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                            <div id="model-validation-status" class="mt-2" style="display:none;">
+                                                <small class="d-flex align-items-center gap-2">
+                                                    <span id="model-validation-icon"></span>
+                                                    <span id="model-validation-message"></span>
+                                                </small>
+                                            </div>
+                                        </div>
+                                        <!-- SPACE / FWHM / VERBOSITY -->
+                                        <div class="col-md-5">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Space</label>
+                                            <input type="text" class="form-control form-control-sm dynamic-input" data-key="SPACE" id="input-SPACE" list="spaces-list" placeholder="e.g. MNI152NLin2009cAsym" value="{{ project.config.space if project else 'MNI152NLin2009cAsym' }}">
+                                            <datalist id="spaces-list"></datalist>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">FWHM (mm)</label>
+                                            <input type="number" class="form-control form-control-sm dynamic-input" data-key="FWHM" id="input-FWHM" step="0.1" value="{{ project.config.fwhm if project else 6 }}">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Verbosity (0-3)</label>
+                                            <input type="number" class="form-control form-control-sm dynamic-input" data-key="VERBOSITY" id="input-VERBOSITY" step="1" min="0" max="3" value="{{ project.config.verbosity if project else 2 }}">
+                                        </div>
+                                        <!-- TASKS -->
+                                        <div class="col-12">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Tasks</label>
+                                            <div id="tasks-container" class="border rounded p-2 bg-light d-flex flex-wrap gap-2" style="min-height: 38px;">
+                                                <span class="text-muted x-small italic">Select BIDS folder to detect tasks...</span>
+                                            </div>
+                                        </div>
+                                        <!-- SUBJECTS -->
+                                        <div class="col-12">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Selected Subjects (comma separated, empty for all)</label>
+                                            <input type="text" class="form-control form-control-sm dynamic-input" data-key="SUBJECTS" id="input-SUBJECTS" placeholder="e.g. 01, 02, 03" value="{{ project.config.subjects | join(', ') if project and project.config.subjects else '' }}">
+                                        </div>
+                                        <div class="col-12 text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button type="button" class="btn btn-outline-info" id="btn-check-paths">Check Folders</button>
+                                                <button type="button" class="btn btn-outline-primary" id="btn-validate">Validate JSON</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section: Container Options -->
+                        <div class="accordion-item shadow-none border-0 mb-2">
+                            <h2 class="accordion-header" id="headingContainer">
+                                <button class="accordion-button bg-light rounded shadow-none py-2 collapsed text-secondary text-uppercase fw-bold x-small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseContainer" aria-expanded="false">
+                                    <i class="fas fa-box me-2"></i> Container Options
+                                </button>
+                            </h2>
+                            <div id="collapseContainer" class="accordion-collapse collapse" data-bs-parent="#formAccordion">
+                                <div class="accordion-body px-0 pt-3">
+                                    <div id="container-form-static" class="row g-3">
+                                        <div class="col-12">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
+                                            <div class="d-flex gap-4 mb-3">
+                                                <div class="form-check">
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if project and project.config.container_type == 'docker' %}checked{% endif %}>
+                                                    <label class="form-check-label" for="type-docker">Docker</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if project and project.config.container_type == 'apptainer' %}checked{% endif %}>
+                                                    <label class="form-check-label" for="type-apptainer">Apptainer</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" {% if not project or project.config.container_type == 'local' %}checked{% endif %}>
+                                                    <label class="form-check-label" for="type-local">Local (No Container)</label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Docker Option -->
+                                        <div class="col-12 {% if not project or project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
+                                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'bidspm/bidspm:latest' }}">
+                                        </div>
+
+                                        <!-- Apptainer Option -->
+                                        <div class="col-12 {% if not project or project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
+                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '' }}">
+                                                <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div> <!-- End Accordion -->
+
+                    <div id="validation-result" class="mt-3"></div>
+                    <div id="path-alerts" class="mt-2"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bottom Section: Terminal -->
+    <div class="row mt-4 mb-5">
+        <div class="col-12">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
+                    <span class="small text-uppercase fw-bold"><i class="fas fa-terminal me-2 text-success"></i>Terminal Log</span>
+                    <span class="badge bg-secondary" id="exec-status">IDLE</span>
+                </div>
+                <div class="card-body p-0 bg-black" style="min-height: 500px;">
+                    <div id="terminal" class="p-3 text-light font-monospace small" style="height: 600px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4;">Welcome to BIDSPM Web Interface.
+{% if project %}Project: {{ project.name }}
+{% endif %}Ready for command.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Browsing Filesystem -->
+<div class="modal fade" id="browseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Select Path</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <nav aria-label="breadcrumb" class="bg-light p-2 border-bottom">
+                    <ol class="breadcrumb mb-0 px-2" id="browse-breadcrumb"></ol>
+                </nav>
+                <div class="list-group list-group-flush overflow-auto" id="browse-list" style="max-height: 400px;"></div>
+            </div>
+            <div class="modal-footer bg-light">
+                <span class="me-auto text-muted small px-2 truncate w-25" id="selected-browse-path"></span>
+                <button type="button" class="btn btn-outline-success btn-sm" id="btn-modal-mkdir">
+                    <i class="fas fa-plus me-1"></i> New Folder
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm px-4" id="btn-confirm-browse">Select</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Loading Config -->
+<div class="modal fade" id="loadConfigModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Load Configuration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="list-group list-group-flush" id="config-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block styles %}
+<style>
+    .bg-black { background-color: #0c0c0c !important; }
+    #terminal::-webkit-scrollbar { width: 10px; }
+    #terminal::-webkit-scrollbar-track { background: #1a1a1a; }
+    #terminal::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; }
+    #terminal::-webkit-scrollbar-thumb:hover { background: #444; }
+    .cursor-pointer { cursor: pointer; }
+    .x-small { font-size: 0.75rem; }
+    .form-control-sm, .input-group-sm > .form-control { font-size: 0.85rem; }
+    .btn { font-weight: 500; }
+    .accordion-button:not(.collapsed) { background-color: #f8f9fa; color: #6c757d; }
+    .accordion-button::after { background-size: 0.8rem; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Project context
+    const currentProjectId = '{{ current_project_id or "" }}';
+    const hasProject = {{ 'true' if project else 'false' }};
+    
+    const terminal = document.getElementById('terminal');
+    const execStatus = document.getElementById('exec-status');
+    const validationResult = document.getElementById('validation-result');
+    const pathAlerts = document.getElementById('path-alerts');
+    
+    let eventSource = null;
+    let schema = {};
+    let unifiedStudyConfig = {};
+
+    // Project selector change
+    document.getElementById('project-selector')?.addEventListener('change', function() {
+        const projectId = this.value;
+        if (projectId) {
+            window.location.href = `/analysis/${projectId}`;
+        } else {
+            window.location.href = '/analysis';
+        }
+    });
+
+    // --- FORM DATA HANDLERS ---
+    function getFullFormData() {
+        const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
+        return {
+            actions: actions,
+            model: document.getElementById('model').value,
+            pilot: document.getElementById('pilot').checked,
+            skip_validation: document.getElementById('skip_validation').checked,
+            local: containerType === 'local',
+            project_id: currentProjectId || null,
+            config_folder: hasProject ? null : document.getElementById('config-folder')?.value,
+            study_filename: hasProject ? null : document.getElementById('study-filename')?.value,
+            study_content: unifiedStudyConfig
+        };
+    }
+
+    async function setFullFormData(data) {
+        if (!data) return;
+        
+        // Checklist Actions
+        document.querySelectorAll('input[name="action"]').forEach(cb => {
+            cb.checked = data.actions && data.actions.includes(cb.value);
+        });
+        
+        // Switches & Text
+        const fields = ['model'];
+        if (!hasProject) fields.push('config-folder', 'study-filename');
+        fields.forEach(f => {
+            const el = document.getElementById(f);
+            if (el && data[f]) el.value = data[f];
+        });
+        
+        const switches = ['pilot', 'skip_validation'];
+        switches.forEach(s => {
+            const el = document.getElementById(s);
+            if (el && data[s] !== undefined) el.checked = data[s];
+        });
+
+        if (data.study_content) {
+            unifiedStudyConfig = data.study_content;
+            await syncInternalToForm();
+        }
+
+        if (data.local) {
+             const rb = document.getElementById('type-local');
+             if (rb) {
+                 rb.checked = true;
+                 rb.dispatchEvent(new Event('change'));
+             }
+        }
+    }
+
+    // --- STATIC FORM INITIALIZATION ---
+    async function initApp() {
+        try {
+            const res = await fetch('/get_schema');
+            schema = await res.json();
+            setupStaticListeners();
+            
+            // Load project config if we have a project
+            if (hasProject && currentProjectId) {
+                await loadProjectConfig();
+            } else {
+                await loadLatestStudy();
+            }
+        } catch (err) { console.error('App init failed:', err); }
+    }
+
+    async function loadProjectConfig() {
+        try {
+            const res = await fetch(`/api/projects/${currentProjectId}/export`);
+            const config = await res.json();
+            
+            // Map the config to the unified format
+            unifiedStudyConfig = {
+                WD: config.WD || '',
+                BIDS_DIR: config.BIDS_DIR || '',
+                DERIVATIVES_DIR: config.DERIVATIVES_DIR || '',
+                FMRIPREP_DIR: config.FMRIPREP_DIR || '',
+                MODELS_FILE: config.MODELS_FILE || '',
+                SPACE: config.SPACE || 'MNI152NLin2009cAsym',
+                FWHM: config.FWHM || 6,
+                TASKS: config.TASKS || [],
+                SUBJECTS: config.SUBJECTS || [],
+                VERBOSITY: config.VERBOSITY || 2,
+                container_type: config.container_type || 'local',
+                docker_image: config.docker_image || 'bidspm/bidspm:latest',
+                apptainer_image: config.apptainer_image || ''
+            };
+            
+            await syncInternalToForm();
+        } catch (err) {
+            console.error('Failed to load project config:', err);
+        }
+    }
+
+    async function saveProjectConfig() {
+        if (!currentProjectId) return;
+        
+        updateInternalState();
+        
+        // Map back to project config format
+        const config = {
+            bids_folder: unifiedStudyConfig.BIDS_DIR || '',
+            derivatives_folder: unifiedStudyConfig.DERIVATIVES_DIR || '',
+            fmriprep_folder: unifiedStudyConfig.FMRIPREP_DIR || '',
+            output_folder: unifiedStudyConfig.WD || '',
+            models_file: unifiedStudyConfig.MODELS_FILE || '',
+            space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
+            fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
+            tasks: unifiedStudyConfig.TASKS || [],
+            subjects: unifiedStudyConfig.SUBJECTS || [],
+            verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
+            container_type: unifiedStudyConfig.container_type || 'local',
+            docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
+            apptainer_image: unifiedStudyConfig.apptainer_image || '',
+            actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
+            pilot: document.getElementById('pilot').checked,
+            skip_validation: true
+        };
+        
+        try {
+            await fetch(`/api/projects/${currentProjectId}/config`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            });
+        } catch (err) {
+            console.error('Failed to save project config:', err);
+        }
+    }
+
+    function setupStaticListeners() {
+        // Browse buttons for Settings
+        document.querySelectorAll('.btn-browse').forEach(btn => {
+            btn.onclick = () => openBrowser(btn.dataset.key, btn.dataset.type === 'dir');
+        });
+        
+        // Browse buttons for Container
+        document.querySelectorAll('.btn-browse-container').forEach(btn => {
+            btn.onclick = () => openBrowser(btn.dataset.key, btn.dataset.type === 'dir', 'container');
+        });
+        
+        // Input changes for Settings
+        document.querySelectorAll('.dynamic-input').forEach(input => {
+            input.onchange = updateInternalState;
+        });
+        
+        // Input changes for Container
+        document.querySelectorAll('.container-input').forEach(input => {
+            input.onchange = updateInternalState;
+        });
+
+        // Container type radios
+        document.querySelectorAll('.container-type-radio').forEach(radio => {
+            radio.onchange = (e) => {
+                const type = e.target.value;
+                document.getElementById('docker-options').classList.toggle('d-none', type !== 'docker');
+                document.getElementById('apptainer-options').classList.toggle('d-none', type !== 'apptainer');
+                updateInternalState();
+            };
+        });
+        
+        // BIDS directory change triggers task detection
+        const bidsInput = document.getElementById('input-BIDS_DIR');
+        if (bidsInput) bidsInput.addEventListener('change', refreshTasks);
+
+        // Models file change triggers model task detection
+        const modelInput = document.getElementById('input-MODELS_FILE');
+        if (modelInput) modelInput.addEventListener('change', refreshModelTasks);
+
+        // FMRIPREP directory change triggers space detection
+        const prepInput = document.getElementById('input-FMRIPREP_DIR');
+        if (prepInput) prepInput.addEventListener('change', refreshSpaces);
+        
+        // Config folder browser (only when no project)
+        if (!hasProject) {
+            document.querySelectorAll('.btn-browse-folder').forEach(btn => {
+                btn.onclick = () => openBrowser('config-folder', true);
+            });
+        }
+    }
+
+    function updateInternalState() {
+        // Settings details
+        document.querySelectorAll('.dynamic-input').forEach(input => {
+            const key = input.dataset.key;
+            if (input.type === 'checkbox') {
+                unifiedStudyConfig[key] = input.checked;
+            } else if (input.type === 'number') {
+                unifiedStudyConfig[key] = input.step === '1' ? parseInt(input.value) : parseFloat(input.value);
+            } else if (key === 'SUBJECTS') {
+                const val = input.value.trim();
+                unifiedStudyConfig[key] = val ? val.split(',').map(s => s.trim()) : [];
+            } else {
+                unifiedStudyConfig[key] = input.value;
+            }
+        });
+        
+        // Tasks
+        const taskInputs = document.querySelectorAll('.task-checkbox:checked');
+        if (taskInputs.length > 0) {
+            unifiedStudyConfig['TASKS'] = Array.from(taskInputs).map(cb => cb.value);
+        } else if (schema.properties && schema.properties.TASKS) {
+            unifiedStudyConfig['TASKS'] = [];
+        }
+
+        // Container info
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
+        unifiedStudyConfig.container_type = containerType;
+        
+        unifiedStudyConfig.docker_image = document.getElementById('input-docker_image').value;
+        unifiedStudyConfig.apptainer_image = document.getElementById('input-apptainer_image').value;
+        unifiedStudyConfig.skip_validation = document.getElementById('skip_validation').checked;
+        
+        validationResult.innerHTML = '';
+    }
+
+    async function syncInternalToForm() {
+        // Settings details
+        for (const [key, val] of Object.entries(unifiedStudyConfig)) {
+            const el = document.getElementById(`input-${key}`);
+            if (el) {
+                if (el.type === 'checkbox') el.checked = val;
+                else if (key === 'SUBJECTS' && Array.isArray(val)) el.value = val.join(', ');
+                else el.value = val;
+            }
+            if (key === 'TASKS' && Array.isArray(val)) {
+                await refreshTasks();
+                val.forEach(t => {
+                    const cb = document.getElementById(`task-${t}`);
+                    if (cb) cb.checked = true;
+                });
+                await refreshSpaces();
+            }
+        }
+        
+        // Container info
+        const type = unifiedStudyConfig.container_type || 'local';
+        const radio = document.getElementById(`type-${type}`);
+        if (radio) {
+            radio.checked = true;
+            document.getElementById('docker-options').classList.toggle('d-none', type !== 'docker');
+            document.getElementById('apptainer-options').classList.toggle('d-none', type !== 'apptainer');
+            updateInternalState();
+        }
+        document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
+        document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';
+
+        const skipVal = document.getElementById('skip_validation');
+        if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
+    }
+
+    // --- API CALLS ---
+    async function refreshTasks() {
+        const bidsDir = document.getElementById('input-BIDS_DIR')?.value;
+        if (!bidsDir) return;
+        const container = document.getElementById('tasks-container');
+        try {
+            const res = await fetch(`/get_bids_tasks?path=${encodeURIComponent(bidsDir)}`);
+            const tasks = await res.json();
+            container.innerHTML = '';
+            if (tasks.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
+            tasks.forEach(t => {
+                const div = document.createElement('div');
+                div.className = 'form-check form-check-inline mb-0';
+                div.innerHTML = `<input class="form-check-input task-checkbox" type="checkbox" value="${t}" id="task-${t}" onchange="updateInternalState(); refreshSpaces()">
+                                 <label class="form-check-label x-small" for="task-${t}">${t}</label>`;
+                container.appendChild(div);
+            });
+            const modelVal = document.getElementById('input-MODELS_FILE')?.value;
+            if (modelVal) refreshModelTasks();
+        } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
+    }
+
+    async function validateModel() {
+        const modelPath = document.getElementById('input-MODELS_FILE')?.value;
+        const statusDiv = document.getElementById('model-validation-status');
+        const icon = document.getElementById('model-validation-icon');
+        const message = document.getElementById('model-validation-message');
+        
+        if (!modelPath) {
+            statusDiv.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/file_content?path=${encodeURIComponent(modelPath)}`);
+            if (!response.ok) {
+                statusDiv.style.display = 'block';
+                icon.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i>';
+                message.textContent = 'Model file not found';
+                return;
+            }
+            
+            const modelText = await response.text();
+            const modelContent = JSON.parse(modelText);
+            
+            const validateResponse = await fetch('/validate_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: modelContent })
+            });
+            
+            const result = await validateResponse.json();
+            statusDiv.style.display = 'block';
+            
+            if (result.valid) {
+                icon.innerHTML = '<i class="fas fa-check-circle text-success"></i>';
+                if (result.warning) {
+                    message.textContent = `✓ Valid (${result.warning})`;
+                    message.classList.add('text-warning');
+                } else {
+                    message.textContent = '✓ Model is valid';
+                    message.classList.remove('text-warning');
+                    message.classList.add('text-success');
+                }
+            } else {
+                icon.innerHTML = '<i class="fas fa-times-circle text-danger"></i>';
+                message.textContent = `✗ ${result.error}`;
+                message.classList.add('text-danger');
+            }
+        } catch (e) {
+            statusDiv.style.display = 'block';
+            icon.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i>';
+            message.textContent = `Error validating model: ${e.message}`;
+        }
+    }
+
+    async function refreshModelTasks() {
+        const modelPath = document.getElementById('input-MODELS_FILE')?.value;
+        if (!modelPath) return;
+        
+        await validateModel();
+        
+        try {
+            const res = await fetch(`/get_model_tasks?path=${encodeURIComponent(modelPath)}`);
+            const data = await res.json();
+            
+            if (data.tasks && Array.isArray(data.tasks)) {
+                const checkboxes = document.querySelectorAll('.task-checkbox');
+                if (checkboxes.length === 0) return;
+                
+                checkboxes.forEach(cb => cb.checked = false);
+                
+                let count = 0;
+                data.tasks.forEach(t => {
+                    const cb = document.getElementById(`task-${t}`);
+                    if (cb) {
+                        cb.checked = true;
+                        count++;
+                    }
+                });
+                
+                updateInternalState();
+                refreshSpaces();
+
+                if (count > 0) {
+                     const container = document.getElementById('tasks-container');
+                     const old = container.querySelector('.badge-model-sync');
+                     if (old) old.remove();
+
+                     const badge = document.createElement('span');
+                     badge.className = 'badge bg-info text-dark x-small ms-2 badge-model-sync';
+                     badge.innerText = 'Synced from Model';
+                     container.appendChild(badge);
+                     setTimeout(() => badge.remove(), 3000);
+                }
+            }
+        } catch (e) { console.error('Error syncing model tasks:', e); }
+    }
+
+    async function refreshSpaces() {
+        const prepDir = document.getElementById('input-FMRIPREP_DIR')?.value;
+        if (!prepDir) return;
+        
+        const tasks = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => cb.value);
+        let url = `/get_fmriprep_spaces?path=${encodeURIComponent(prepDir)}`;
+        tasks.forEach(t => url += `&tasks=${encodeURIComponent(t)}`);
+        
+        try {
+            const res = await fetch(url);
+            const spaces = await res.json();
+            const datalist = document.getElementById('spaces-list');
+            datalist.innerHTML = '';
+            spaces.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s;
+                datalist.appendChild(opt);
+            });
+        } catch (e) { console.error('Error detecting spaces:', e); }
+    }
+
+    async function loadLatestStudy() {
+        if (hasProject) return;
+        
+        const folder = document.getElementById('config-folder')?.value;
+        const filename = document.getElementById('study-filename')?.value;
+        if (!folder || !filename) return;
+        
+        const path = folder + filename;
+        try {
+            const res = await fetch(`/load_config_file?path=${encodeURIComponent(path)}`);
+            unifiedStudyConfig = await res.json();
+            await syncInternalToForm();
+        } catch (err) { console.error('Failed to load study file:', err); }
+    }
+
+    // --- BUTTON EVENTS ---
+    document.getElementById('btn-validate').onclick = async () => {
+        updateInternalState();
+        validationResult.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Validating...';
+        const res = await fetch('/validate_config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({content: unifiedStudyConfig})
+        });
+        const result = await res.json();
+        validationResult.innerHTML = result.valid 
+            ? '<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i> Valid JSON configuration</div>'
+            : `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i> ${result.error}</div>`;
+    };
+
+    document.getElementById('btn-check-paths').onclick = async () => {
+        updateInternalState();
+        const res = await fetch('/check_paths', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(unifiedStudyConfig)
+        });
+        const results = await res.json();
+        pathAlerts.innerHTML = '';
+        for (const [k, exists] of Object.entries(results)) {
+            const div = document.createElement('div');
+            div.className = `alert alert-${exists ? 'success' : 'danger'} py-1 x-small mb-1 shadow-sm border-0`;
+            div.innerHTML = `<i class="fas fa-${exists ? 'check' : 'times'} me-1"></i> ${k}: ${exists ? 'Path found' : 'Path not found'}`;
+            pathAlerts.appendChild(div);
+        }
+    };
+
+    document.getElementById('btn-save-start').onclick = async () => {
+        updateInternalState();
+        
+        const selectedContainer = document.querySelector('input[name="container_type"]:checked');
+        if (selectedContainer) {
+            unifiedStudyConfig.container_type = selectedContainer.value;
+        }
+        
+        const data = getFullFormData();
+        
+        if (hasProject && currentProjectId) {
+            // Save to project
+            await saveProjectConfig();
+            
+            const runPayload = {
+                ...data,
+                project_id: currentProjectId,
+                settings: null
+            };
+            delete runPayload.container;
+            startExecution(runPayload);
+        } else {
+            // Legacy mode: save to file
+            const folder = data.config_folder;
+            const study_path = folder + data.study_filename;
+            
+            await fetch('/save_settings', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filepath: study_path, content: unifiedStudyConfig})
+            });
+            
+            const runPayload = {
+                ...data,
+                settings: study_path
+            };
+            delete runPayload.container;
+            
+            await fetch('/save_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({config: runPayload, folder: folder, filename: "study_run_meta.json"})
+            });
+            
+            startExecution(runPayload);
+        }
+    };
+
+    document.getElementById('btn-run-cached').onclick = () => {
+        const data = getFullFormData();
+        
+        if (hasProject && currentProjectId) {
+            const runPayload = {
+                ...data,
+                project_id: currentProjectId
+            };
+            delete runPayload.container;
+            startExecution(runPayload);
+        } else {
+            const folder = data.config_folder;
+            const study_path = folder + data.study_filename;
+            const runPayload = {
+                ...data,
+                settings: study_path
+            };
+            delete runPayload.container;
+            startExecution(runPayload);
+        }
+    };
+    
+    document.getElementById('btn-stop').onclick = () => fetch('/stop', {method: 'POST'});
+
+    document.getElementById('btn-load-config')?.addEventListener('click', async () => {
+        if (hasProject) {
+            // Browse for config to import into project
+            alert('Use the Projects page to import configurations into projects.');
+            return;
+        }
+        
+        const folder = document.getElementById('config-folder').value;
+        const res = await fetch(`/configs?folder=${folder}`);
+        const files = await res.json();
+        const list = document.getElementById('config-list');
+        list.innerHTML = '';
+        if (files.length === 0) {
+            list.innerHTML = '<div class="p-4 text-muted text-center italic">No configuration files found in this folder.</div>';
+        } else {
+            files.forEach(f => {
+                const btn = document.createElement('button');
+                btn.className = 'list-group-item list-group-item-action small py-2 d-flex justify-content-between align-items-center';
+                btn.innerHTML = `<span><i class="fas fa-file-invoice me-2 text-primary"></i> ${f}</span> <i class="fas fa-chevron-right text-muted x-small"></i>`;
+                btn.onclick = async () => {
+                    const r = await fetch(`/load_config?folder=${folder}&filename=${f}`);
+                    const data = await r.json();
+                    
+                    if (data.study_content) {
+                        await setFullFormData(data);
+                    } else {
+                        unifiedStudyConfig = data;
+                        document.getElementById('study-filename').value = f;
+                        syncInternalToForm();
+                    }
+                    bootstrap.Modal.getInstance(document.getElementById('loadConfigModal')).hide();
+                };
+                list.appendChild(btn);
+            });
+        }
+        new bootstrap.Modal(document.getElementById('loadConfigModal')).show();
+    });
+
+    // --- EXECUTION CORE ---
+    async function startExecution(payload) {
+        if (payload.actions.length === 0) { alert('Please select at least one action.'); return; }
+        
+        terminal.innerText = '--- EXECUTION TRIGGERED ---\n';
+        execStatus.innerText = 'RUNNING';
+        execStatus.className = 'badge bg-danger';
+        
+        const res = await fetch('/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (result.error) { terminal.innerText += 'ERROR: ' + result.error; resetStatus(); return; }
+        
+        if (eventSource) eventSource.close();
+        eventSource = new EventSource(`/stream/${result.execution_id}`);
+        eventSource.onmessage = e => {
+            terminal.innerText += e.data + '\n';
+            terminal.scrollTop = terminal.scrollHeight;
+            if (e.data.includes('Process finished') || e.data.includes('Execution stopped')) resetStatus();
+        };
+        eventSource.onerror = () => {
+            terminal.innerText += '\n--- Connection Interrupted ---\n';
+            resetStatus();
+        };
+    }
+
+    function resetStatus() { 
+        execStatus.innerText = 'IDLE'; 
+        execStatus.className = 'badge bg-secondary';
+        if (eventSource) eventSource.close();
+    }
+
+    // --- BROWSER MODAL ---
+    let currentBrowseTarget = null;
+    let currentBrowseScope = 'settings';
+    let currentBrowsingPath = '.';
+
+    function openBrowser(targetKey, onlyDirs, scope = 'settings') {
+        currentBrowseTarget = targetKey;
+        currentBrowseScope = scope;
+        let startPath = '';
+        if (targetKey === 'config-folder') {
+            startPath = document.getElementById('config-folder')?.value || '.';
+        } else {
+            const id = `input-${targetKey}`;
+            startPath = document.getElementById(id)?.value || '.';
+        }
+        fetchBrowse(startPath || '.', onlyDirs);
+        new bootstrap.Modal(document.getElementById('browseModal')).show();
+    }
+
+    async function fetchBrowse(path, onlyDirs) {
+        const res = await fetch(`/browse?path=${encodeURIComponent(path)}&only_dirs=${onlyDirs}`);
+        const data = await res.json();
+        if (data.error) { alert('Error: ' + data.error); return; }
+
+        const list = document.getElementById('browse-list');
+        list.innerHTML = '';
+        
+        const bc = document.getElementById('browse-breadcrumb');
+        bc.innerHTML = '';
+        const parts = data.current_path.split('/').filter(p => p !== '');
+        
+        const rootLi = document.createElement('li');
+        rootLi.className = 'breadcrumb-item x-small';
+        rootLi.innerHTML = `<a href="#" onclick="fetchBrowse('/', ${onlyDirs})">Root</a>`;
+        bc.appendChild(rootLi);
+
+        let currentBuild = '';
+        parts.forEach((p, i) => {
+            currentBuild += '/' + p;
+            const li = document.createElement('li');
+            li.className = 'breadcrumb-item x-small' + (i === parts.length - 1 ? ' active' : '');
+            if (i === parts.length - 1) li.innerText = p;
+            else li.innerHTML = `<a href="#" onclick="fetchBrowse('${currentBuild.replace(/'/g, "\\'")}', ${onlyDirs})">${p}</a>`;
+            bc.appendChild(li);
+        });
+
+        data.items.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = `list-group-item list-group-item-action d-flex align-items-center small py-2`;
+            btn.innerHTML = `<i class="fas fa-${item.type === 'dir' ? 'folder text-warning' : (item.name.endsWith('.sif') ? 'box text-success' : 'file-code text-primary')} me-2"></i> ${item.name}`;
+            btn.onclick = () => {
+                if (item.type === 'dir') fetchBrowse(item.path, onlyDirs);
+                else selectPath(item.path);
+            };
+            list.appendChild(btn);
+        });
+        currentBrowsingPath = data.current_path;
+        document.getElementById('selected-browse-path').innerText = data.current_path;
+        document.getElementById('btn-confirm-browse').onclick = () => selectPath(data.current_path);
+
+        document.getElementById('btn-modal-mkdir').onclick = async () => {
+            const folderName = prompt('Enter new folder name:');
+            if (!folderName) return;
+            const newPath = currentBrowsingPath + (currentBrowsingPath.endsWith('/') ? '' : '/') + folderName;
+            
+            try {
+                const res = await fetch('/mkdir', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: newPath})
+                });
+                const result = await res.json();
+                if (result.success) {
+                    fetchBrowse(currentBrowsingPath, onlyDirs);
+                } else {
+                    alert('Error creating folder: ' + result.error);
+                }
+            } catch (e) { alert('Failed to create folder.'); }
+        };
+    }
+
+    function selectPath(path) {
+        if (!currentBrowseTarget) return;
+        if (currentBrowseTarget === 'config-folder') {
+            document.getElementById('config-folder').value = path;
+        } else {
+            const id = `input-${currentBrowseTarget}`;
+            const input = document.getElementById(id);
+            if (input) {
+                input.value = path;
+                input.dispatchEvent(new Event('change'));
+            }
+        }
+        bootstrap.Modal.getInstance(document.getElementById('browseModal')).hide();
+    }
+
+    window.addEventListener('DOMContentLoaded', initApp);
+</script>
+{% endblock %}
