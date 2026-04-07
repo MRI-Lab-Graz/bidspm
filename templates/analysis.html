@@ -922,10 +922,17 @@
             node.forEach((item, idx) => {
                 const itemPath = `${basePath}[${idx}]`;
                 const locked = inheritedLocked || isReadonlyModelPath(itemPath);
+                // User-friendly label: show value for primitives, name/index for objects
+                let displayLabel;
                 if (item !== null && typeof item === 'object') {
-                    createBranchAccordion(listWrap, `[${idx}]`, itemPath, item, locked, depth);
+                    displayLabel = item.Name || `#${idx + 1}`;
                 } else {
-                    createPrimitiveRow(listWrap, `[${idx}]`, item, itemPath, locked, depth);
+                    displayLabel = item !== null && item !== '' ? String(item) : `#${idx + 1}`;
+                }
+                if (item !== null && typeof item === 'object') {
+                    createBranchAccordion(listWrap, displayLabel, itemPath, item, locked, depth);
+                } else {
+                    createPrimitiveRow(listWrap, `#${idx + 1}`, item, itemPath, locked, depth);
                 }
             });
             container.appendChild(listWrap);

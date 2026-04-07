@@ -180,19 +180,34 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="project-bids-folder" class="form-label">BIDS Folder <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="project-bids-folder" placeholder="/path/to/bids/dataset">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="project-bids-folder" placeholder="/path/to/bids/dataset">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="project-bids-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Path to raw BIDS data</small>
                         </div>
                         <div class="col-md-6">
                             <label for="project-output-folder" class="form-label">Output Folder</label>
-                            <input type="text" class="form-control" id="project-output-folder" placeholder="/path/to/output">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="project-output-folder" placeholder="/path/to/output">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="project-output-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Where to write results</small>
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="project-fmriprep-folder" class="form-label">fMRIPrep Folder</label>
-                            <input type="text" class="form-control" id="project-fmriprep-folder" placeholder="/path/to/fmriprep">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="project-fmriprep-folder" placeholder="/path/to/fmriprep">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="project-fmriprep-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Existing preprocessed data (optional)</small>
                         </div>
                         <div class="col-md-6">
@@ -265,19 +280,34 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="edit-bids-folder" class="form-label">BIDS Folder <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="edit-bids-folder" placeholder="/path/to/bids/dataset">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="edit-bids-folder" placeholder="/path/to/bids/dataset">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="edit-bids-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Path to raw BIDS data</small>
                         </div>
                         <div class="col-md-6">
                             <label for="edit-output-folder" class="form-label">Output Folder</label>
-                            <input type="text" class="form-control" id="edit-output-folder" placeholder="/path/to/output">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="edit-output-folder" placeholder="/path/to/output">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="edit-output-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Where to write results</small>
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label for="edit-fmriprep-folder" class="form-label">fMRIPrep Folder</label>
-                            <input type="text" class="form-control" id="edit-fmriprep-folder" placeholder="/path/to/fmriprep">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="edit-fmriprep-folder" placeholder="/path/to/fmriprep">
+                                <button type="button" class="btn btn-outline-secondary folder-browse-btn" data-target="edit-fmriprep-folder" title="Browse...">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                             <small class="text-muted">Existing preprocessed data (optional)</small>
                         </div>
                         <div class="col-md-6">
@@ -343,6 +373,37 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" id="btn-confirm-import" disabled>
                     <i class="fas fa-file-import me-2"></i>Import & Create Project
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Folder Browser Modal -->
+<div class="modal fade" id="folderBrowserModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-folder-open me-2"></i>Select Folder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <nav aria-label="breadcrumb" class="bg-light p-2 border-bottom rounded-top">
+                    <ol class="breadcrumb mb-0 px-2" id="folder-browse-breadcrumb"></ol>
+                </nav>
+                <div class="list-group list-group-flush overflow-auto border rounded-bottom" id="folder-browse-list" style="max-height: 400px;"></div>
+                <div class="mt-3 d-flex align-items-center justify-content-between">
+                    <div>
+                        <small class="text-muted">Selected: </small>
+                        <code id="folder-selected-path" class="text-primary">None</code>
+                    </div>
+                    <span id="folder-bids-badge" class="badge bg-success d-none"><i class="fas fa-check me-1"></i>BIDS Dataset</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-select-folder">
+                    <i class="fas fa-check me-2"></i>Select Folder
                 </button>
             </div>
         </div>
@@ -542,6 +603,134 @@ document.addEventListener('DOMContentLoaded', function() {
             imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
         }
     });
+    
+    // =============================================================================
+    // Folder Browser
+    // =============================================================================
+    let folderBrowserTargetInput = null;
+    let folderBrowserSelectedPath = null;
+    const folderBrowserModal = document.getElementById('folderBrowserModal') ? new bootstrap.Modal(document.getElementById('folderBrowserModal')) : null;
+    
+    // Open folder browser when browse button is clicked
+    document.querySelectorAll('.folder-browse-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const targetId = this.dataset.target;
+            folderBrowserTargetInput = document.getElementById(targetId);
+            const startPath = folderBrowserTargetInput?.value.trim() || '';
+            folderBrowserSelectedPath = null;
+            document.getElementById('folder-selected-path').textContent = 'None';
+            document.getElementById('folder-bids-badge')?.classList.add('d-none');
+            loadFolderBrowser(startPath || '/');
+            folderBrowserModal?.show();
+        });
+    });
+    
+    async function loadFolderBrowser(path) {
+        try {
+            const response = await fetch(`/browse?path=${encodeURIComponent(path)}&only_dirs=true`);
+            const data = await response.json();
+            
+            if (data.error) {
+                console.error(data.error);
+                return;
+            }
+            
+            // Update breadcrumb
+            const breadcrumb = document.getElementById('folder-browse-breadcrumb');
+            const parts = data.current_path.split('/').filter(p => p);
+            breadcrumb.innerHTML = '<li class="breadcrumb-item"><a href="#" data-path="/">/</a></li>';
+            let accumulated = '';
+            parts.forEach((part, i) => {
+                accumulated += '/' + part;
+                const isLast = i === parts.length - 1;
+                if (isLast) {
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item active">${part}</li>`;
+                } else {
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" data-path="${accumulated}">${part}</a></li>`;
+                }
+            });
+            
+            // Selected path is the current directory
+            folderBrowserSelectedPath = data.current_path;
+            document.getElementById('folder-selected-path').textContent = folderBrowserSelectedPath;
+            
+            // Check if it's a BIDS dataset
+            checkBidsFolder(data.current_path);
+            
+            // Update list - show only directories
+            const list = document.getElementById('folder-browse-list');
+            list.innerHTML = '';
+            
+            // Filter to only show directories
+            const dirs = data.items.filter(item => item.type === 'dir');
+            
+            dirs.forEach(item => {
+                const el = document.createElement('a');
+                el.className = 'list-group-item list-group-item-action d-flex align-items-center';
+                el.href = '#';
+                el.dataset.path = item.path;
+                
+                // Check if folder contains dataset_description.json (BIDS indicator)
+                const icon = item.name === '..' ? 'fa-level-up-alt text-secondary' : 'fa-folder text-warning';
+                const bidsIndicator = '';  // We'll check this async
+                
+                el.innerHTML = `<i class="fas ${icon} me-3"></i> <span class="flex-grow-1">${item.name}</span>`;
+                
+                el.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadFolderBrowser(this.dataset.path);
+                });
+                
+                // Double-click to select and close
+                el.addEventListener('dblclick', function(e) {
+                    e.preventDefault();
+                    folderBrowserSelectedPath = this.dataset.path;
+                    document.getElementById('folder-selected-path').textContent = folderBrowserSelectedPath;
+                    selectFolder();
+                });
+                
+                list.appendChild(el);
+            });
+            
+            // Breadcrumb navigation
+            breadcrumb.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadFolderBrowser(this.dataset.path);
+                });
+            });
+            
+        } catch (error) {
+            console.error('Error browsing folders:', error);
+        }
+    }
+    
+    function checkBidsFolder(path) {
+        // Check if path contains dataset_description.json (indicates BIDS dataset)
+        fetch(`/browse?path=${encodeURIComponent(path)}`)
+            .then(r => r.json())
+            .then(data => {
+                const hasBids = data.items?.some(item => item.name === 'dataset_description.json');
+                const badge = document.getElementById('folder-bids-badge');
+                if (hasBids) {
+                    badge?.classList.remove('d-none');
+                } else {
+                    badge?.classList.add('d-none');
+                }
+            })
+            .catch(() => {});
+    }
+    
+    function selectFolder() {
+        if (folderBrowserSelectedPath && folderBrowserTargetInput) {
+            folderBrowserTargetInput.value = folderBrowserSelectedPath;
+            folderBrowserTargetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            folderBrowserModal?.hide();
+        }
+    }
+    
+    // Select folder button
+    document.getElementById('btn-select-folder')?.addEventListener('click', selectFolder);
     
     // New Project
     document.getElementById('btn-create-project')?.addEventListener('click', async function() {
