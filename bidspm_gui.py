@@ -491,7 +491,7 @@ def api_preflight_check(project_id: str):
             if event_files:
                 results['events'] = {'status': 'ok', 'message': f'{len(event_files)} event files found', 'value': str(len(event_files))}
             else:
-                results['events'] = {'status': 'warning', 'message': 'No event files found'}
+                results['events'] = {'status': 'error', 'message': 'No event files found'}
         else:
             results['events'] = {'status': 'na', 'message': 'BIDS folder not available'}
         
@@ -1047,6 +1047,10 @@ def api_model_hints():
     if bids_dir and os.path.isdir(bids_dir):
         bids_tasks = discover_tasks(Path(bids_dir))
         event_info = _discover_event_info(Path(bids_dir), model_hints.get('model_tasks', []))
+        if event_info.get('files_scanned', 0) == 0:
+            return jsonify({
+                "error": "No BIDS *_events.tsv files found in BIDS folder. Event files are required."
+            }), 400
 
     warnings = _build_model_warnings(model_hints, bids_tasks, event_info)
 
