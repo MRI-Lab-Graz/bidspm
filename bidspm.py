@@ -3,7 +3,7 @@
 BIDSPM Runner - CLI Entry Point
 
 This is a thin CLI wrapper that parses arguments and delegates to the core Pipeline.
-All business logic is in lib/core.py to avoid duplication with web_interface.py.
+All business logic is in lib/core.py to avoid duplication with bidspm_gui.py.
 """
 
 import argparse
