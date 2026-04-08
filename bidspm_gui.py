@@ -158,7 +158,10 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
         }
 
     task_tokens = set(tasks_filter or [])
-    event_files = sorted(bids_dir.glob('**/*_events.tsv'))
+    # Only look in subject func folders — never in code/, derivatives/, etc.
+    event_files = sorted(bids_dir.glob('sub-*/ses-*/func/*_events.tsv')) + \
+                  sorted(bids_dir.glob('sub-*/func/*_events.tsv'))
+    event_files = sorted(set(event_files))
     if task_tokens:
         event_files = [
             f for f in event_files
@@ -487,7 +490,9 @@ def api_preflight_check(project_id: str):
         # Check for event files
         if bids_path and bids_path.exists():
             import glob
-            event_files = list(bids_path.glob('**/*_events.tsv'))
+            # Only count events files in subject func folders
+            event_files = list(bids_path.glob('sub-*/ses-*/func/*_events.tsv')) + \
+                          list(bids_path.glob('sub-*/func/*_events.tsv'))
             if event_files:
                 results['events'] = {'status': 'ok', 'message': f'{len(event_files)} event files found', 'value': str(len(event_files))}
             else:
@@ -978,6 +983,181 @@ def api_check_environment():
 # Model Validation (delegate to core)
 # =============================================================================
 
+# Model Validation (delegate to core)
+# =============================================================================
+
+def _scan_bids_for_model(bids_dir: str) -> dict:
+    """
+    Scan a BIDS directory to extract tasks and trial_type levels.
+    Returns a dict with keys: tasks (list), trial_types_by_task (dict).
+    Mirrors what pybids auto_model() does, without the numpy 2.x incompatibility.
+    """
+    import re as _re
+    bids_path = Path(bids_dir)
+    tasks = []
+    trial_types_by_task: dict = {}
+
+    # Only scan subject func folders (ignores code/, derivatives/, etc.)
+    all_evfiles = sorted(bids_path.glob('sub-*/ses-*/func/*_events.tsv')) + \
+                  sorted(bids_path.glob('sub-*/func/*_events.tsv'))
+
+    for evfile in all_evfiles:
+        m = _re.search(r'task-([^_/]+)', evfile.name)
+        if not m:
+            continue
+        task = m.group(1)
+        if task not in tasks:
+            tasks.append(task)
+        try:
+            with evfile.open(encoding='utf-8') as fh:
+                reader = csv.DictReader(fh, delimiter='\t')
+                for row in reader:
+                    val = (row.get('trial_type') or '').strip()
+                    if val and val != 'n/a':
+                        trial_types_by_task.setdefault(task, set()).add(val)
+        except Exception:
+            pass
+
+    # Deduplicate / sort
+    for t in trial_types_by_task:
+        trial_types_by_task[t] = sorted(trial_types_by_task[t])
+
+    return {"tasks": tasks, "trial_types_by_task": trial_types_by_task}
+
+
+def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
+    """
+    Build a default BIDS stats model following the reference default model spec:
+    https://bids-standard.github.io/stats-models/default_model.html
+    One Run-level node per task, then a Subject-level and Dataset-level node.
+    """
+    nodes = []
+
+    for task in tasks:
+        conditions = trial_types_by_task.get(task, [])
+        predictors = [f"trial_type.{c}" for c in conditions] if conditions else ["trial_type.condition_a"]
+        predictors_with_intercept = predictors + [1]
+
+        # One-vs-rest contrasts: each condition vs average of all others
+        contrasts = []
+        n = len(predictors)
+        for i, pred in enumerate(predictors):
+            cname = pred.replace("trial_type.", "")
+            if n > 1:
+                weights = [-1 / (n - 1) if j != i else 1 for j in range(n)]
+            else:
+                weights = [1]
+            contrasts.append({
+                "Name": cname,
+                "ConditionList": predictors,
+                "Weights": weights,
+                "Test": "t"
+            })
+
+        node_name = f"run_level_{task}" if len(tasks) > 1 else "run_level"
+        nodes.append({
+            "Level": "Run",
+            "Name": node_name,
+            "GroupBy": ["run", "subject", "task"],
+            "Transformations": {
+                "Transformer": "bidspm",
+                "Instructions": []
+            },
+            "Model": {
+                "X": predictors_with_intercept,
+                "HRF": {
+                    "Variables": predictors,
+                    "Model": "spm"
+                },
+                "Options": {
+                    "HighPassFilterCutoffHz": 0.0078,
+                    "Mask": {"desc": ["brain"], "suffix": ["mask"]}
+                },
+                "Software": [{"Name": "SPM", "Version": 25}]
+            },
+            "Contrasts": contrasts
+        })
+
+    # Gather all run-level contrast names for subject level
+    all_contrast_names = []
+    for node in nodes:
+        for c in node.get("Contrasts", []):
+            if c["Name"] not in all_contrast_names:
+                all_contrast_names.append(c["Name"])
+
+    subject_contrasts = [
+        {"Name": n, "ConditionList": [n], "Weights": [1], "Test": "t"}
+        for n in all_contrast_names
+    ]
+    nodes.append({
+        "Level": "Subject",
+        "Name": "subject_level",
+        "GroupBy": ["subject", "contrast"],
+        "Model": {"X": all_contrast_names or ["contrast"]},
+        "Contrasts": subject_contrasts
+    })
+
+    dataset_contrasts = [
+        {"Name": n, "ConditionList": [n], "Weights": [1], "Test": "t"}
+        for n in all_contrast_names
+    ]
+    nodes.append({
+        "Level": "Dataset",
+        "Name": "dataset_level",
+        "GroupBy": ["contrast"],
+        "Model": {"X": [1]},
+        "Contrasts": dataset_contrasts
+    })
+
+    return {
+        "Name": "default-model",
+        "BIDSModelVersion": "1.0.0",
+        "Description": "Default BIDS stats model – generated from dataset events files.",
+        "Input": {"task": tasks},
+        "Nodes": nodes
+    }
+
+
+@app.route('/api/model/create', methods=['POST'])
+def api_model_create():
+    """
+    Create a BIDS stats model JSON file.
+    If bids_dir is provided, scans its events files to build a default model
+    (tasks + trial_type levels), mirroring pybids auto_model().
+    Otherwise writes a minimal skeleton.
+    """
+    data = request.json or {}
+    path = data.get('path', '').strip()
+    bids_dir = data.get('bids_dir', '').strip()
+
+    if not path:
+        return jsonify({"success": False, "error": "No path provided"}), 400
+
+    path = os.path.abspath(path)
+
+    if os.path.exists(path) and not data.get('overwrite', False):
+        return jsonify({"success": False, "error": "File already exists. Set overwrite=true to replace it."}), 409
+
+    try:
+        if bids_dir and os.path.isdir(bids_dir):
+            scan = _scan_bids_for_model(bids_dir)
+            model = _build_default_model(scan["tasks"], scan["trial_types_by_task"])
+            source = "bids_scan"
+        else:
+            # Minimal skeleton when no BIDS dir is available
+            model = _build_default_model([], {})
+            source = "skeleton"
+
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(model, f, indent=2)
+            f.write('\n')
+        return jsonify({"success": True, "path": path, "source": source,
+                        "tasks": model["Input"].get("task", [])})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/validate_model', methods=['POST'])
 def api_validate_model():
     """Validate BIDS stats model using core module."""
@@ -1078,7 +1258,9 @@ def load_config_file():
         return jsonify({
             "WD": "", "BIDS_DIR": "", "DERIVATIVES_DIR": "", "FMRIPREP_DIR": "",
             "SPACE": "MNI152NLin2009cAsym", "FWHM": 6, "MODELS_FILE": "",
-            "TASKS": [], "VERBOSITY": 3, "container_type": "local"
+            "TASKS": [], "VERBOSITY": 3, "container_type": "apptainer",
+            "docker_image": "",
+            "apptainer_image": "/data/local/container/bidspm/bidspm_4.0.0.sif"
         })
     
     with open(path, 'r') as f:
@@ -1167,9 +1349,9 @@ def load_container_file():
     
     if not os.path.exists(path):
         return jsonify({
-            "container_type": "local",
-            "docker_image": "bidspm/bidspm:latest",
-            "apptainer_image": ""
+            "container_type": "apptainer",
+            "docker_image": "",
+            "apptainer_image": "/data/local/container/bidspm/bidspm_4.0.0.sif"
         })
     
     with open(path, 'r') as f:
@@ -1340,15 +1522,17 @@ if __name__ == '__main__':
     import argparse
     import webbrowser
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
-    parser.add_argument('-p', '--port', type=int, default=None, 
+    parser.add_argument('-p', '--port', type=int, default=None,
                        help='Port to use (default: auto-select starting from 5000)')
+    parser.add_argument('--no-browser', action='store_true',
+                       help='Do not attempt to open a browser automatically (useful on headless servers)')
     args = parser.parse_args()
-    
+
     if args.port:
         port = args.port
     else:
         port = find_free_port(5000)
-    
+
     if not port:
         print("Error: Could not find a free port.")
         import sys
@@ -1361,13 +1545,14 @@ if __name__ == '__main__':
     print()
     print(f"🚀 Running with Waitress server on 0.0.0.0:{port}")
 
-    try:
-        opened = webbrowser.open(url)
-        if opened:
-            print("✅ Browser opened automatically")
-        else:
+    if not args.no_browser:
+        try:
+            opened = webbrowser.open(url)
+            if opened:
+                print("✅ Browser opened automatically")
+            else:
+                print("⚠️  Could not auto-open browser (open URL manually)")
+        except Exception:
             print("⚠️  Could not auto-open browser (open URL manually)")
-    except Exception:
-        print("⚠️  Could not auto-open browser (open URL manually)")
 
     serve(app, host='0.0.0.0', port=port, threads=10)

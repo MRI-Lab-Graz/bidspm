@@ -209,27 +209,27 @@
                                                     <label class="form-check-label" for="type-docker">Docker</label>
                                                 </div>
                                                 <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer">
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" checked>
                                                     <label class="form-check-label" for="type-apptainer">Apptainer</label>
                                                 </div>
                                                 <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" checked>
+                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local">
                                                     <label class="form-check-label" for="type-local">Local (No Container)</label>
                                                 </div>
                                             </div>
                                         </div>
 
                                         <!-- Docker Option -->
-                                        <div class="col-12" id="docker-options">
+                                        <div class="col-12 d-none" id="docker-options">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
                                             <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="bidspm/bidspm:latest">
                                         </div>
 
                                         <!-- Apptainer Option -->
-                                        <div class="col-12 d-none" id="apptainer-options">
+                                        <div class="col-12" id="apptainer-options">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
                                             <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image">
+                                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="/data/local/container/bidspm/bidspm_4.0.0.sif">
                                                 <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
                                             </div>
                                         </div>
@@ -337,7 +337,7 @@ Ready for command.</div>
     // --- FORM DATA HANDLERS ---
     function getFullFormData() {
         const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
-        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'apptainer';
         return {
             actions: actions,
             model: document.getElementById('model').value,
@@ -471,7 +471,7 @@ Ready for command.</div>
         }
 
         // Container info
-        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'local';
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'apptainer';
         unifiedStudyConfig.container_type = containerType;
         
         unifiedStudyConfig.docker_image = document.getElementById('input-docker_image').value;
@@ -501,7 +501,7 @@ Ready for command.</div>
         }
         
         // Container info - ensure we read from the loaded config
-        const type = unifiedStudyConfig.container_type || 'local';
+        const type = unifiedStudyConfig.container_type || 'apptainer';
         console.log('Loading container_type:', type, 'from config:', unifiedStudyConfig);
         const radio = document.getElementById(`type-${type}`);
         if (radio) {

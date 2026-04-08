@@ -235,13 +235,30 @@ def generate_bids_events_name(bold_file):
     return name
 
 
-def process_folder(source_folder, dest_folder, dry_run=False):
+def backup_existing_files(target_dir, file_pattern):
+    """Backup existing files matching pattern to a timestamped subdirectory."""
+    from datetime import datetime
+    target_path = Path(target_dir)
+    existing = list(target_path.glob(file_pattern))
+    if not existing:
+        return
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_dir = target_path / f"backup_events_{timestamp}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  Creating backup directory: {backup_dir}")
+    for f in existing:
+        print(f"    Backing up: {f.name}")
+        shutil.move(str(f), backup_dir / f.name)
+
+
+def process_folder(source_folder, dest_folder, force=False, dry_run=False):
     """
     Process all events files in source folder and copy to dest folder with BIDS naming.
     
     Args:
         source_folder: Folder containing source events TSV files
         dest_folder: BIDS func folder containing bold files (used for naming)
+        force:    If True, overwrite existing files. Otherwise skip them.
         dry_run: If True, only show what would be done
     """
     source_path = Path(source_folder)
@@ -286,8 +303,13 @@ def process_folder(source_folder, dest_folder, dry_run=False):
             print(f"  No matching bold found, using: {new_name}")
         
         if dry_run:
-            print(f"  [DRY RUN] Would create: {output_path}")
+            exists = output_path.exists()
+            action = "[DRY RUN] Would skip (exists, no --force)" if exists and not force else "[DRY RUN] Would create"
+            print(f"  {action}: {output_path}")
         else:
+            if output_path.exists() and not force:
+                print(f"  Skipped (already exists, use --force to overwrite): {output_path}")
+                continue
             # Read, fix, and save
             try:
                 df = pd.read_csv(events_file, sep='\t')
@@ -297,55 +319,218 @@ def process_folder(source_folder, dest_folder, dry_run=False):
                 processed += 1
             except Exception as e:
                 print(f"  ERROR: {e}")
-    
+
     print("-" * 60)
     print(f"Processed {processed} file(s)")
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("""
-Usage: 
-  Single file:
-    python fix_events_format.py <input_events.tsv> [output_events.tsv]
-  
-  Batch folder:
-    python fix_events_format.py --folder <source_folder> <bids_func_folder> [--dry-run]
+def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=None,
+                          run=None, force=False, backup=False, dry_run=False):
+    """
+    Process all events files in source folder and copy to correct BIDS paths.
 
+    Parses sub-XXX and ses-XXX from each filename and writes reformatted files to
+    <bids_root>/sub-XXX/ses-XXX/func/  (mirroring events2bids.sh behaviour).
+
+    Args:
+        source_folder: Folder containing source events TSV files
+        bids_root:     Root of the BIDS dataset
+        task:          Task label for output filename (e.g. 'crom').
+                       When given, bold-file matching is skipped.
+        ses_override:  Session label override (e.g. '1'). Replaces value
+                       parsed from the source filename.
+        run:           Run index to include in output filename (e.g. '1').
+                       Inserted between task and 'events' if provided.
+        force:         If True, overwrite existing files. Otherwise skip them.
+        backup:        If True, back up existing events files before writing
+        dry_run:       If True, only show what would be done
+    """
+    source_path = Path(source_folder)
+    bids_path = Path(bids_root)
+
+    if not source_path.exists():
+        print(f"Error: Source folder does not exist: {source_folder}")
+        return
+
+    if not bids_path.exists():
+        print(f"Error: BIDS root does not exist: {bids_root}")
+        return
+
+    events_files = sorted(source_path.glob('*_events.tsv'))
+    if not events_files:
+        print(f"No *_events.tsv files found in {source_folder}")
+        return
+
+    print(f"Found {len(events_files)} events file(s)")
+    print(f"BIDS root: {bids_root}")
+    print("-" * 60)
+
+    processed = 0
+    for events_file in events_files:
+        print(f"\nProcessing: {events_file.name}")
+
+        # Sanity check – skip tiny files
+        line_count = sum(1 for _ in events_file.open())
+        if line_count <= 5:
+            print(f"  Warning: File seems too small ({line_count} lines), skipping.")
+            continue
+
+        entities = parse_bids_filename(events_file.name)
+        sub = entities.get('sub')
+        ses = ses_override if ses_override else entities.get('ses')
+
+        if not sub:
+            print(f"  Warning: Could not parse 'sub' from filename, skipping.")
+            continue
+
+        # Construct BIDS func path
+        if ses:
+            func_dir = bids_path / f"sub-{sub}" / f"ses-{ses}" / "func"
+        else:
+            func_dir = bids_path / f"sub-{sub}" / "func"
+
+        if not func_dir.exists():
+            print(f"  Warning: {func_dir} does not exist – creating it.")
+            if not dry_run:
+                func_dir.mkdir(parents=True, exist_ok=True)
+
+        # Determine output filename
+        if task:
+            # Build name directly from parsed entities + explicit labels
+            parts = [f"sub-{sub}"]
+            if ses:
+                parts.append(f"ses-{ses}")
+            parts.append(f"task-{task}")
+            if run:
+                parts.append(f"run-{run}")
+            new_name = "_".join(parts) + "_events.tsv"
+            print(f"  Output name: {new_name}")
+        else:
+            # Try to match a bold file for proper BIDS naming
+            bold_file = find_matching_bold(events_file, func_dir) if func_dir.exists() else None
+            if bold_file:
+                new_name = generate_bids_events_name(bold_file)
+                print(f"  Matched bold: {bold_file.name} -> {new_name}")
+            else:
+                new_name = events_file.name
+                print(f"  No matching bold found, keeping name: {new_name}")
+
+        output_path = func_dir / new_name
+        print(f"  Output: {output_path}")
+
+        if dry_run:
+            exists = output_path.exists()
+            action = "[DRY RUN] Would skip (exists, no --force)" if exists and not force else "[DRY RUN] Would write"
+            print(f"  {action}: {output_path}")
+            continue
+
+        if output_path.exists() and not force:
+            print(f"  Skipped (already exists, use --force to overwrite): {output_path}")
+            continue
+
+        if backup:
+            backup_existing_files(func_dir, '*_events.tsv')
+
+        try:
+            df = pd.read_csv(events_file, sep='\t')
+            result_df = fix_events_dataframe(df)
+            result_df.to_csv(output_path, sep='\t', index=False)
+            print(f"  Created: {output_path}")
+            processed += 1
+        except Exception as e:
+            print(f"  ERROR: {e}")
+
+    print("-" * 60)
+    print(f"Processed {processed} file(s)")
+    if backup:
+        print("Note: Existing files were backed up to timestamped backup directories.")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Fix BIDS events file formatting for MRAUT task.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
 Examples:
+  # Fix a single file (output: <name>_fixed.tsv next to input)
   python fix_events_format.py sub-01_task-MRAUT_events.tsv
-  python fix_events_format.py --folder ./raw_events ./bids/sub-01/ses-1/func
-  python fix_events_format.py --folder ./raw_events ./bids/sub-01/ses-1/func --dry-run
-""")
-        sys.exit(1)
-    
-    # Check for folder mode
-    if sys.argv[1] == '--folder':
-        if len(sys.argv) < 4:
-            print("Error: --folder requires <source_folder> and <bids_func_folder>")
-            sys.exit(1)
-        
-        source_folder = sys.argv[2]
-        dest_folder = sys.argv[3]
-        dry_run = '--dry-run' in sys.argv
-        
-        process_folder(source_folder, dest_folder, dry_run)
-    else:
-        # Single file mode
-        input_path = sys.argv[1]
-        output_path = sys.argv[2] if len(sys.argv) > 2 else None
-        
-        result = fix_single_file(input_path, output_path)
-        
-        if output_path is None:
-            p = Path(input_path)
-            output_path = p.parent / f"{p.stem}_fixed{p.suffix}"
-        
-        print(f"Fixed events file saved to: {output_path}")
+
+  # Fix and write to a specific output file
+  python fix_events_format.py sub-01_task-MRAUT_events.tsv out_events.tsv
+
+  # Batch: fix all *_events.tsv in source_folder and copy into the correct
+  #   BIDS sub/ses/func paths under bids_root (auto-parsed from filenames)
+  python fix_events_format.py --folder ./raw_events --bids /data/BIDS
+
+  # Specify task and session explicitly
+  python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --ses 1
+
+  # Include a run index in the output filename
+  python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --ses 1 --run 1
+
+  # Dry-run preview with backup
+  python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --ses 1 --backup --dry-run
+
+  # Legacy: fix into a single already-known func folder
+  python fix_events_format.py --folder ./raw_events --dest /data/BIDS/sub-01/ses-1/func
+"""
+    )
+
+    parser.add_argument('input', nargs='?', help='Input events TSV file (single-file mode)')
+    parser.add_argument('output', nargs='?', help='Output events TSV file (single-file mode, optional)')
+    parser.add_argument('--folder', metavar='SOURCE', help='Source folder containing *_events.tsv files')
+    parser.add_argument('--bids', metavar='BIDS_ROOT',
+                        help='BIDS dataset root; sub/ses paths are auto-constructed from filenames')
+    parser.add_argument('--dest', metavar='FUNC_DIR',
+                        help='Explicit BIDS func folder (legacy single-subject mode)')
+    parser.add_argument('--task', metavar='TASK',
+                        help='Task label for output filename (e.g. crom). '
+                             'Skips bold-file matching; use when source files '
+                             'have a different task name than the BIDS bold files.')
+    parser.add_argument('--ses', metavar='SES',
+                        help='Session label override (e.g. 1). '
+                             'Overrides the session parsed from the source filename.')
+    parser.add_argument('--run', metavar='RUN',
+                        help='Run index to include in output filename (e.g. 1). '
+                             'Inserted after task label: sub-X_ses-Y_task-Z_run-1_events.tsv')
+    parser.add_argument('--force', action='store_true',
+                        help='Overwrite existing output files. Without this flag, '
+                             'existing files are skipped.')
+    parser.add_argument('--backup', action='store_true',
+                        help='Back up existing events files before overwriting (implies --force).')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Show what would be done without writing any files')
+
+    args = parser.parse_args()
+
+    if args.folder:
+        force = args.force or args.backup  # --backup implies overwrite
+        if args.bids:
+            process_folder_to_bids(args.folder, args.bids, task=args.task,
+                                   ses_override=args.ses, run=args.run,
+                                   force=force, backup=args.backup, dry_run=args.dry_run)
+        elif args.dest:
+            process_folder(args.folder, args.dest, force=force, dry_run=args.dry_run)
+        else:
+            parser.error("--folder requires either --bids <bids_root> or --dest <func_dir>")
+    elif args.input:
+        result = fix_single_file(args.input, args.output)
+
+        out = args.output
+        if out is None:
+            p = Path(args.input)
+            out = p.parent / f"{p.stem}_fixed{p.suffix}"
+
+        print(f"Fixed events file saved to: {out}")
         print("\nSample of fixed events (first 20 rows):")
         print(result.head(20).to_string())
         print("\n\nUnique trial_types:")
         print(result['trial_type'].unique())
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == '__main__':

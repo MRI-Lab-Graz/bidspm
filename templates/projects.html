@@ -227,14 +227,14 @@
                         <div class="col-md-4">
                             <label class="form-label">Container Type</label>
                             <select class="form-select" id="project-container-type">
-                                <option value="local" selected>Local (No Container)</option>
-                                <option value="apptainer">Apptainer</option>
+                                <option value="local">Local (No Container)</option>
+                                <option value="apptainer" selected>Apptainer</option>
                                 <option value="docker">Docker</option>
                             </select>
                         </div>
                         <div class="col-md-8">
                             <label for="project-container-image" class="form-label">Container Image</label>
-                            <input type="text" class="form-control" id="project-container-image" placeholder="Path to .sif or Docker image name" disabled>
+                            <input type="text" class="form-control" id="project-container-image" placeholder="Path to .sif or Docker image name" value="/data/local/container/bidspm/bidspm_4.0.0.sif">
                             <small class="text-muted">Apptainer: path to .sif file | Docker: image name</small>
                         </div>
                     </div>
@@ -797,7 +797,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('edit-output-folder').value = config.output_folder || '';
                 document.getElementById('edit-fmriprep-folder').value = config.fmriprep_folder || '';
                 document.getElementById('edit-space').value = config.space || 'MNI152NLin2009cAsym';
-                document.getElementById('edit-container-type').value = config.container_type || 'local';
+                document.getElementById('edit-container-type').value = config.container_type || 'apptainer';
                 
                 const containerImage = config.container_type === 'apptainer' ? config.apptainer_image : 
                                        config.container_type === 'docker' ? config.docker_image : '';
