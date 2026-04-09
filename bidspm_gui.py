@@ -1110,10 +1110,6 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
             "Level": "Run",
             "Name": node_name,
             "GroupBy": ["run", "subject", "task"],
-            "Transformations": {
-                "Transformer": "bidspm",
-                "Instructions": []
-            },
             "Model": {
                 "Type": "glm",
                 "X": predictors_with_intercept,
@@ -1125,7 +1121,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
                     "HighPassFilterCutoffHz": 0.0078,
                     "Mask": {"desc": ["brain"], "suffix": ["mask"]}
                 },
-                "Software": [{"Name": "SPM", "Version": 25}]
+                "Software": {"SPM": {"Version": 25}}
             },
             "Contrasts": contrasts
         })

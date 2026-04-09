@@ -68,6 +68,43 @@ def normalize_legacy_model_keys(node):
 
     return fixes
 
+
+def normalize_software_blocks(node):
+    """Normalize legacy Software fields to the schema-valid object form."""
+    fixes = 0
+
+    if isinstance(node, dict):
+        software = node.get('Software')
+        if 'Software' in node:
+            normalized_software = None
+
+            if isinstance(software, list):
+                if not software:
+                    normalized_software = None
+                elif all(isinstance(item, str) for item in software):
+                    normalized_software = {item: {} for item in software}
+                elif all(isinstance(item, dict) and 'Name' in item for item in software):
+                    normalized_software = {
+                        item['Name']: {key: value for key, value in item.items() if key != 'Name'}
+                        for item in software
+                    }
+
+            elif isinstance(software, str):
+                normalized_software = {software: {}}
+
+            if normalized_software is not None or isinstance(software, list):
+                node['Software'] = normalized_software
+                fixes += 1
+
+        for value in node.values():
+            fixes += normalize_software_blocks(value)
+
+    elif isinstance(node, list):
+        for item in node:
+            fixes += normalize_software_blocks(item)
+
+    return fixes
+
 def validate_json(model_path):
     if not VALIDATION_AVAILABLE:
         print(f"⚠️  Warning: BIDS-StatsModel validation skipped due to missing dependencies: {MISSING_MODULES}")
@@ -81,6 +118,7 @@ def validate_json(model_path):
         with open(model_path, "r") as f:
             model = json.load(f)
         normalize_legacy_model_keys(model)
+        normalize_software_blocks(model)
         
         # First check for schema validity
         validate(instance=model, schema=schema)
@@ -102,6 +140,7 @@ def validate_json(model_path):
             with open(model_path, "r") as f:
                 model = json.load(f)
             normalize_legacy_model_keys(model)
+            normalize_software_blocks(model)
             contrast_issues = check_empty_contrasts(model)
             if contrast_issues:
                 print("❌ The model has empty contrast issues:")
