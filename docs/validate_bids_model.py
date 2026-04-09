@@ -38,6 +38,36 @@ def check_empty_contrasts(model):
     
     return issues
 
+
+def normalize_legacy_model_keys(node):
+    """Normalize legacy BIDS model keys in-place for compatibility."""
+    fixes = 0
+
+    if isinstance(node, dict):
+        is_contrast = 'ConditionList' in node and 'Weights' in node
+        if is_contrast and 'Type' in node and 'Test' not in node and node['Type'] in {'t', 'F', 'pass'}:
+            node['Test'] = node.pop('Type')
+            fixes += 1
+
+        is_dummy_contrast = 'Contrasts' in node and 'ConditionList' not in node and 'Weights' not in node
+        if is_dummy_contrast and 'Type' in node and 'Test' not in node and node['Type'] in {'t', 'F', 'pass'}:
+            node['Test'] = node.pop('Type')
+            fixes += 1
+
+        is_model = 'X' in node and 'ConditionList' not in node and 'Weights' not in node
+        if is_model and 'Type' not in node:
+            node['Type'] = 'glm'
+            fixes += 1
+
+        for value in node.values():
+            fixes += normalize_legacy_model_keys(value)
+
+    elif isinstance(node, list):
+        for item in node:
+            fixes += normalize_legacy_model_keys(item)
+
+    return fixes
+
 def validate_json(model_path):
     if not VALIDATION_AVAILABLE:
         print(f"⚠️  Warning: BIDS-StatsModel validation skipped due to missing dependencies: {MISSING_MODULES}")
@@ -50,6 +80,7 @@ def validate_json(model_path):
         schema = requests.get(schema_url).json()
         with open(model_path, "r") as f:
             model = json.load(f)
+        normalize_legacy_model_keys(model)
         
         # First check for schema validity
         validate(instance=model, schema=schema)
@@ -70,6 +101,7 @@ def validate_json(model_path):
             # Still check for semantic issues even with transformer warning
             with open(model_path, "r") as f:
                 model = json.load(f)
+            normalize_legacy_model_keys(model)
             contrast_issues = check_empty_contrasts(model)
             if contrast_issues:
                 print("❌ The model has empty contrast issues:")

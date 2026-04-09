@@ -68,6 +68,7 @@ app.config['APP_VERSION'] = __version__
 BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
 PYTHON_EXE = os.path.abspath(".bidspm/bin/python")
 LOG_DIR = Path("logs")
+DEFAULT_PORT = 5100
 
 # Store running executions (with periodic cleanup)
 executions: Dict[str, Dict[str, Any]] = {}
@@ -80,7 +81,7 @@ MAX_EXECUTIONS = 50  # Cleanup threshold
 # Utility Functions
 # =============================================================================
 
-def find_free_port(start_port: int = 5000, max_tries: int = 100) -> Optional[int]:
+def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Optional[int]:
     """Find an available port."""
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -90,6 +91,34 @@ def find_free_port(start_port: int = 5000, max_tries: int = 100) -> Optional[int
             except socket.error:
                 continue
     return None
+
+
+def kill_existing_on_port(port: int) -> bool:
+    """Kill any process currently listening on the given port. Returns True if something was killed."""
+    import signal as _signal
+    killed = False
+    try:
+        result = subprocess.run(
+            ['ss', '-tlnp', f'sport = :{port}'],
+            capture_output=True, text=True
+        )
+        # Parse PIDs from ss output like: users:(("python",pid=12345,fd=6))
+        pids = set(re.findall(r'pid=(\d+)', result.stdout))
+        own_pid = str(os.getpid())
+        for pid in pids:
+            if pid == own_pid:
+                continue
+            try:
+                os.kill(int(pid), _signal.SIGTERM)
+                killed = True
+                print(f"  Stopped existing instance (PID {pid}) on port {port}")
+            except (ProcessLookupError, PermissionError):
+                pass
+        if killed:
+            time.sleep(1)  # Give the process time to release the port
+    except Exception:
+        pass
+    return killed
 
 
 def cleanup_old_executions():
@@ -105,6 +134,28 @@ def cleanup_old_executions():
     to_remove = len(executions) - MAX_EXECUTIONS
     for eid, _ in finished[:to_remove]:
         del executions[eid]
+
+
+def _get_all_bids_dirs() -> list:
+    """Return all BIDS directories registered across all projects (normalised, absolute)."""
+    dirs = []
+    try:
+        for project in project_manager.list_projects():
+            bids = getattr(project.config, 'bids_dir', None) or ''
+            if bids:
+                dirs.append(os.path.normpath(os.path.abspath(bids)))
+    except Exception:
+        pass
+    return dirs
+
+
+def _is_inside_bids_dir(target_path: str) -> bool:
+    """Return True if *target_path* is inside any registered BIDS folder."""
+    target = os.path.normpath(os.path.abspath(target_path))
+    for bids_dir in _get_all_bids_dirs():
+        if target == bids_dir or target.startswith(bids_dir + os.sep):
+            return True
+    return False
 
 
 def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1064,6 +1115,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
                 "Instructions": []
             },
             "Model": {
+                "Type": "glm",
                 "X": predictors_with_intercept,
                 "HRF": {
                     "Variables": predictors,
@@ -1093,7 +1145,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
         "Level": "Subject",
         "Name": "subject_level",
         "GroupBy": ["subject", "contrast"],
-        "Model": {"X": all_contrast_names or ["contrast"]},
+        "Model": {"Type": "glm", "X": all_contrast_names or ["contrast"]},
         "Contrasts": subject_contrasts
     })
 
@@ -1105,7 +1157,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
         "Level": "Dataset",
         "Name": "dataset_level",
         "GroupBy": ["contrast"],
-        "Model": {"X": [1]},
+        "Model": {"Type": "glm", "X": [1]},
         "Contrasts": dataset_contrasts
     })
 
@@ -1370,6 +1422,8 @@ def browse_fs():
     
     if not os.path.exists(path):
         path = os.getcwd()
+    elif os.path.isfile(path):
+        path = os.path.dirname(os.path.abspath(path)) or os.getcwd()
     
     try:
         items = []
@@ -1415,6 +1469,9 @@ def save_file_content():
     if not path:
         return jsonify({"success": False, "error": "No file path provided"}), 400
 
+    if _is_inside_bids_dir(path):
+        return jsonify({"success": False, "error": "Writing inside the BIDS folder is not allowed."}), 403
+
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 
@@ -1442,6 +1499,9 @@ def create_directory():
     
     if not path:
         return jsonify({"success": False, "error": "No path provided"}), 400
+
+    if _is_inside_bids_dir(path):
+        return jsonify({"success": False, "error": "Creating directories inside the BIDS folder is not allowed."}), 403
     
     try:
         os.makedirs(path, exist_ok=True)
@@ -1523,18 +1583,20 @@ if __name__ == '__main__':
     import webbrowser
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
     parser.add_argument('-p', '--port', type=int, default=None,
-                       help='Port to use (default: auto-select starting from 5000)')
+                       help='Port to use (default: 5100; any existing instance on that port is stopped first)')
     parser.add_argument('--no-browser', action='store_true',
                        help='Do not attempt to open a browser automatically (useful on headless servers)')
     args = parser.parse_args()
 
-    if args.port:
-        port = args.port
-    else:
-        port = find_free_port(5000)
+    target_port = args.port or DEFAULT_PORT
 
+    # Kill any stale instance on the target port so the user always gets
+    # a fresh server at the same URL (fixes the recurring blank-page issue).
+    kill_existing_on_port(target_port)
+
+    port = find_free_port(target_port, max_tries=1)
     if not port:
-        print("Error: Could not find a free port.")
+        print(f"Error: Port {target_port} is still in use after attempting to free it.")
         import sys
         sys.exit(1)
 
@@ -1545,14 +1607,27 @@ if __name__ == '__main__':
     print()
     print(f"🚀 Running with Waitress server on 0.0.0.0:{port}")
 
+    # Detect VS Code Remote: BROWSER is set to VS Code's browser.sh helper.
+    # In that context webbrowser.open() fires --openExternal BEFORE VS Code has
+    # finished setting up its local port-forwarding tunnel, so the local browser
+    # receives "connection refused" and shows a blank page.
+    # Solution: skip auto-open and let VS Code's own port-detection show its
+    # "Open in Browser" notification (which fires only after the tunnel is ready).
+    _browser_cmd = os.environ.get('BROWSER', '')
+    _vscode_remote = 'browser.sh' in _browser_cmd or os.environ.get('TERM_PROGRAM') == 'vscode'
+
     if not args.no_browser:
-        try:
-            opened = webbrowser.open(url)
-            if opened:
+        if _vscode_remote:
+            print()
+            print("📌 VS Code Remote detected.")
+            print(f"   → Click the 'Open in Browser' popup that VS Code shows,")
+            print(f"     or open manually: {url}")
+            print(f"   → You can also click the port badge in the VS Code Ports tab.")
+        else:
+            def open_browser():
+                webbrowser.open(url)
                 print("✅ Browser opened automatically")
-            else:
-                print("⚠️  Could not auto-open browser (open URL manually)")
-        except Exception:
-            print("⚠️  Could not auto-open browser (open URL manually)")
+
+            threading.Timer(1, open_browser).start()
 
     serve(app, host='0.0.0.0', port=port, threads=10)

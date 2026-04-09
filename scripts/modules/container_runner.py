@@ -9,6 +9,25 @@ from typing import List
 from .config import Config, ContainerConfig
 from .logging_utils import log_error
 
+# Repo root is two levels above this file: scripts/modules -> scripts -> bidspm
+_REPO_ROOT = Path(__file__).parent.parent.parent
+_LOCAL_SRC = _REPO_ROOT / "local_src" / "bidspm_local"
+_CONTAINER_BIDSPM = "/home/neuro/bidspm"
+
+
+def _local_patch_binds() -> List[str]:
+    """Return --bind args for every file in local_src/bidspm_local/ that
+    should override the corresponding file inside the container."""
+    binds = []
+    if not _LOCAL_SRC.exists():
+        return binds
+    for local_file in _LOCAL_SRC.rglob("*"):
+        if local_file.is_file():
+            rel = local_file.relative_to(_LOCAL_SRC)
+            container_path = f"{_CONTAINER_BIDSPM}/{rel}"
+            binds.extend(["--bind", f"{local_file}:{container_path}"])
+    return binds
+
 
 def build_container_command(container_config: ContainerConfig, config: Config, args: List[str], model_file_path: Path) -> tuple:
     """Build container command based on container type (docker or apptainer)
@@ -172,6 +191,9 @@ exec "$REAL_OCTAVE" --init-file /tmp/octave_init_runtime.m "$@"
         "--env", "BIDSPM_IGNORE_FIGURES=1",
         "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
     ])
+
+    # Bind-mount local patches (local_src/bidspm_local/) over container files
+    cmd.extend(_local_patch_binds())
 
     cmd.append(container_config.apptainer_image)
     cmd.extend(args)

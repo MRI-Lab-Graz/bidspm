@@ -1591,7 +1591,8 @@
 
         const trimmed = userPath.trim();
         if (!trimmed.endsWith('.json')) {
-            alert('File must end with .json');
+            document.getElementById('model-validation-message').textContent = 'Path must end with .json';
+            document.getElementById('model-validation-status').style.display = 'block';
             return;
         }
 
@@ -1616,7 +1617,8 @@
             }
 
             if (!result.success) {
-                alert('Error: ' + result.error);
+                document.getElementById('model-validation-message').textContent = result.error;
+                document.getElementById('model-validation-status').style.display = 'block';
                 return;
             }
 
@@ -1636,7 +1638,8 @@
             await openModelEditor();
 
         } catch (e) {
-            alert('Failed to create model: ' + e.message);
+            document.getElementById('model-validation-message').textContent = 'Failed to create model: ' + e.message;
+            document.getElementById('model-validation-status').style.display = 'block';
         }
     }
 
@@ -1651,7 +1654,7 @@
             pathLabel.textContent = 'No model selected.';
             modelEditorDraft = null;
             editor.innerHTML = '<div class="text-muted small">Select MODELS_FILE first.</div>';
-            new bootstrap.Modal(document.getElementById('modelEditorModal')).show();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
             return;
         } else {
             pathLabel.textContent = modelPath;
@@ -1670,12 +1673,12 @@
                 modelEditorDraft = null;
                 editor.innerHTML = '<div class="text-muted small">Unable to render editor.</div>';
                 status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${e.message}</div>`;
-                new bootstrap.Modal(document.getElementById('modelEditorModal')).show();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
                 return;
             }
         }
 
-        new bootstrap.Modal(document.getElementById('modelEditorModal')).show();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
     }
 
     async function saveModelEditor() {
@@ -1722,8 +1725,14 @@
             }
 
             status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model saved.</div>';
-            await refreshModelTasks();
-            await refreshModelHints();
+
+            // Close the modal immediately so the backdrop doesn't block the UI
+            const modalEl = document.getElementById('modelEditorModal');
+            const modalInst = bootstrap.Modal.getInstance(modalEl);
+            if (modalInst) modalInst.hide();
+
+            // Refresh task and hint state in the background (no await)
+            refreshModelTasks();
         } catch (e) {
             status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${e.message}</div>`;
         }
@@ -2040,7 +2049,11 @@
     async function fetchBrowse(path, onlyDirs) {
         const res = await fetch(`/browse?path=${encodeURIComponent(path)}&only_dirs=${onlyDirs}`);
         const data = await res.json();
-        if (data.error) { alert('Error: ' + data.error); return; }
+        if (data.error) {
+            const list = document.getElementById('browse-list');
+            list.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">${data.error}</div>`;
+            return;
+        }
 
         const list = document.getElementById('browse-list');
         list.innerHTML = '';
@@ -2093,9 +2106,13 @@
                 if (result.success) {
                     fetchBrowse(currentBrowsingPath, onlyDirs);
                 } else {
-                    alert('Error creating folder: ' + result.error);
+                    const list = document.getElementById('browse-list');
+                    list.insertAdjacentHTML('afterbegin', `<div class="alert alert-danger py-2 px-3 small mb-1">${result.error}</div>`);
                 }
-            } catch (e) { alert('Failed to create folder.'); }
+            } catch (e) {
+                const list = document.getElementById('browse-list');
+                list.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger py-2 px-3 small mb-1">Failed to create folder.</div>');
+            }
         };
     }
 

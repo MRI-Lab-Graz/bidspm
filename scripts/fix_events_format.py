@@ -17,19 +17,26 @@ from glob import glob
 
 def fix_events_dataframe(df):
     """Fix the events dataframe formatting."""
-    
+
+    def col(row, name, default='n/a'):
+        """Safely get a column value, returning default if column is absent."""
+        if name not in df.columns:
+            return default
+        val = row[name]
+        return default if (val != val or val is None) else val  # NaN check
+
     # Create output dataframe
     new_rows = []
-    
+
     i = 0
     while i < len(df):
         row = df.iloc[i]
-        
-        event_type = str(row['event_type'])
-        trial_type = str(row['trial_type'])
+
+        event_type = str(col(row, 'event_type', ''))
+        trial_type = str(col(row, 'trial_type', ''))
         onset = float(row['onset'])
-        duration = row['duration']
-        response_time = row['response_time']
+        duration = col(row, 'duration', 0)
+        response_time = col(row, 'response_time', 'n/a')
         
         # Check if next row is a paired Keyboard event (same onset)
         has_keyboard_pair = False
@@ -127,8 +134,8 @@ def fix_events_dataframe(df):
         
         # Process paired Keyboard event as button_press with adjusted onset
         if has_keyboard_pair:
-            kb_response_time = keyboard_row['response_time']
-            kb_trial_type = str(keyboard_row['trial_type'])
+            kb_response_time = col(keyboard_row, 'response_time', 'n/a')
+            kb_trial_type = str(col(keyboard_row, 'trial_type', ''))
             
             # Calculate new onset: original onset + response_time from keyboard row
             if kb_response_time != 'n/a' and pd.notna(kb_response_time):
@@ -247,8 +254,8 @@ def backup_existing_files(target_dir, file_pattern):
     backup_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Creating backup directory: {backup_dir}")
     for f in existing:
-        print(f"    Backing up: {f.name}")
-        shutil.move(str(f), backup_dir / f.name)
+        print(f"    Backing up (copy): {f.name}")
+        shutil.copy2(str(f), backup_dir / f.name)  # copy, never move – originals stay in BIDS
 
 
 def process_folder(source_folder, dest_folder, force=False, dry_run=False):
@@ -366,6 +373,7 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
     print("-" * 60)
 
     processed = 0
+    missing_func_dirs = []
     for events_file in events_files:
         print(f"\nProcessing: {events_file.name}")
 
@@ -390,9 +398,9 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
             func_dir = bids_path / f"sub-{sub}" / "func"
 
         if not func_dir.exists():
-            print(f"  Warning: {func_dir} does not exist – creating it.")
-            if not dry_run:
-                func_dir.mkdir(parents=True, exist_ok=True)
+            print(f"  Skipping: {func_dir} does not exist (no func data).")
+            missing_func_dirs.append(str(func_dir))
+            continue
 
         # Determine output filename
         if task:
@@ -418,32 +426,48 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
         output_path = func_dir / new_name
         print(f"  Output: {output_path}")
 
-        if dry_run:
-            exists = output_path.exists()
-            action = "[DRY RUN] Would skip (exists, no --force)" if exists and not force else "[DRY RUN] Would write"
-            print(f"  {action}: {output_path}")
-            continue
-
-        if output_path.exists() and not force:
-            print(f"  Skipped (already exists, use --force to overwrite): {output_path}")
-            continue
-
-        if backup:
-            backup_existing_files(func_dir, '*_events.tsv')
-
         try:
             df = pd.read_csv(events_file, sep='\t')
             result_df = fix_events_dataframe(df)
+        except Exception as e:
+            print(f"  ERROR reading/processing source: {e}")
+            continue
+
+        if dry_run:
+            exists = output_path.exists()
+            action = "[DRY RUN] Would skip (already up to date)" if exists else "[DRY RUN] Would write"
+            print(f"  {action}: {output_path}")
+            continue
+
+        # If the file exists, only skip if the content is already identical
+        if output_path.exists() and not force:
+            try:
+                existing_df = pd.read_csv(output_path, sep='\t')
+                if existing_df.equals(result_df):
+                    print(f"  Already up to date: {output_path}")
+                    continue
+            except Exception:
+                pass  # Can't read existing file – fall through and overwrite
+
+        if backup and output_path.exists():
+            backup_existing_files(func_dir, '*_events.tsv')
+
+        try:
             result_df.to_csv(output_path, sep='\t', index=False)
             print(f"  Created: {output_path}")
             processed += 1
         except Exception as e:
-            print(f"  ERROR: {e}")
+            print(f"  ERROR writing output: {e}")
 
     print("-" * 60)
     print(f"Processed {processed} file(s)")
     if backup:
         print("Note: Existing files were backed up to timestamped backup directories.")
+
+    if missing_func_dirs:
+        print(f"\nMissing func folders ({len(missing_func_dirs)}) – no events written:")
+        for d in missing_func_dirs:
+            print(f"  {d}")
 
 
 def main():
@@ -496,8 +520,7 @@ Examples:
                         help='Run index to include in output filename (e.g. 1). '
                              'Inserted after task label: sub-X_ses-Y_task-Z_run-1_events.tsv')
     parser.add_argument('--force', action='store_true',
-                        help='Overwrite existing output files. Without this flag, '
-                             'existing files are skipped.')
+                        help='Overwrite existing output files even if content is identical.')
     parser.add_argument('--backup', action='store_true',
                         help='Back up existing events files before overwriting (implies --force).')
     parser.add_argument('--dry-run', action='store_true',
