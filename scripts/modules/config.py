@@ -23,6 +23,10 @@ class Config:
     SUBJECTS: Optional[List[str]] = None
     ROI: Optional[bool] = None
     ROI_CONFIG: Optional[dict] = None
+    LOCAL_ACTION_TIMEOUT_SECONDS: int = 900
+    SMOOTH_TIMEOUT_SECONDS: int = 900
+    STATS_TIMEOUT_SECONDS: int = 300
+    DATASET_TIMEOUT_SECONDS: int = 300
 
 
 @dataclass
@@ -70,6 +74,10 @@ def load_config(config_file: str) -> Config:
     derivatives_dir = Path(data["DERIVATIVES_DIR"])
     fmriprep_dir = Path(data["FMRIPREP_DIR"])
     verbosity = data.get("VERBOSITY", 3)
+    local_action_timeout_seconds = int(data.get("LOCAL_ACTION_TIMEOUT_SECONDS", 900))
+    smooth_timeout = int(data.get("SMOOTH_TIMEOUT_SECONDS", local_action_timeout_seconds))
+    stats_timeout = int(data.get("STATS_TIMEOUT_SECONDS", 300))
+    dataset_timeout = int(data.get("DATASET_TIMEOUT_SECONDS", 300))
 
     return Config(
         WD=wd,
@@ -83,7 +91,11 @@ def load_config(config_file: str) -> Config:
         VERBOSITY=verbosity,
         SUBJECTS=data.get("SUBJECTS"),
         ROI=data.get("ROI"),
-        ROI_CONFIG=data.get("ROI_CONFIG")
+        ROI_CONFIG=data.get("ROI_CONFIG"),
+        LOCAL_ACTION_TIMEOUT_SECONDS=max(1, local_action_timeout_seconds),
+        SMOOTH_TIMEOUT_SECONDS=max(1, smooth_timeout),
+        STATS_TIMEOUT_SECONDS=max(1, stats_timeout),
+        DATASET_TIMEOUT_SECONDS=max(1, dataset_timeout),
     )
 
 

@@ -18,6 +18,10 @@
       "minItems": 1
     },
     "VERBOSITY": {"type": "integer", "minimum": 0, "maximum": 3},
+    "LOCAL_ACTION_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
+    "SMOOTH_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
+    "STATS_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
+    "DATASET_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
     "SUBJECTS": {
       "type": "array",
       "items": {"type": "string"}

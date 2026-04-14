@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 
 from .config import Config
-from .environment import check_local_bidspm_installation
+from .environment import check_local_bidspm_installation, get_local_bidspm_cli_command
 from .logging_utils import log_debug, log_error, log_error_non_fatal
 
 # Module-level constant
@@ -57,13 +57,20 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
         env_dict[key] = os.pathsep.join(cleaned)
 
     success = True
+    cli_base_cmd = get_local_bidspm_cli_command(repo_root)
+    _timeout_map = {
+        "smooth": int(getattr(config, "SMOOTH_TIMEOUT_SECONDS", 900) or 900),
+        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 300) or 300),
+        "dataset": int(getattr(config, "DATASET_TIMEOUT_SECONDS", 300) or 300),
+    }
 
     for subject in subjects:
+        timeout_seconds = max(1, _timeout_map.get(action, int(getattr(config, "LOCAL_ACTION_TIMEOUT_SECONDS", 900) or 900)))
         print(f">>> {action.title()} for subject: {subject}, task: {task}")
 
         try:
             cmd = [
-                ".bidspm/bin/bidspm",
+                *cli_base_cmd,
                 str(config.BIDS_DIR),
                 str(config.DERIVATIVES_DIR),
                 "subject",
@@ -80,7 +87,11 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
             if action == "smooth":
                 cmd.extend(["--fwhm", str(config.FWHM)])
             elif action in ["stats", "contrasts", "results"]:
-                cmd.extend(["--model_file", str(model_file_path)])
+                preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc"
+                cmd.extend([
+                    "--model_file", str(model_file_path),
+                    "--preproc_dir", str(preproc_dir),
+                ])
 
             log_debug(f"Local BIDSPM CLI command: {' '.join(cmd)}")
 
@@ -103,7 +114,7 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800,
+                timeout=timeout_seconds,
                 cwd=repo_root,
                 env=env,
             )
@@ -120,8 +131,12 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
                     print(f"   STDERR: {result.stderr}")
                 success = False
 
-        except subprocess.TimeoutExpired:
-            print(f"⚠️  {action.title()} timed out for subject {subject}")
+        except subprocess.TimeoutExpired as exc:
+            print(f"⚠️  {action.title()} timed out for subject {subject} after {timeout_seconds} seconds")
+            if exc.stdout:
+                print(f"   Partial STDOUT: {str(exc.stdout).strip()[-4000:]}")
+            if exc.stderr:
+                print(f"   Partial STDERR: {str(exc.stderr).strip()[-4000:]}")
             success = False
         except Exception as e:
             print(f"⚠️  {action.title()} failed for subject {subject}: {e}")
@@ -149,6 +164,12 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
     
     success = True
     local_bidspm_dir = Path("local_src/bidspm_local")
+    _timeout_map = {
+        "smooth": int(getattr(config, "SMOOTH_TIMEOUT_SECONDS", 900) or 900),
+        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 300) or 300),
+        "dataset": int(getattr(config, "DATASET_TIMEOUT_SECONDS", 300) or 300),
+    }
+    timeout_seconds = max(1, _timeout_map.get(action, int(getattr(config, "LOCAL_ACTION_TIMEOUT_SECONDS", 900) or 900)))
     
     for subject in subjects:
         try:
@@ -171,7 +192,7 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
                 log_debug(f"Local BIDSPM command: {' '.join(cmd)}")
                 
                 result = subprocess.run(cmd, check=True, text=True, 
-                                      capture_output=True, timeout=1800)
+                                      capture_output=True, timeout=timeout_seconds)
                 
                 print(f"✅ Local {action} completed successfully for subject {subject}")
                 
@@ -188,7 +209,7 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
                 print(f"STDERR: {e.stderr}")
             success = False
         except subprocess.TimeoutExpired:
-            log_error_non_fatal(f"Local {action} timed out for subject {subject}")
+            log_error_non_fatal(f"Local {action} timed out for subject {subject} after {timeout_seconds} seconds")
             success = False
         except Exception as e:
             log_error_non_fatal(f"Error running local {action} for subject {subject}: {e}")

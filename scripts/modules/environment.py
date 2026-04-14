@@ -3,10 +3,42 @@
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import List
 
 from .config import ContainerConfig
 from .logging_utils import log_error, log_error_non_fatal, log, log_debug
+
+
+def get_local_bidspm_cli_command(repo_root: Path | None = None) -> List[str]:
+    """Return a robust local BIDSPM CLI invocation.
+
+    The generated console script under .bidspm/bin can contain a stale shebang
+    when the environment is moved. Running the CLI via Python with an explicit
+    import path avoids that failure mode and also prevents the top-level
+    bidspm.py file in the repo root from shadowing the installed package.
+    """
+    repo_root = (repo_root or Path.cwd()).resolve()
+    bidspm_src = repo_root / "local_src" / "bidspm_local" / "src"
+    if not bidspm_src.exists():
+        raise FileNotFoundError(f"Local BIDSPM source not found at {bidspm_src}")
+
+    venv_python = repo_root / ".bidspm" / "bin" / "python"
+    python_executable = str(venv_python) if venv_python.exists() else sys.executable
+
+    bootstrap = (
+        "import sys; "
+        "from pathlib import Path; "
+        "repo_root = Path(sys.argv.pop(1)).resolve(); "
+        "sys.path.insert(0, str(repo_root / 'local_src' / 'bidspm_local' / 'src')); "
+        "site_packages = sorted((repo_root / '.bidspm' / 'lib').glob('python*/site-packages')); "
+        "[sys.path.insert(1, str(path)) for path in reversed(site_packages)]; "
+        "from bidspm.cli import cli; "
+        "cli(sys.argv)"
+    )
+
+    return [python_executable, "-c", bootstrap, str(repo_root)]
 
 
 def check_command(cmd):
@@ -35,10 +67,16 @@ def check_docker_availability():
 
 def check_local_bidspm_installation():
     """Check if local BIDSPM installation is available"""
+    repo_root = Path.cwd().resolve()
+
     try:
-        # Check if bidspm command is available
-        result = subprocess.run(["bidspm", "--help"], 
-                              capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            get_local_bidspm_cli_command(repo_root) + ["--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=repo_root,
+        )
         if result.returncode == 0:
             print("✅ Local BIDSPM CLI found")
             return True
@@ -46,7 +84,7 @@ def check_local_bidspm_installation():
         pass
     
     # Check if local BIDSPM directory exists
-    local_bidspm_dir = Path("local_src/bidspm_local")
+    local_bidspm_dir = repo_root / "local_src" / "bidspm_local"
     if local_bidspm_dir.exists():
         print("✅ Local BIDSPM directory found")
         return True
