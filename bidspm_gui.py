@@ -33,6 +33,7 @@ import time
 import re
 import csv
 import shlex
+import urllib.request
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -78,6 +79,15 @@ current_project_id: Optional[str] = None
 MAX_EXECUTIONS = 50  # Cleanup threshold
 
 
+@app.after_request
+def disable_browser_cache(response):
+    """Avoid stale startup documents in forwarded/browser-preview sessions."""
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -93,6 +103,42 @@ def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Opti
             except socket.error:
                 continue
     return None
+
+
+def wait_for_http_ready(url: str, timeout: float = 8.0, interval: float = 0.2) -> bool:
+    """Poll a local HTTP URL until it responds or the timeout expires."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.0) as response:
+                if 200 <= getattr(response, 'status', 0) < 400:
+                    return True
+        except Exception:
+            time.sleep(interval)
+    return False
+
+
+def should_skip_browser_auto_open() -> tuple[bool, str]:
+    """Return whether browser auto-open should be skipped and why."""
+    browser_cmd = os.environ.get('BROWSER', '')
+    term_program = os.environ.get('TERM_PROGRAM', '')
+
+    vscode_markers = [
+        'browser.sh' in browser_cmd,
+        term_program == 'vscode',
+        bool(os.environ.get('VSCODE_IPC_HOOK_CLI')),
+        bool(os.environ.get('VSCODE_GIT_ASKPASS_NODE')),
+        bool(os.environ.get('VSCODE_GIT_IPC_HANDLE')),
+    ]
+    if any(vscode_markers):
+        return True, 'VS Code environment detected'
+
+    ssh_session = bool(os.environ.get('SSH_CONNECTION') or os.environ.get('SSH_TTY'))
+    headless = not bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    if ssh_session and headless:
+        return True, 'headless SSH session detected'
+
+    return False, ''
 
 
 def _pids_listening_on_port(port: int) -> List[int]:
@@ -487,11 +533,6 @@ def test_page():
     """
 
 @app.route('/')
-def index():
-    """Redirect to projects page."""
-    return redirect(url_for('projects_page'))
-
-
 @app.route('/projects')
 def projects_page():
     """Render projects management page."""
@@ -1769,26 +1810,24 @@ if __name__ == '__main__':
     print()
     print(f"🚀 Running with Waitress server on 0.0.0.0:{port}")
 
-    # Detect VS Code Remote: BROWSER is set to VS Code's browser.sh helper.
-    # In that context webbrowser.open() fires --openExternal BEFORE VS Code has
-    # finished setting up its local port-forwarding tunnel, so the local browser
-    # receives "connection refused" and shows a blank page.
-    # Solution: skip auto-open and let VS Code's own port-detection show its
-    # "Open in Browser" notification (which fires only after the tunnel is ready).
-    _browser_cmd = os.environ.get('BROWSER', '')
-    _vscode_remote = 'browser.sh' in _browser_cmd or os.environ.get('TERM_PROGRAM') == 'vscode'
+    # In VS Code Remote or headless SSH sessions, browser auto-open often fires
+    # before local port forwarding is ready, which can surface as an empty page
+    # or connection-refused tab in the user's browser.
+    skip_browser_open, skip_reason = should_skip_browser_auto_open()
 
     if not args.no_browser:
-        if _vscode_remote:
+        if skip_browser_open:
             print()
-            print("📌 VS Code Remote detected.")
-            print(f"   → Click the 'Open in Browser' popup that VS Code shows,")
+            print(f"📌 Browser auto-open skipped: {skip_reason}.")
+            print("   → Open the forwarded port from VS Code once the tunnel is ready,")
             print(f"     or open manually: {url}")
-            print(f"   → You can also click the port badge in the VS Code Ports tab.")
         else:
             def open_browser():
-                webbrowser.open(url)
-                print("✅ Browser opened automatically")
+                if wait_for_http_ready(url):
+                    webbrowser.open(url)
+                    print("✅ Browser opened automatically")
+                else:
+                    print(f"⚠️  Server did not become ready within the browser-open timeout. Open manually: {url}")
 
             threading.Timer(1, open_browser).start()
 
