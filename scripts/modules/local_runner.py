@@ -3,8 +3,9 @@
 
 import os
 import subprocess
+import threading
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 from .config import Config
 from .environment import check_local_bidspm_installation, get_local_bidspm_cli_command
@@ -12,6 +13,59 @@ from .logging_utils import log_debug, log_error, log_error_non_fatal
 
 # Module-level constant
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _run_streaming(
+    cmd: list,
+    timeout_seconds: int,
+    env: dict,
+    cwd: Path,
+) -> Tuple[int, str, str]:
+    """Run a subprocess, printing stdout/stderr lines as they arrive.
+
+    Returns (returncode, full_stdout, full_stderr).
+    Raises subprocess.TimeoutExpired (process already killed) on timeout.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env,
+    )
+
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+
+    def _reader(pipe, lines, tag: str) -> None:
+        for raw in iter(pipe.readline, ""):
+            line = raw.rstrip("\n")
+            # Filter out pure backspace/CR noise from SPM progress bars
+            if line and not all(c in "\x08\r" for c in line):
+                print(f"   [{tag}] {line}", flush=True)
+            lines.append(raw)
+        pipe.close()
+
+    t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_lines, "OUT"), daemon=True)
+    t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_lines, "ERR"), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        t_out.join(timeout=3)
+        t_err.join(timeout=3)
+        exc = subprocess.TimeoutExpired(cmd, timeout_seconds)
+        exc.stdout = "".join(stdout_lines)
+        exc.stderr = "".join(stderr_lines)
+        raise exc
+
+    t_out.join(timeout=5)
+    t_err.join(timeout=5)
+    return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
 
 
 def run_local_bidspm(config: Config, action: str, subjects: List[str], task: str, model_file_path: Path):
@@ -60,7 +114,7 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
     cli_base_cmd = get_local_bidspm_cli_command(repo_root)
     _timeout_map = {
         "smooth": int(getattr(config, "SMOOTH_TIMEOUT_SECONDS", 900) or 900),
-        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 300) or 300),
+        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 1800) or 1800),
         "dataset": int(getattr(config, "DATASET_TIMEOUT_SECONDS", 300) or 300),
     }
 
@@ -110,33 +164,17 @@ def run_local_bidspm_cli(config: Config, action: str, subjects: List[str], task:
             elif octave_minimal.exists():
                 env["OCTAVE_SITE_INITFILE"] = str(octave_minimal)
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                cwd=repo_root,
-                env=env,
-            )
+            log_debug(f"Timeout: {timeout_seconds}s | Command: {' '.join(cmd)}")
+            returncode, out, err = _run_streaming(cmd, timeout_seconds, env, repo_root)
 
-            if result.returncode == 0:
+            if returncode == 0:
                 print(f"✅ {action.title()} completed successfully for subject {subject}")
-                if result.stdout:
-                    log_debug(f"STDOUT: {result.stdout}")
             else:
-                print(f"❌ {action.title()} failed for subject {subject}")
-                if result.stdout:
-                    print(f"   STDOUT: {result.stdout}")
-                if result.stderr:
-                    print(f"   STDERR: {result.stderr}")
+                print(f"❌ {action.title()} failed for subject {subject} (exit {returncode})")
                 success = False
 
         except subprocess.TimeoutExpired as exc:
             print(f"⚠️  {action.title()} timed out for subject {subject} after {timeout_seconds} seconds")
-            if exc.stdout:
-                print(f"   Partial STDOUT: {str(exc.stdout).strip()[-4000:]}")
-            if exc.stderr:
-                print(f"   Partial STDERR: {str(exc.stderr).strip()[-4000:]}")
             success = False
         except Exception as e:
             print(f"⚠️  {action.title()} failed for subject {subject}: {e}")
@@ -166,7 +204,7 @@ def run_local_bidspm_direct(config: Config, action: str, subjects: List[str], ta
     local_bidspm_dir = Path("local_src/bidspm_local")
     _timeout_map = {
         "smooth": int(getattr(config, "SMOOTH_TIMEOUT_SECONDS", 900) or 900),
-        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 300) or 300),
+        "stats": int(getattr(config, "STATS_TIMEOUT_SECONDS", 1800) or 1800),
         "dataset": int(getattr(config, "DATASET_TIMEOUT_SECONDS", 300) or 300),
     }
     timeout_seconds = max(1, _timeout_map.get(action, int(getattr(config, "LOCAL_ACTION_TIMEOUT_SECONDS", 900) or 900)))

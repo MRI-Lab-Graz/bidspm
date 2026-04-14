@@ -25,7 +25,7 @@ class Config:
     ROI_CONFIG: Optional[dict] = None
     LOCAL_ACTION_TIMEOUT_SECONDS: int = 900
     SMOOTH_TIMEOUT_SECONDS: int = 900
-    STATS_TIMEOUT_SECONDS: int = 300
+    STATS_TIMEOUT_SECONDS: int = 1800
     DATASET_TIMEOUT_SECONDS: int = 300
 
 
@@ -76,7 +76,7 @@ def load_config(config_file: str) -> Config:
     verbosity = data.get("VERBOSITY", 3)
     local_action_timeout_seconds = int(data.get("LOCAL_ACTION_TIMEOUT_SECONDS", 900))
     smooth_timeout = int(data.get("SMOOTH_TIMEOUT_SECONDS", local_action_timeout_seconds))
-    stats_timeout = int(data.get("STATS_TIMEOUT_SECONDS", 300))
+    stats_timeout = int(data.get("STATS_TIMEOUT_SECONDS", 1800))
     dataset_timeout = int(data.get("DATASET_TIMEOUT_SECONDS", 300))
 
     return Config(
