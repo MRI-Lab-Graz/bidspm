@@ -32,6 +32,7 @@ import threading
 import time
 import re
 import csv
+import shlex
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -86,6 +87,7 @@ def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Opti
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind(('0.0.0.0', port))
                 return port
             except socket.error:
@@ -93,32 +95,55 @@ def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Opti
     return None
 
 
-def kill_existing_on_port(port: int) -> bool:
-    """Kill any process currently listening on the given port. Returns True if something was killed."""
-    import signal as _signal
-    killed = False
+def _pids_listening_on_port(port: int) -> List[int]:
+    """Return PIDs listening on the given TCP port."""
     try:
         result = subprocess.run(
             ['ss', '-tlnp', f'sport = :{port}'],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
+            check=False
         )
-        # Parse PIDs from ss output like: users:(("python",pid=12345,fd=6))
-        pids = set(re.findall(r'pid=(\d+)', result.stdout))
-        own_pid = str(os.getpid())
-        for pid in pids:
-            if pid == own_pid:
-                continue
-            try:
-                os.kill(int(pid), _signal.SIGTERM)
-                killed = True
-                print(f"  Stopped existing instance (PID {pid}) on port {port}")
-            except (ProcessLookupError, PermissionError):
-                pass
-        if killed:
-            time.sleep(1)  # Give the process time to release the port
     except Exception:
-        pass
-    return killed
+        return []
+
+    return sorted({int(pid) for pid in re.findall(r'pid=(\d+)', result.stdout)})
+
+
+def kill_existing_on_port(port: int) -> bool:
+    """Kill any process currently listening on the given port. Returns True if something was killed."""
+    killed = False
+    own_pid = os.getpid()
+    pids = [pid for pid in _pids_listening_on_port(port) if pid != own_pid]
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed = True
+            print(f"  Stopped existing instance (PID {pid}) on port {port}")
+        except (ProcessLookupError, PermissionError):
+            continue
+
+    if not killed:
+        return False
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        remaining = [pid for pid in _pids_listening_on_port(port) if pid != own_pid]
+        if not remaining:
+            return True
+        time.sleep(0.2)
+
+    remaining = [pid for pid in _pids_listening_on_port(port) if pid != own_pid]
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            print(f"  Force-stopped lingering instance (PID {pid}) on port {port}")
+        except (ProcessLookupError, PermissionError):
+            continue
+
+    time.sleep(0.2)
+    return True
 
 
 def cleanup_old_executions():
@@ -134,6 +159,66 @@ def cleanup_old_executions():
     to_remove = len(executions) - MAX_EXECUTIONS
     for eid, _ in finished[:to_remove]:
         del executions[eid]
+
+
+def _execution_log_location(project_id: Optional[str], execution_id: str) -> tuple[Path, str]:
+    """Return log file path and display filename for an execution."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if project_id:
+        log_dir = project_manager.get_project_logs_dir(project_id)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_filename = f"run_{timestamp}_{execution_id[:8]}.log"
+        return log_dir / log_filename, log_filename
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_filename = f"web_run_{timestamp}_{execution_id[:8]}.log"
+    return LOG_DIR / log_filename, log_filename
+
+
+def _append_execution_log(log_file: Path, message: str) -> None:
+    """Append text to the execution log file."""
+    with open(log_file, 'a', encoding='utf-8') as log:
+        log.write(message)
+        log.flush()
+
+
+def _sanitize_sse_line(line: str) -> str:
+    """Normalize log text for SSE transport."""
+    return re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', line).rstrip("\n")
+
+
+def _finalize_execution(execution_id: str, return_code: int) -> None:
+    """Mark an execution finished and persist its terminal status to the log."""
+    global current_execution_id
+
+    exec_info = executions.get(execution_id)
+    if not exec_info or exec_info.get('finished'):
+        return
+
+    finish_msg = f"\n[{datetime.now().isoformat()}] Process finished with exit code {return_code}\n"
+    log_file = Path(exec_info['log_file'])
+    _append_execution_log(log_file, finish_msg)
+
+    exec_info['finished'] = True
+    exec_info['return_code'] = return_code
+    exec_info['process'] = None
+
+    project_id = exec_info.get('project_id')
+    log_filename = exec_info.get('log_filename')
+    if project_id and log_filename:
+        project_manager.update_project_log(project_id, log_filename)
+
+    if current_execution_id == execution_id:
+        current_execution_id = None
+
+
+def _monitor_execution(execution_id: str, process: subprocess.Popen) -> None:
+    """Wait for a detached execution and mark it finished when it exits."""
+    try:
+        return_code = process.wait()
+    except Exception:
+        return_code = -1
+    _finalize_execution(execution_id, return_code)
 
 
 def _get_all_bids_dirs() -> list:
@@ -160,29 +245,81 @@ def _is_inside_bids_dir(target_path: str) -> bool:
 
 def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract tasks, contrast levels, and replacement values from a BIDS model."""
-    tasks = model_data.get('Input', {}).get('task', [])
+    field_status = {
+        "model_tasks": "absent",
+        "replace_values": "absent",
+        "contrast_levels": "absent"
+    }
+
+    raw_input = model_data.get('Input', {})
+    raw_tasks = raw_input.get('task', []) if isinstance(raw_input, dict) else []
+    tasks = raw_tasks
     if isinstance(tasks, str):
         tasks = [tasks]
-    if not isinstance(tasks, list):
+    elif not isinstance(tasks, list):
         tasks = []
+        if raw_tasks not in (None, [], ''):
+            field_status["model_tasks"] = "invalid"
 
     replace_values = set()
     contrast_levels = set()
     contrast_terms = set()
+    saw_replace_instruction = False
+    saw_contrast_term = False
 
-    for node in model_data.get('Nodes', []):
+    nodes = model_data.get('Nodes', [])
+    if not isinstance(nodes, list):
+        nodes = []
+        field_status["replace_values"] = "invalid"
+        field_status["contrast_levels"] = "invalid"
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            field_status["replace_values"] = "invalid"
+            field_status["contrast_levels"] = "invalid"
+            continue
+
         transformations = node.get('Transformations', {})
-        for instruction in transformations.get('Instructions', []):
+        instructions = transformations.get('Instructions', []) if isinstance(transformations, dict) else []
+        if transformations and not isinstance(transformations, dict):
+            field_status["replace_values"] = "invalid"
+
+        for instruction in instructions if isinstance(instructions, list) else []:
+            if not isinstance(instruction, dict):
+                field_status["replace_values"] = "invalid"
+                continue
             if instruction.get('Name') == 'Replace':
-                for rep in instruction.get('Replace', []):
+                saw_replace_instruction = True
+                replace_entries = instruction.get('Replace', [])
+                if not isinstance(replace_entries, list):
+                    field_status["replace_values"] = "invalid"
+                    continue
+                for rep in replace_entries:
+                    if not isinstance(rep, dict):
+                        field_status["replace_values"] = "invalid"
+                        continue
                     value = rep.get('value')
                     if isinstance(value, str) and value.strip():
                         replace_values.add(value.strip())
 
-        for contrast in node.get('Contrasts', []):
-            for term in contrast.get('ConditionList', []):
+        contrasts = node.get('Contrasts', [])
+        if contrasts and not isinstance(contrasts, list):
+            field_status["contrast_levels"] = "invalid"
+            continue
+
+        for contrast in contrasts if isinstance(contrasts, list) else []:
+            if not isinstance(contrast, dict):
+                field_status["contrast_levels"] = "invalid"
+                continue
+            condition_list = contrast.get('ConditionList', [])
+            if condition_list and not isinstance(condition_list, list):
+                field_status["contrast_levels"] = "invalid"
+                continue
+            for term in condition_list if isinstance(condition_list, list) else []:
                 if not isinstance(term, str):
+                    field_status["contrast_levels"] = "invalid"
                     continue
+                saw_contrast_term = True
                 contrast_terms.add(term)
                 if '.' in term:
                     _, level = term.rsplit('.', 1)
@@ -191,11 +328,28 @@ def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     contrast_levels.add(term)
 
+    model_tasks = sorted({t.strip() for t in tasks if isinstance(t, str) and t.strip()})
+    if model_tasks:
+        field_status["model_tasks"] = "present"
+    elif field_status["model_tasks"] != "invalid":
+        field_status["model_tasks"] = "absent"
+
+    if replace_values:
+        field_status["replace_values"] = "present"
+    elif field_status["replace_values"] != "invalid":
+        field_status["replace_values"] = "absent" if saw_replace_instruction or nodes else "absent"
+
+    if contrast_levels:
+        field_status["contrast_levels"] = "present"
+    elif field_status["contrast_levels"] != "invalid":
+        field_status["contrast_levels"] = "absent" if saw_contrast_term or nodes else "absent"
+
     return {
-        "model_tasks": sorted({t for t in tasks if isinstance(t, str) and t.strip()}),
+        "model_tasks": model_tasks,
         "replace_values": sorted(replace_values),
         "contrast_levels": sorted(contrast_levels),
-        "contrast_terms": sorted(contrast_terms)
+        "contrast_terms": sorted(contrast_terms),
+        "field_status": field_status
     }
 
 
@@ -205,7 +359,8 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
         return {
             "files_scanned": 0,
             "event_columns": [],
-            "sample_values": {}
+            "sample_values": {},
+            "sample_status": {}
         }
 
     task_tokens = set(tasks_filter or [])
@@ -251,6 +406,14 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
         "sample_values": {
             "trial_type": sorted(sample_values['trial_type'])[:30],
             "condition": sorted(sample_values['condition'])[:30]
+        },
+        "sample_status": {
+            "trial_type": "present" if sample_values['trial_type'] else (
+                "missing-column" if 'trial_type' not in event_columns else "empty-column"
+            ),
+            "condition": "present" if sample_values['condition'] else (
+                "missing-column" if 'condition' not in event_columns else "empty-column"
+            )
         }
     }
 
@@ -749,84 +912,66 @@ def run_bidspm():
         command.append('--force')
 
     cleanup_old_executions()
+
+    log_file, log_filename = _execution_log_location(project_id, execution_id)
+    command_display = shlex.join(command)
     
     executions[execution_id] = {
         'command': command,
-        'output': [],
         'finished': False,
         'process': None,
         'start_time': time.time(),
-        'project_id': project_id
+        'project_id': project_id,
+        'log_file': str(log_file),
+        'log_filename': log_filename,
+        'return_code': None,
+        'stop_requested': False,
+        'pid': None
     }
 
-    def execute():
-        global current_execution_id
-        current_execution_id = execution_id
-        
-        # Use project-specific log directory if available
-        if project_id:
-            log_dir = project_manager.get_project_logs_dir(project_id)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_filename = f"run_{timestamp}.log"
-            log_file = log_dir / log_filename
-        else:
-            LOG_DIR.mkdir(parents=True, exist_ok=True)
-            log_file = LOG_DIR / "web_run.log"
-            log_filename = "web_run.log"
-        
-        env = os.environ.copy()
-        env['PYTHONUNBUFFERED'] = '1'
-        
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            start_new_session=True,
-            env=env
-        )
-        executions[execution_id]['process'] = process
-        executions[execution_id]['log_file'] = str(log_file)
+    global current_execution_id
+    current_execution_id = execution_id
 
-        msg = f"[{datetime.now().isoformat()}] Executing: {' '.join(command)}\n"
-        executions[execution_id]['output'].append(msg)
-        
-        with open(log_file, "a") as log:
-            log.write(f"\n{'='*80}\n")
-            log.write(msg)
-            log.write(f"{'='*80}\n\n")
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
 
-        try:
-            for line in process.stdout:
-                executions[execution_id]['output'].append(line)
-                with open(log_file, "a") as log:
-                    log.write(line)
-        except Exception as e:
-            error_msg = f"\nError reading output: {str(e)}\n"
-            executions[execution_id]['output'].append(error_msg)
+    header = (
+        f"\n{'=' * 80}\n"
+        f"[{datetime.now().isoformat()}] Executing (detached via nohup): {command_display}\n"
+        f"Log file: {log_file}\n"
+        f"{'=' * 80}\n\n"
+    )
 
-        process.wait()
-        finish_msg = f"\n[{datetime.now().isoformat()}] Process finished with exit code {process.returncode}\n"
-        executions[execution_id]['output'].append(finish_msg)
+    try:
+        with open(log_file, 'a', encoding='utf-8', buffering=1) as log:
+            log.write(header)
+            log.flush()
+            process = subprocess.Popen(
+                ['nohup'] + command,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=env,
+                text=True
+            )
+    except Exception as e:
         executions[execution_id]['finished'] = True
-        executions[execution_id]['return_code'] = process.returncode
-        
-        with open(log_file, "a") as log:
-            log.write(finish_msg)
-        
-        # Update project's last log reference
-        if project_id:
-            project_manager.update_project_log(project_id, log_filename)
+        _append_execution_log(log_file, f"[{datetime.now().isoformat()}] Failed to start execution: {str(e)}\n")
+        return jsonify({"error": f"Failed to start execution: {str(e)}"}), 500
 
-    thread = threading.Thread(target=execute, daemon=True)
-    thread.start()
+    executions[execution_id]['process'] = process
+    executions[execution_id]['pid'] = process.pid
+
+    monitor = threading.Thread(target=_monitor_execution, args=(execution_id, process), daemon=True)
+    monitor.start()
 
     return jsonify({
         "execution_id": execution_id,
-        "project_id": project_id
+        "project_id": project_id,
+        "log_file": str(log_file),
+        "log_filename": log_filename,
+        "pid": process.pid
     })
 
 
@@ -838,18 +983,37 @@ def stream_output(execution_id: str):
             yield "data: Error: Execution not found\n\n"
             return
 
-        idx = 0
+        exec_info = executions[execution_id]
+        log_file = Path(exec_info.get('log_file', ''))
+        offset = 0
+        keepalive_at = time.time()
+
         while True:
-            if idx < len(executions[execution_id]['output']):
-                line = executions[execution_id]['output'][idx]
-                line = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', line)
-                line = line.rstrip("\n")
-                yield f"data: {line}\n\n"
-                idx += 1
-            elif executions[execution_id]['finished']:
+            emitted = False
+
+            if log_file.exists():
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='replace') as log:
+                        log.seek(offset)
+                        while True:
+                            line = log.readline()
+                            if not line:
+                                offset = log.tell()
+                                break
+                            yield f"data: {_sanitize_sse_line(line)}\n\n"
+                            emitted = True
+                except Exception as e:
+                    yield f"data: Log streaming error: {_sanitize_sse_line(str(e))}\n\n"
+                    break
+
+            if exec_info.get('finished') and not emitted:
                 break
-            else:
-                time.sleep(0.05)
+
+            if not emitted and (time.time() - keepalive_at) >= 1:
+                yield ": keepalive\n\n"
+                keepalive_at = time.time()
+
+            time.sleep(0.2)
                 
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
@@ -870,21 +1034,23 @@ def stop_execution():
     try:
         proc = exec_info['process']
         if proc.poll() is None:
+            exec_info['stop_requested'] = True
+            _append_execution_log(Path(exec_info['log_file']), f"\n[{datetime.now().isoformat()}] --- Stop requested by user ---\n")
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGINT)
                 time.sleep(1)
                 if proc.poll() is None:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    time.sleep(1)
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
             except Exception:
                 proc.terminate()
                 if proc.poll() is None:
                     proc.kill()
-        
-        exec_info['output'].append("\n--- Execution stopped by user ---\n")
-        exec_info['finished'] = True
-        return jsonify({"status": "stopped"})
+        return jsonify({"status": "stopping"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

@@ -775,7 +775,15 @@ Ready for command.</div>
         startExecution(runPayload);
     };
     
-    document.getElementById('btn-stop').onclick = () => fetch('/stop', {method: 'POST'});
+    document.getElementById('btn-stop').onclick = async () => {
+        const res = await fetch('/stop', {method: 'POST'});
+        const result = await res.json();
+        if (result.status === 'stopping') {
+            terminal.innerText += '\n--- STOP REQUESTED ---\n';
+            execStatus.innerText = 'STOPPING';
+            execStatus.className = 'badge bg-warning text-dark';
+        }
+    };
 
     document.getElementById('btn-load-config').onclick = async () => {
         const folder = document.getElementById('config-folder').value;
@@ -825,6 +833,10 @@ Ready for command.</div>
         });
         const result = await res.json();
         if (result.error) { terminal.innerText += 'ERROR: ' + result.error; resetStatus(); return; }
+
+        if (result.log_file) {
+            terminal.innerText += `--- FOLLOWING NOHUP LOG: ${result.log_file} ---\n`;
+        }
         
         if (eventSource) eventSource.close();
         eventSource = new EventSource(`/stream/${result.execution_id}`);
@@ -832,10 +844,10 @@ Ready for command.</div>
             // Ensure each streamed line lands on its own line for readability
             terminal.innerText += e.data + '\n';
             terminal.scrollTop = terminal.scrollHeight;
-            if (e.data.includes('Process finished') || e.data.includes('Execution stopped')) resetStatus();
+            if (e.data.includes('Process finished')) resetStatus();
         };
         eventSource.onerror = () => {
-            terminal.innerText += '\n--- Connection Interrupted ---\n';
+            terminal.innerText += '\n--- LOG STREAM INTERRUPTED ---\n';
             resetStatus();
         };
     }
