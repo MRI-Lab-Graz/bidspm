@@ -18,10 +18,10 @@
       "minItems": 1
     },
     "VERBOSITY": {"type": "integer", "minimum": 0, "maximum": 3},
-    "LOCAL_ACTION_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
-    "SMOOTH_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
-    "STATS_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
-    "DATASET_TIMEOUT_SECONDS": {"type": "integer", "minimum": 1},
+    "LOCAL_ACTION_TIMEOUT_SECONDS": {"type": ["integer", "null"], "minimum": 0},
+    "SMOOTH_TIMEOUT_SECONDS": {"type": ["integer", "null"], "minimum": 0},
+    "STATS_TIMEOUT_SECONDS": {"type": ["integer", "null"], "minimum": 0},
+    "DATASET_TIMEOUT_SECONDS": {"type": ["integer", "null"], "minimum": 0},
     "SUBJECTS": {
       "type": "array",
       "items": {"type": "string"}
