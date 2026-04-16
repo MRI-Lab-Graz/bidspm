@@ -156,6 +156,9 @@
                                                 <button type="button" class="btn btn-outline-primary btn-sm" id="btn-open-model-editor">
                                                     <i class="fas fa-edit me-1"></i> Edit Model JSON
                                                 </button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-open-contrast-builder">
+                                                    <i class="fas fa-puzzle-piece me-1"></i> Contrast Builder
+                                                </button>
                                                 <button type="button" class="btn btn-outline-info btn-sm" id="btn-model-hints">
                                                     <i class="fas fa-lightbulb me-1"></i> Validate + Hints
                                                 </button>
@@ -362,6 +365,107 @@
         </div>
     </div>
 </div>
+
+<!-- ===== Contrast Builder Modal ===== -->
+<div class="modal fade" id="contrastBuilderModal" tabindex="-1" aria-labelledby="contrastBuilderModalLabel">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:1120px;">
+        <div class="modal-content cb-modal-content">
+            <div class="modal-header cb-modal-header">
+                <div class="d-flex flex-column">
+                    <h5 class="modal-title mb-0" id="contrastBuilderModalLabel">
+                        <i class="fas fa-puzzle-piece me-2"></i>Contrast Builder
+                    </h5>
+                    <small class="text-muted mt-1">Drag conditions onto contrasts · set weights · build your design</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <!-- Node selector bar -->
+            <div class="cb-node-bar px-4 pt-3 pb-2 border-bottom d-flex align-items-center gap-3 flex-wrap">
+                <span class="small fw-bold text-muted text-uppercase" style="white-space:nowrap;">Analysis Node:</span>
+                <div id="cb-node-tabs" class="d-flex flex-wrap gap-2"></div>
+                <div id="cb-no-nodes-msg" class="text-muted small d-none">No nodes in model – add a node first.</div>
+            </div>
+
+            <div class="modal-body cb-modal-body d-flex gap-0 p-0" style="min-height:520px;">
+
+                <!-- ── Left panel: available conditions ── -->
+                <aside class="cb-left-panel p-3 d-flex flex-column gap-3">
+                    <div>
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <span class="x-small fw-bold text-uppercase text-muted">Available Conditions</span>
+                            <span class="x-small text-muted">drag onto a contrast →</span>
+                        </div>
+                        <div id="cb-condition-pool" class="cb-condition-pool"></div>
+                    </div>
+
+                    <div class="cb-divider"></div>
+
+                    <div>
+                        <div class="x-small fw-bold text-uppercase text-muted mb-1">Add Custom Condition</div>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="cb-custom-condition" class="form-control" placeholder="e.g. trial_type.new">
+                            <button class="btn btn-outline-secondary" id="cb-add-custom-btn" type="button">Add</button>
+                        </div>
+                    </div>
+
+                    <div class="cb-divider"></div>
+
+                    <!-- Quick preset templates -->
+                    <div>
+                        <div class="x-small fw-bold text-uppercase text-muted mb-2">Quick Presets</div>
+                        <div class="d-flex flex-column gap-2">
+                            <button class="btn btn-sm btn-outline-primary cb-preset-btn" data-preset="each-vs-rest">
+                                <i class="fas fa-star-of-life me-1 small"></i>Each vs Rest
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary cb-preset-btn" data-preset="each-vs-baseline">
+                                <i class="fas fa-arrow-up me-1 small"></i>Each > Baseline
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary cb-preset-btn" data-preset="all-active">
+                                <i class="fas fa-layer-group me-1 small"></i>All Active (F-test)
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary cb-preset-btn" data-preset="clear-all">
+                                <i class="fas fa-trash me-1 small"></i>Clear All Contrasts
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="mt-auto">
+                        <div class="cb-legend">
+                            <div class="cb-legend-row"><span class="cb-weight-badge cb-w-pos">+1</span> <span>positive / active</span></div>
+                            <div class="cb-legend-row"><span class="cb-weight-badge cb-w-neg">-1</span> <span>negative / baseline</span></div>
+                            <div class="cb-legend-row"><span class="cb-weight-badge cb-w-zero">0</span> <span>not contrasted</span></div>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- ── Right panel: contrast list ── -->
+                <main class="cb-right-panel p-3 d-flex flex-column gap-3 flex-grow-1">
+
+                    <div id="cb-contrast-list" class="d-flex flex-column gap-3"></div>
+
+                    <button class="btn btn-outline-success btn-sm align-self-start" id="cb-add-contrast-btn">
+                        <i class="fas fa-plus me-1"></i>Add Contrast
+                    </button>
+
+                    <div id="cb-equation-preview" class="cb-equation-preview d-none"></div>
+                </main>
+            </div>
+
+            <div class="modal-footer cb-modal-footer d-flex justify-content-between">
+                <div id="cb-status" class="small"></div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="cb-apply-btn">
+                        <i class="fas fa-check me-1"></i>Apply to Model
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ===== /Contrast Builder Modal ===== -->
 
 {% endblock %}
 
@@ -666,6 +770,271 @@
             justify-content: flex-start;
             min-width: 0;
         }
+    }
+
+    /* ================================================================
+       Contrast Builder
+    ================================================================ */
+    .cb-modal-content { border: 0; box-shadow: 0 24px 50px rgba(14,30,55,.18); }
+    .cb-modal-header {
+        background: linear-gradient(120deg, #edf4fb 0%, #f3f9ef 100%);
+        border-bottom: 1px solid #cfe0ee;
+    }
+    .cb-modal-body { background: #f7f9fc; overflow: hidden; }
+    .cb-modal-footer { background: #f0f4f9; border-top: 1px solid #d9e4ef; }
+
+    /* Node bar */
+    .cb-node-bar { background: #fff; }
+    .cb-node-tab {
+        border: 1.5px solid #b0c8df;
+        border-radius: 999px;
+        padding: 0.25rem 0.85rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #3d5a74;
+        background: #eef5fc;
+        cursor: pointer;
+        transition: all .15s;
+        white-space: nowrap;
+    }
+    .cb-node-tab:hover { background: #d9eaf6; border-color: #7aadd1; }
+    .cb-node-tab.active {
+        background: #2a6fad;
+        border-color: #2a6fad;
+        color: #fff;
+    }
+
+    /* Panels */
+    .cb-left-panel {
+        width: 260px;
+        min-width: 220px;
+        background: #fff;
+        border-right: 1.5px solid #dde8f2;
+        overflow-y: auto;
+    }
+    .cb-right-panel {
+        overflow-y: auto;
+        max-height: 520px;
+    }
+    .cb-divider { height: 1px; background: #e4ecf5; margin: 0 -0.25rem; }
+
+    /* Condition pool */
+    .cb-condition-pool {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        min-height: 60px;
+    }
+    .cb-condition-chip {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.4rem 0.65rem;
+        border-radius: 0.6rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #25445f;
+        background: #eef5fc;
+        border: 1.5px solid #b8d4ec;
+        cursor: grab;
+        user-select: none;
+        transition: all .12s;
+    }
+    .cb-condition-chip:hover { background: #d9eaf6; border-color: #84b8dc; transform: translateX(2px); }
+    .cb-condition-chip.dragging { opacity: .45; transform: rotate(-1deg) scale(.97); }
+    .cb-condition-chip .cb-chip-icon { font-size: 0.65rem; color: #6c99bb; }
+
+    /* Contrast card */
+    .cb-contrast-card {
+        background: #fff;
+        border: 1.5px solid #dce8f5;
+        border-radius: 0.9rem;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(20,50,90,.06);
+        transition: box-shadow .15s;
+    }
+    .cb-contrast-card.drag-over { border-color: #2a6fad; box-shadow: 0 0 0 3px rgba(42,111,173,.18); }
+    .cb-contrast-card.cb-dragging-card { opacity: .5; }
+    .cb-contrast-header {
+        background: linear-gradient(90deg, #f0f7ff 0%, #f8fbf8 100%);
+        border-bottom: 1px solid #dce8f4;
+        padding: 0.6rem 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
+    .cb-contrast-grab {
+        cursor: grab;
+        color: #94adc5;
+        font-size: 0.85rem;
+        padding: 0 0.2rem;
+    }
+    .cb-contrast-name-input {
+        border: 1px solid #c8dbef;
+        border-radius: 0.4rem;
+        padding: 0.25rem 0.55rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #1d3f63;
+        background: #fff;
+        min-width: 140px;
+    }
+    .cb-contrast-name-input:focus { outline: 2px solid #7ab3e0; border-color: transparent; }
+    .cb-test-type-select {
+        border: 1px solid #c8dbef;
+        border-radius: 0.4rem;
+        padding: 0.22rem 0.45rem;
+        font-size: 0.8rem;
+        color: #1d3f63;
+        background: #fff;
+        cursor: pointer;
+    }
+    .cb-contrast-actions { margin-left: auto; display: flex; gap: .4rem; }
+    .cb-contrast-body { padding: 0.75rem 0.9rem; }
+
+    /* Drop zone */
+    .cb-drop-zone {
+        min-height: 64px;
+        border: 2px dashed #b8cfe8;
+        border-radius: 0.65rem;
+        background: #f5f9fd;
+        padding: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        transition: all .15s;
+        position: relative;
+    }
+    .cb-drop-zone.drag-over {
+        border-color: #2a6fad;
+        background: #e8f2fc;
+    }
+    .cb-drop-zone-hint {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #94b4cc;
+        font-size: 0.78rem;
+        font-style: italic;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+
+    /* Condition row inside a contrast */
+    .cb-condition-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: #fff;
+        border: 1px solid #dce8f5;
+        border-radius: 0.5rem;
+        padding: 0.3rem 0.5rem;
+        transition: all .1s;
+    }
+    .cb-condition-row[draggable="true"] { cursor: grab; }
+    .cb-condition-row.drag-over-row { border-color: #2a6fad; background: #eef5fc; }
+    .cb-cond-label {
+        flex: 1;
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #253b54;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .cb-weight-ctrl {
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
+    }
+    .cb-weight-quick { display: flex; gap: 0.18rem; }
+    .cb-wbtn {
+        border: 1.5px solid #b0c8df;
+        border-radius: 0.35rem;
+        padding: 0.12rem 0.42rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: #eef5fc;
+        color: #25445f;
+        transition: all .1s;
+        line-height: 1.4;
+    }
+    .cb-wbtn:hover { background: #d9eaf6; }
+    .cb-wbtn.active-pos { background: #1f8b5c; border-color: #1f8b5c; color: #fff; }
+    .cb-wbtn.active-neg { background: #c0392b; border-color: #c0392b; color: #fff; }
+    .cb-wbtn.active-zero { background: #94a3b8; border-color: #94a3b8; color: #fff; }
+    .cb-weight-input {
+        width: 54px;
+        border: 1px solid #b0c8df;
+        border-radius: 0.35rem;
+        padding: 0.12rem 0.3rem;
+        font-size: 0.78rem;
+        text-align: center;
+        color: #1d3f63;
+    }
+    .cb-weight-badge {
+        display: inline-block;
+        border-radius: 0.35rem;
+        padding: 0.1rem 0.45rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+    }
+    .cb-w-pos { background: #d9f2e1; color: #1a5c38; border: 1px solid #9fd6b0; }
+    .cb-w-neg { background: #fde8e6; color: #8b1c12; border: 1px solid #f5a49c; }
+    .cb-w-zero { background: #e9ecef; color: #6c757d; border: 1px solid #ced4da; }
+    .cb-remove-cond {
+        border: none;
+        background: none;
+        color: #b0bcc8;
+        cursor: pointer;
+        padding: 0 0.1rem;
+        font-size: 0.8rem;
+        transition: color .1s;
+    }
+    .cb-remove-cond:hover { color: #c0392b; }
+
+    /* Equation preview */
+    .cb-equation-preview {
+        background: #1e2d3d;
+        color: #a8d8f0;
+        border-radius: 0.65rem;
+        padding: 0.7rem 1rem;
+        font-family: monospace;
+        font-size: 0.82rem;
+        margin-top: 0.5rem;
+    }
+
+    /* Contrast summary row (weight sum indicator) */
+    .cb-weight-sum {
+        font-size: 0.7rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 0.3rem;
+        font-weight: 600;
+    }
+    .cb-weight-sum-ok { background: #d9f2e1; color: #1a5c38; }
+    .cb-weight-sum-warn { background: #fff3cd; color: #856404; }
+
+    /* Legend */
+    .cb-legend { background: #f0f6fb; border-radius: 0.5rem; padding: 0.5rem 0.65rem; }
+    .cb-legend-row {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.75rem;
+        color: #4a6478;
+        padding: 0.1rem 0;
+    }
+
+    /* Empty state */
+    .cb-empty-state {
+        text-align: center;
+        padding: 2rem 1rem;
+        color: #94adc5;
+        font-size: 0.85rem;
     }
 </style>
 {% endblock %}
@@ -3028,6 +3397,634 @@
         bootstrap.Modal.getInstance(document.getElementById('browseModal')).hide();
     }
 
+    // ================================================================
+    //  CONTRAST BUILDER
+    // ================================================================
+    (function () {
+        // ── State ──────────────────────────────────────────────
+        let cbNodeIdx = 0;           // which Node we're editing
+        let cbDraft = null;          // deep clone of contrast array for current node
+        let cbConditions = [];       // available condition pool
+
+        // Drag state
+        let dragChip = null;         // condition name being dragged from pool
+        let dragFromCardIdx = null;  // contrast idx when dragging inside a card
+        let dragFromCondIdx = null;  // condition idx when dragging inside a card
+        let dragCardIdx = null;      // whole contrast card being reordered
+
+        // ── DOM refs ───────────────────────────────────────────
+        const modal        = document.getElementById('contrastBuilderModal');
+        const nodeTabs     = document.getElementById('cb-node-tabs');
+        const noNodesMsg   = document.getElementById('cb-no-nodes-msg');
+        const condPool     = document.getElementById('cb-condition-pool');
+        const contrastList = document.getElementById('cb-contrast-list');
+        const cbStatus     = document.getElementById('cb-status');
+        const applyBtn     = document.getElementById('cb-apply-btn');
+        const addContrastBtn = document.getElementById('cb-add-contrast-btn');
+        const addCustomBtn   = document.getElementById('cb-add-custom-btn');
+        const customCondInput = document.getElementById('cb-custom-condition');
+
+        // ── Helpers ────────────────────────────────────────────
+        function getNodes() {
+            return (modelEditorDraft && Array.isArray(modelEditorDraft.Nodes))
+                ? modelEditorDraft.Nodes : [];
+        }
+
+        function currentNode() { return getNodes()[cbNodeIdx] || null; }
+
+        function buildConditions() {
+            // Combine interest regressors, model X entries, and anything already in contrasts
+            const pool = new Set(modelEditorInterestRegressors || []);
+            const node = currentNode();
+            if (node) {
+                (node.Model?.X || []).forEach(v => {
+                    if (typeof v === 'string' && !NUISANCE_REGRESSOR_RX.test(v.trim())) {
+                        pool.add(v.trim());
+                    }
+                });
+                (node.Contrasts || []).forEach(ct => {
+                    (ct.ConditionList || []).forEach(c => pool.add(c));
+                });
+            }
+            // Always include the constant
+            const conditions = Array.from(pool).filter(Boolean);
+            if (!conditions.includes('1')) conditions.push('1');
+            return conditions.sort((a, b) => a.localeCompare(b));
+        }
+
+        function cloneContrasts() {
+            const node = currentNode();
+            if (!node) return [];
+            return structuredClone(Array.isArray(node.Contrasts) ? node.Contrasts : []);
+        }
+
+        function defaultContrastName() {
+            return `Contrast_${String(Date.now()).slice(-4)}`;
+        }
+
+        function sumWeights(contrast) {
+            return (contrast.Weights || []).reduce((s, w) => s + Number(w), 0);
+        }
+
+        function weightClass(w) {
+            const n = Number(w);
+            if (n > 0) return 'active-pos';
+            if (n < 0) return 'active-neg';
+            return 'active-zero';
+        }
+
+        function conditionLabel(cond) {
+            if (cond === '1') return 'constant (intercept)';
+            return cond;
+        }
+
+        // ── Render helpers ─────────────────────────────────────
+        function renderNodeTabs() {
+            nodeTabs.innerHTML = '';
+            const nodes = getNodes();
+            if (!nodes.length) {
+                noNodesMsg.classList.remove('d-none');
+                return;
+            }
+            noNodesMsg.classList.add('d-none');
+            nodes.forEach((node, i) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `cb-node-tab ${i === cbNodeIdx ? 'active' : ''}`;
+                btn.textContent = `${node.Level || 'Node'} – ${node.Name || '#' + (i + 1)}`;
+                btn.addEventListener('click', () => {
+                    cbNodeIdx = i;
+                    reloadForNode();
+                });
+                nodeTabs.appendChild(btn);
+            });
+        }
+
+        function renderConditionPool() {
+            condPool.innerHTML = '';
+            if (!cbConditions.length) {
+                condPool.innerHTML = '<div class="text-muted small">No conditions detected. Set BIDS folder first.</div>';
+                return;
+            }
+            cbConditions.forEach(cond => {
+                condPool.appendChild(makeChip(cond));
+            });
+        }
+
+        function makeChip(cond) {
+            const chip = document.createElement('div');
+            chip.className = 'cb-condition-chip';
+            chip.draggable = true;
+            chip.dataset.cond = cond;
+            chip.innerHTML = `<i class="fas fa-grip-vertical cb-chip-icon"></i><span>${conditionLabel(cond)}</span>`;
+            chip.addEventListener('dragstart', e => {
+                dragChip = cond;
+                dragFromCardIdx = null;
+                dragFromCondIdx = null;
+                dragCardIdx = null;
+                chip.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('text/plain', cond);
+            });
+            chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+            return chip;
+        }
+
+        // ── Contrast-level render ──────────────────────────────
+        function renderContrastList() {
+            contrastList.innerHTML = '';
+            if (!cbDraft.length) {
+                const empty = document.createElement('div');
+                empty.className = 'cb-empty-state';
+                empty.innerHTML = `<i class="fas fa-arrow-left fa-2x mb-2 d-block opacity-25"></i>
+                    Drag conditions from the left panel<br>and click <strong>Add Contrast</strong> to start.`;
+                contrastList.appendChild(empty);
+                return;
+            }
+            cbDraft.forEach((contrast, idx) => renderContrastCard(idx));
+        }
+
+        function renderContrastCard(idx) {
+            const contrast = cbDraft[idx];
+            const card = document.createElement('div');
+            card.className = 'cb-contrast-card';
+            card.dataset.idx = idx;
+            card.draggable = false;  // we use a grab handle instead
+
+            // ── Header ──
+            const header = document.createElement('div');
+            header.className = 'cb-contrast-header';
+
+            // Drag handle for reordering contrasts
+            const grab = document.createElement('span');
+            grab.className = 'cb-contrast-grab';
+            grab.title = 'Drag to reorder contrasts';
+            grab.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+            grab.draggable = true;
+            grab.addEventListener('dragstart', e => {
+                dragCardIdx = idx;
+                dragChip = null;
+                card.classList.add('cb-dragging-card');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            grab.addEventListener('dragend', () => card.classList.remove('cb-dragging-card'));
+            header.appendChild(grab);
+
+            // Name input
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'cb-contrast-name-input';
+            nameInput.value = contrast.Name || '';
+            nameInput.placeholder = 'Contrast name';
+            nameInput.addEventListener('input', () => {
+                cbDraft[idx].Name = nameInput.value;
+            });
+            header.appendChild(nameInput);
+
+            // Test type selector
+            const testSel = document.createElement('select');
+            testSel.className = 'cb-test-type-select';
+            ['t', 'F'].forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t; opt.textContent = t + '-test';
+                if (contrast.Test === t) opt.selected = true;
+                testSel.appendChild(opt);
+            });
+            testSel.addEventListener('change', () => { cbDraft[idx].Test = testSel.value; });
+            header.appendChild(testSel);
+
+            // Weight sum indicator
+            const wsum = document.createElement('span');
+            const sum = sumWeights(contrast);
+            wsum.className = 'cb-weight-sum ' + (Math.abs(sum) < 0.001 ? 'cb-weight-sum-ok' : 'cb-weight-sum-warn');
+            wsum.title = 'Sum of weights (should be 0 for t-tests across conditions)';
+            wsum.textContent = `Σ = ${sum % 1 === 0 ? sum : sum.toFixed(3)}`;
+            header.appendChild(wsum);
+
+            // Actions
+            const actions = document.createElement('div');
+            actions.className = 'cb-contrast-actions';
+
+            // Preset: vs rest
+            const vsRestBtn = document.createElement('button');
+            vsRestBtn.type = 'button';
+            vsRestBtn.className = 'btn btn-sm btn-outline-secondary';
+            vsRestBtn.title = 'Auto: each +1, others split equally negative';
+            vsRestBtn.innerHTML = '<i class="fas fa-balance-scale"></i>';
+            vsRestBtn.addEventListener('click', () => { applyVsRestPreset(idx); renderContrastList(); });
+            actions.appendChild(vsRestBtn);
+
+            // Flip signs
+            const flipBtn = document.createElement('button');
+            flipBtn.type = 'button';
+            flipBtn.className = 'btn btn-sm btn-outline-secondary';
+            flipBtn.title = 'Flip all weights';
+            flipBtn.innerHTML = '<i class="fas fa-exchange-alt"></i>';
+            flipBtn.addEventListener('click', () => {
+                cbDraft[idx].Weights = (cbDraft[idx].Weights || []).map(w => -Number(w));
+                renderContrastList();
+            });
+            actions.appendChild(flipBtn);
+
+            // Delete contrast
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'btn btn-sm btn-outline-danger';
+            delBtn.title = 'Delete contrast';
+            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delBtn.addEventListener('click', () => {
+                cbDraft.splice(idx, 1);
+                renderContrastList();
+            });
+            actions.appendChild(delBtn);
+            header.appendChild(actions);
+            card.appendChild(header);
+
+            // ── Body ──
+            const body = document.createElement('div');
+            body.className = 'cb-contrast-body';
+
+            // Drop zone
+            const dropZone = document.createElement('div');
+            dropZone.className = 'cb-drop-zone';
+
+            // Hint text when empty
+            if (!(contrast.ConditionList || []).length) {
+                const hint = document.createElement('div');
+                hint.className = 'cb-drop-zone-hint';
+                hint.textContent = '← drag a condition here';
+                dropZone.appendChild(hint);
+            }
+
+            dropZone.addEventListener('dragover', e => {
+                // Accept from pool (chip) OR reordering conditions within same card
+                if (dragChip !== null || (dragFromCardIdx === idx && dragFromCondIdx !== null)) {
+                    e.preventDefault();
+                    dropZone.classList.add('drag-over');
+                }
+            });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+                if (dragChip !== null) {
+                    addConditionToContrast(idx, dragChip);
+                    dragChip = null;
+                    renderContrastList();
+                }
+            });
+
+            // Condition rows
+            (contrast.ConditionList || []).forEach((cond, ci) => {
+                const w = (contrast.Weights || [])[ci] ?? 0;
+                const row = buildConditionRow(idx, ci, cond, w);
+                dropZone.appendChild(row);
+            });
+
+            body.appendChild(dropZone);
+
+            // Equation line
+            if ((contrast.ConditionList || []).length) {
+                const eq = buildEquationLine(contrast);
+                body.appendChild(eq);
+            }
+
+            card.appendChild(body);
+
+            // Card-level drag handling (for whole-contrast reorder)
+            card.addEventListener('dragover', e => {
+                if (dragCardIdx !== null && dragCardIdx !== idx) {
+                    e.preventDefault();
+                    card.classList.add('drag-over');
+                }
+            });
+            card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+            card.addEventListener('drop', e => {
+                if (dragCardIdx !== null && dragCardIdx !== idx) {
+                    e.preventDefault();
+                    card.classList.remove('drag-over');
+                    const from = dragCardIdx;
+                    const to = idx;
+                    const spliced = cbDraft.splice(from, 1)[0];
+                    cbDraft.splice(to, 0, spliced);
+                    dragCardIdx = null;
+                    renderContrastList();
+                }
+            });
+
+            contrastList.appendChild(card);
+        }
+
+        function buildConditionRow(cardIdx, condIdx, cond, weight) {
+            const row = document.createElement('div');
+            row.className = 'cb-condition-row';
+            row.draggable = true;
+            row.dataset.condIdx = condIdx;
+
+            row.addEventListener('dragstart', e => {
+                dragFromCardIdx = cardIdx;
+                dragFromCondIdx = condIdx;
+                dragChip = null;
+                dragCardIdx = null;
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            row.addEventListener('dragover', e => {
+                if (dragFromCardIdx === cardIdx && dragFromCondIdx !== condIdx) {
+                    e.preventDefault();
+                    row.classList.add('drag-over-row');
+                }
+            });
+            row.addEventListener('dragleave', () => row.classList.remove('drag-over-row'));
+            row.addEventListener('drop', e => {
+                e.preventDefault();
+                row.classList.remove('drag-over-row');
+                if (dragFromCardIdx === cardIdx && dragFromCondIdx !== condIdx) {
+                    const from = dragFromCondIdx;
+                    const to = condIdx;
+                    const c = cbDraft[cardIdx].ConditionList;
+                    const w = cbDraft[cardIdx].Weights;
+                    [c[from], c[to]] = [c[to], c[from]];
+                    [w[from], w[to]] = [w[to], w[from]];
+                    dragFromCondIdx = null;
+                    dragFromCardIdx = null;
+                    renderContrastList();
+                }
+            });
+
+            // Grip icon
+            const grip = document.createElement('i');
+            grip.className = 'fas fa-grip-vertical text-muted small';
+            grip.style.cursor = 'grab';
+            row.appendChild(grip);
+
+            // Label
+            const label = document.createElement('span');
+            label.className = 'cb-cond-label';
+            label.title = cond;
+            label.textContent = conditionLabel(cond);
+            row.appendChild(label);
+
+            // Weight controls
+            const ctrl = document.createElement('div');
+            ctrl.className = 'cb-weight-ctrl';
+
+            // Quick-pick buttons: +1, 0, -1
+            const quick = document.createElement('div');
+            quick.className = 'cb-weight-quick';
+            [['−1', -1], ['0', 0], ['+1', 1]].forEach(([lbl, val]) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'cb-wbtn';
+                btn.textContent = lbl;
+                const n = Number(weight);
+                if (val === 1 && n > 0 && Math.abs(n - 1) < 0.001) btn.classList.add('active-pos');
+                else if (val === -1 && n < 0 && Math.abs(n + 1) < 0.001) btn.classList.add('active-neg');
+                else if (val === 0 && Math.abs(n) < 0.001) btn.classList.add('active-zero');
+                btn.addEventListener('click', () => {
+                    cbDraft[cardIdx].Weights[condIdx] = val;
+                    renderContrastList();
+                });
+                quick.appendChild(btn);
+            });
+            ctrl.appendChild(quick);
+
+            // Custom weight input
+            const wInput = document.createElement('input');
+            wInput.type = 'number';
+            wInput.step = 'any';
+            wInput.className = 'cb-weight-input';
+            wInput.value = weight;
+            wInput.title = 'Custom weight';
+            wInput.addEventListener('change', () => {
+                const v = parseFloat(wInput.value);
+                cbDraft[cardIdx].Weights[condIdx] = Number.isNaN(v) ? 0 : v;
+                renderContrastList();
+            });
+            ctrl.appendChild(wInput);
+            row.appendChild(ctrl);
+
+            // Remove condition from contrast
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'cb-remove-cond';
+            removeBtn.title = 'Remove from contrast';
+            removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            removeBtn.addEventListener('click', () => {
+                cbDraft[cardIdx].ConditionList.splice(condIdx, 1);
+                cbDraft[cardIdx].Weights.splice(condIdx, 1);
+                renderContrastList();
+            });
+            row.appendChild(removeBtn);
+
+            return row;
+        }
+
+        function buildEquationLine(contrast) {
+            const parts = [];
+            (contrast.ConditionList || []).forEach((cond, i) => {
+                const w = Number((contrast.Weights || [])[i] ?? 0);
+                const sign = w >= 0 ? '+' : '−';
+                const abs = Math.abs(w);
+                const wStr = abs === 1 ? '' : `${abs}×`;
+                if (i === 0) {
+                    parts.push(`${w < 0 ? '−' : ''}${wStr}${cond}`);
+                } else {
+                    if (abs < 0.001) return;
+                    parts.push(` ${sign} ${wStr}${cond}`);
+                }
+            });
+            const div = document.createElement('div');
+            div.className = 'x-small text-muted mt-2 font-monospace';
+            div.style.overflowX = 'auto';
+            div.style.whiteSpace = 'nowrap';
+            div.textContent = parts.join('') || '(empty)';
+            return div;
+        }
+
+        // ── Business logic ─────────────────────────────────────
+        function addConditionToContrast(cardIdx, cond) {
+            const contrast = cbDraft[cardIdx];
+            if (!contrast.ConditionList) contrast.ConditionList = [];
+            if (!contrast.Weights) contrast.Weights = [];
+            if (contrast.ConditionList.includes(cond)) return; // duplicate guard
+            // Smart default weight: first condition gets +1, second gets -1, rest get 0
+            let defW = 0;
+            const pos = contrast.Weights.filter(w => w > 0).length;
+            const neg = contrast.Weights.filter(w => w < 0).length;
+            if (pos === 0) defW = 1;
+            else if (neg === 0) defW = -1;
+            contrast.ConditionList.push(cond);
+            contrast.Weights.push(defW);
+        }
+
+        function applyVsRestPreset(cardIdx) {
+            const contrast = cbDraft[cardIdx];
+            const n = (contrast.ConditionList || []).length;
+            if (!n) return;
+            const negW = n > 1 ? -(1 / (n - 1)) : -1;
+            // First condition = +1, rest = negW  (user can re-order to choose which is "active")
+            contrast.Weights = contrast.ConditionList.map((_, i) => i === 0 ? 1 : negW);
+        }
+
+        // ── Preset templates ───────────────────────────────────
+        function applyPreset(preset) {
+            const conditions = cbConditions.filter(c => c !== '1');
+            if (!conditions.length) {
+                showStatus('No conditions available for preset. Set BIDS folder first.', 'danger');
+                return;
+            }
+            switch (preset) {
+                case 'each-vs-rest': {
+                    // One contrast per condition: condition +1, all others equally negative
+                    cbDraft = [];
+                    conditions.forEach(cond => {
+                        const others = conditions.filter(c => c !== cond);
+                        const w = others.length > 0 ? -(1 / others.length) : -1;
+                        const name = cond.replace(/^trial_type\.|^condition\./, '');
+                        cbDraft.push({
+                            Name: name,
+                            ConditionList: [cond, ...others],
+                            Weights: [1, ...others.map(() => w)],
+                            Test: 't'
+                        });
+                    });
+                    break;
+                }
+                case 'each-vs-baseline': {
+                    // Each condition vs the constant (intercept / baseline)
+                    cbDraft = [];
+                    conditions.forEach(cond => {
+                        const name = cond.replace(/^trial_type\.|^condition\./, '');
+                        cbDraft.push({
+                            Name: name,
+                            ConditionList: [cond, '1'],
+                            Weights: [1, -1],
+                            Test: 't'
+                        });
+                    });
+                    break;
+                }
+                case 'all-active': {
+                    // Single F-test: all conditions equally positive
+                    cbDraft = [{
+                        Name: 'all_active',
+                        ConditionList: conditions,
+                        Weights: conditions.map(() => 1),
+                        Test: 'F'
+                    }];
+                    break;
+                }
+                case 'clear-all': {
+                    if (cbDraft.length && !confirm('Remove all contrasts for this node?')) return;
+                    cbDraft = [];
+                    break;
+                }
+            }
+            renderContrastList();
+        }
+
+        // ── Reload for a node ──────────────────────────────────
+        function reloadForNode() {
+            cbConditions = buildConditions();
+            cbDraft = cloneContrasts();
+            renderNodeTabs();
+            renderConditionPool();
+            renderContrastList();
+            cbStatus.innerHTML = '';
+        }
+
+        // ── open / apply / status ──────────────────────────────
+        function showStatus(msg, type = 'info') {
+            const cls = { info: 'text-primary', success: 'text-success', danger: 'text-danger', warn: 'text-warning' };
+            cbStatus.innerHTML = `<span class="${cls[type] || 'text-muted'}">${msg}</span>`;
+            if (type === 'success') setTimeout(() => { cbStatus.innerHTML = ''; }, 2500);
+        }
+
+        async function openContrastBuilder() {
+            if (!modelEditorDraft) {
+                // Try to load first
+                const modelPath = document.getElementById('input-MODELS_FILE')?.value;
+                if (!modelPath) {
+                    alert('Select a Model File first.');
+                    return;
+                }
+                try {
+                    await loadBidsTasksForModelEditor();
+                    const mc = await getModelContentFromPath(modelPath);
+                    await loadInterestRegressorsForModelEditor(mc);
+                    await loadGroupByOptionsForModelEditor();
+                    modelEditorDraft = structuredClone(mc);
+                } catch (e) {
+                    alert('Could not load model: ' + e.message);
+                    return;
+                }
+            } else {
+                // Refresh regressors in background (non-blocking)
+                const modelPath = document.getElementById('input-MODELS_FILE')?.value;
+                if (modelPath) {
+                    getModelContentFromPath(modelPath)
+                        .then(mc => loadInterestRegressorsForModelEditor(mc))
+                        .catch(() => {});
+                }
+            }
+
+            cbNodeIdx = 0;
+            reloadForNode();
+            bootstrap.Modal.getOrCreateInstance(modal).show();
+        }
+
+        function applyToModel() {
+            const nodes = getNodes();
+            if (!nodes[cbNodeIdx]) {
+                showStatus('No node to apply to.', 'danger');
+                return;
+            }
+            // Write back cbDraft to the node's Contrasts
+            nodes[cbNodeIdx].Contrasts = structuredClone(cbDraft);
+            // Re-render the main model editor accordion if it's open
+            if (document.getElementById('modelEditorModal')?.classList.contains('show')) {
+                renderModelAccordionEditor();
+            }
+            showStatus('Applied to model! Save using "Save Model" or "Apply to Model" button.', 'success');
+            cbStatus.innerHTML = '<span class="text-success"><i class="fas fa-check me-1"></i>Applied. Use <strong>Edit Model JSON → Save</strong> to persist.</span>';
+        }
+
+        // ── Event bindings ─────────────────────────────────────
+        document.getElementById('btn-open-contrast-builder')
+            .addEventListener('click', openContrastBuilder);
+
+        addContrastBtn.addEventListener('click', () => {
+            cbDraft.push({
+                Name: defaultContrastName(),
+                ConditionList: [],
+                Weights: [],
+                Test: 't'
+            });
+            renderContrastList();
+        });
+
+        addCustomBtn.addEventListener('click', () => {
+            const val = customCondInput.value.trim();
+            if (!val) return;
+            if (!cbConditions.includes(val)) {
+                cbConditions.push(val);
+                renderConditionPool();
+            }
+            customCondInput.value = '';
+        });
+        customCondInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') addCustomBtn.click();
+        });
+
+        applyBtn.addEventListener('click', applyToModel);
+
+        document.querySelectorAll('.cb-preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+        });
+
+    })();  // end IIFE
+
     window.addEventListener('DOMContentLoaded', initApp);
 </script>
 {% endblock %}
+
