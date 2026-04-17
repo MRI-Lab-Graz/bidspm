@@ -357,6 +357,11 @@ def main():
             print("\n⚠️  Warnings:")
             for w in result.warnings:
                 print(f"   • {w}")
+
+        if result.environment_notes and (not result.success or args.debug):
+            print("\nℹ️  Environment Notes:")
+            for note in result.environment_notes:
+                print(f"   • {note}")
         
         if result.errors:
             print("\n❌ Errors:")
