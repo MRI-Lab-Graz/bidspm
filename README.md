@@ -27,6 +27,8 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - `scripts/` – helper utilities (environment activation, legacy runner, wrapper scripts)
 - `octave/` – Octave startup files consumed by the Python CLI and shell helpers
 - `logs/` – auto-generated run logs (e.g., `run_bidspm.log`, `model_*_timestamp.log`)
+- `tests/` – automated tests for API and feature behavior
+- `docs/repository_notes.md` – engineering notes (OO direction and test policy)
 
 ## ⚠️ Known Issues and Solutions
 
@@ -176,6 +178,19 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install requests jsonschema
 ```
+
+## Testing
+
+Run the test suite from repository root:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+Notes:
+
+- Add tests for each new feature under `tests/`.
+- Keep tests deterministic and independent from external services.
 
 ## Configuration
 

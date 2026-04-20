@@ -559,6 +559,24 @@ def analysis_page(project_id: Optional[str] = None):
                           current_project=project)
 
 
+@app.route('/model_editor')
+@app.route('/model_editor/<project_id>')
+def model_editor_page(project_id: Optional[str] = None):
+    """Dedicated model editor page (split-screen) for editing model JSON and transformations."""
+    project = None
+    projects = project_manager.list_projects()
+    if project_id:
+        project = project_manager.load_project(project_id)
+
+    model_path = request.args.get('path', '')
+    return render_template('model_editor.html',
+                           project=project,
+                           projects=projects,
+                           current_project_id=project_id,
+                           current_project=project,
+                           model_path=model_path)
+
+
 # =============================================================================
 # Utility API Endpoints
 # =============================================================================
@@ -1113,13 +1131,64 @@ def get_bids_tasks():
 
 @app.route('/api/bids_entities')
 def api_bids_entities():
-    """Discover common BIDS entities from filenames to drive UI dropdown options."""
+    """Discover BIDS entities and observed values from dataset filenames."""
     path = request.args.get('path')
     if not path or not os.path.isdir(path):
-        return jsonify({"entities": [], "groupby_options": ["subject"]})
+        return jsonify({
+            "entities": [],
+            "groupby_options": ["subject"],
+            "values": {"task": [], "run": [], "session": [], "subject": []}
+        })
 
     bids_path = Path(path)
+    entity_aliases = {
+        'sub': 'subject',
+        'ses': 'session',
+        'acq': 'acquisition',
+        'ce': 'ceagent',
+        'rec': 'reconstruction',
+        'dir': 'direction',
+        'proc': 'processing',
+        'desc': 'description',
+        'res': 'resolution',
+        'den': 'density',
+        'trc': 'tracer'
+    }
+    known_datatypes = {
+        'anat', 'func', 'dwi', 'fmap', 'perf', 'meg', 'eeg', 'ieeg', 'beh', 'pet',
+        'micr', 'nirs', 'motion', 'mrs'
+    }
+
     entities = set()
+    values = {}
+
+    def _add_value(key: str, value: str) -> None:
+        key = (key or '').strip()
+        value = (value or '').strip()
+        if not key or not value:
+            return
+        entities.add(key)
+        values.setdefault(key, set()).add(value)
+
+    def _filename_stem(filename: str) -> str:
+        if filename.endswith('.nii.gz'):
+            return filename[:-7]
+        if filename.endswith('.tsv.gz'):
+            return filename[:-7]
+        if filename.endswith('.json.gz'):
+            return filename[:-8]
+        return Path(filename).stem
+
+    def _file_extension(file_path: Path) -> str:
+        name = file_path.name
+        if name.endswith('.nii.gz'):
+            return '.nii.gz'
+        if name.endswith('.tsv.gz'):
+            return '.tsv.gz'
+        if name.endswith('.json.gz'):
+            return '.json.gz'
+        return ''.join(file_path.suffixes) or file_path.suffix or ''
+
     max_scan = 8000
     scanned = 0
 
@@ -1132,19 +1201,63 @@ def api_bids_entities():
 
             scanned += 1
             name = file_path.name
-            if '_sub-' in name:
-                entities.add('subject')
-            if '_ses-' in name:
-                entities.add('session')
-            if '_task-' in name:
-                entities.add('task')
-            if '_run-' in name:
-                entities.add('run')
 
-            if {'subject', 'session', 'task', 'run'}.issubset(entities):
-                break
+            # Parse entity key-value tokens from filename stem.
+            stem = _filename_stem(name)
+            tokens = [tok for tok in stem.split('_') if tok]
+            for token in tokens:
+                if '-' not in token:
+                    continue
+                short_key, raw_value = token.split('-', 1)
+                key = entity_aliases.get(short_key, short_key)
+                _add_value(key, raw_value)
+
+            # Parse suffix from final non-entity token.
+            suffix_token = ''
+            for token in tokens:
+                if '-' not in token:
+                    suffix_token = token
+            if suffix_token:
+                _add_value('suffix', suffix_token)
+
+            # Parse datatype from path folders.
+            for part in file_path.parts:
+                if part in known_datatypes:
+                    _add_value('datatype', part)
+
+            # Parse subject/session from parent directories where available.
+            for part in file_path.parts[:-1]:
+                if part.startswith('sub-') and len(part) > 4:
+                    _add_value('subject', part[4:])
+                elif part.startswith('ses-') and len(part) > 4:
+                    _add_value('session', part[4:])
+
+            # Track file extension.
+            extension = _file_extension(file_path)
+            if extension:
+                _add_value('extension', extension)
+
     except Exception:
         pass
+
+    # Prefer discover_tasks() for task labels when available.
+    try:
+        discovered_tasks = discover_tasks(bids_path)
+        for task in discovered_tasks:
+            if isinstance(task, str) and task.strip():
+                _add_value('task', task.strip())
+    except Exception:
+        pass
+
+    def _sort_tokens(tokens):
+        def key_fn(token):
+            text = str(token)
+            if text.isdigit():
+                return (0, int(text), text)
+            return (1, text.lower(), text)
+        return sorted(tokens, key=key_fn)
+
+    value_lists = {k: _sort_tokens(v) for k, v in values.items()}
 
     groupby_options = ['subject']
     for candidate in ['run', 'session', 'task']:
@@ -1154,6 +1267,7 @@ def api_bids_entities():
     return jsonify({
         "entities": sorted(list(entities)),
         "groupby_options": groupby_options,
+        "values": value_lists,
         "scanned_files": scanned
     })
 

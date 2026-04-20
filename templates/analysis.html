@@ -2897,42 +2897,15 @@
 
     async function openModelEditor() {
         const modelPath = document.getElementById('input-MODELS_FILE')?.value;
-        const pathLabel = document.getElementById('model-editor-path');
-        const editor = document.getElementById('model-editor-accordion');
-        const status = document.getElementById('model-editor-status');
-
-        status.innerHTML = '';
+        const baseUrl = currentProjectId
+            ? `/model_editor/${encodeURIComponent(currentProjectId)}`
+            : '/model_editor';
+        // Open dedicated model editor page instead of modal dialog
         if (!modelPath) {
-            pathLabel.textContent = 'No model selected.';
-            modelEditorDraft = null;
-            renderModelEditorSummary(null);
-            editor.innerHTML = '<div class="text-muted small">Select MODELS_FILE first.</div>';
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
-            return;
+            window.location.href = baseUrl;
         } else {
-            pathLabel.textContent = modelPath;
-            try {
-                await loadBidsTasksForModelEditor();
-                const modelContent = await getModelContentFromPath(modelPath);
-                await loadInterestRegressorsForModelEditor(modelContent);
-                await loadGroupByOptionsForModelEditor();
-                modelEditorDraft = structuredClone(modelContent);
-                if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') {
-                    modelEditorDraft.Input = {};
-                }
-                modelEditorDraft.Input.task = (modelEditorDraft.Input.task || []).filter(t => modelEditorBidsTasks.includes(t));
-                renderModelAccordionEditor();
-            } catch (e) {
-                modelEditorDraft = null;
-                renderModelEditorSummary(null);
-                editor.innerHTML = '<div class="text-muted small">Unable to render editor.</div>';
-                status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${e.message}</div>`;
-                bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
-                return;
-            }
+            window.location.href = `${baseUrl}?path=${encodeURIComponent(modelPath)}`;
         }
-
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('modelEditorModal')).show();
     }
 
     async function saveModelEditor() {
