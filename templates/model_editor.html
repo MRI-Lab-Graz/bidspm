@@ -2,6 +2,42 @@
 
 {% block title %}Model Editor{% endblock %}
 
+{% block styles %}
+<style>
+  .x-small { font-size: 0.75rem; }
+  .modelx-pool { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .modelx-reg-badge { cursor: grab; }
+  .modelx-reg-badge:active { cursor: grabbing; }
+  .modelx-drop-zone {
+    border: 1px dashed #c7d4e2;
+    border-radius: 0.45rem;
+    padding: 0.5rem;
+    background: #f8fafc;
+    min-height: 3rem;
+  }
+  .modelx-drop-zone.is-over {
+    border-color: #0d6efd;
+    background: #edf5ff;
+  }
+  .modelx-reg-row {
+    border: 1px solid #dee2e6;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.45rem;
+    background: #ffffff;
+  }
+  .modelx-reg-row.is-drop-target {
+    border-color: #198754;
+    background: #f1fbf4;
+  }
+  .modelx-reg-handle { color: #6c757d; cursor: grab; }
+  .modelx-nuisance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.35rem 0.8rem;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="row mb-3">
   <div class="col-12 d-flex justify-content-between align-items-center">
@@ -115,6 +151,15 @@
   window.modelEditorInterestRegressors = Array.isArray(window.modelEditorInterestRegressors)
     ? window.modelEditorInterestRegressors
     : [];
+  window.modelEditorEventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+    ? window.modelEditorEventSamples
+    : { trial_type: [], condition: [] };
+  window.modelEditorConfoundColumns = Array.isArray(window.modelEditorConfoundColumns)
+    ? window.modelEditorConfoundColumns
+    : [];
+  window.modelEditorTransRotConfounds = Array.isArray(window.modelEditorTransRotConfounds)
+    ? window.modelEditorTransRotConfounds
+    : [];
   window.modelEditorGroupByOptions = (Array.isArray(window.modelEditorGroupByOptions) && window.modelEditorGroupByOptions.length)
     ? window.modelEditorGroupByOptions
     : ['subject'];
@@ -130,6 +175,9 @@
   let rawModeReturnEditor = 'full';
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
+
+  const MODEL_NUISANCE_RX = /^(framewise_displacement|trans_[xyz]|rot_[xyz]|a_comp_cor|dvars|std_dvars|non_steady_state_outlier|cosine\d*|white_matter|csf|global_signal)/;
+  const DEFAULT_TRANS_ROT_REGRESSORS = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
 
   let modelPath = new URLSearchParams(window.location.search).get('path') || '';
   // Spec-aligned guided input keys from BEP002 v1.0.0-rc1 section 3.1:
@@ -268,6 +316,7 @@
       const pathLabel = document.getElementById('model-editor-path');
       if(pathLabel) pathLabel.textContent = path;
       await refreshInputEntityOptions(false);
+      await refreshModelEditorHintData(model);
       renderModelStructure();
       renderNodeList();
       // reset selection to show all sections, then render full editor
@@ -427,6 +476,81 @@
       if (candidate) prepInput.value = candidate;
     } catch (e) {
       // Leave empty if config cannot be loaded.
+    }
+  }
+
+  function isLikelyNuisanceRegressor(value){
+    if (typeof value !== 'string') return false;
+    return MODEL_NUISANCE_RX.test(value.trim());
+  }
+
+  function confoundColumnExists(columnName, confoundColumns){
+    const normalized = String(columnName || '').trim();
+    if (!normalized) return false;
+    return confoundColumns.some(col => {
+      const candidate = String(col || '').trim();
+      return candidate === normalized || candidate.startsWith(`${normalized}_`);
+    });
+  }
+
+  async function refreshModelEditorHintData(explicitModelContent = null){
+    const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim() || '';
+    const prepDir = document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || '';
+
+    if (!bidsDir) {
+      window.modelEditorInterestRegressors = [];
+      window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      if (!prepDir) {
+        window.modelEditorConfoundColumns = [];
+        window.modelEditorTransRotConfounds = [];
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/model_hints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_content: explicitModelContent || modelEditorDraft || model || {},
+          bids_dir: bidsDir,
+          fmriprep_dir: prepDir
+        })
+      });
+
+      const data = await response.json();
+      if (data.error) {
+        window.modelEditorInterestRegressors = [];
+        window.modelEditorEventSamples = { trial_type: [], condition: [] };
+        if (!prepDir) {
+          window.modelEditorConfoundColumns = [];
+          window.modelEditorTransRotConfounds = [];
+        }
+        return;
+      }
+
+      const sample = data?.dataset?.events?.sample_values || {};
+      const trialValues = normalizeStringArray(sample.trial_type);
+      const conditionValues = normalizeStringArray(sample.condition);
+      window.modelEditorEventSamples = {
+        trial_type: trialValues,
+        condition: conditionValues
+      };
+
+      const trialRegs = trialValues.map(v => `trial_type.${v}`);
+      const conditionRegs = conditionValues.map(v => `condition.${v}`);
+      window.modelEditorInterestRegressors = Array.from(new Set([...trialRegs, ...conditionRegs])).filter(Boolean);
+
+      const confounds = data?.dataset?.confounds || {};
+      window.modelEditorConfoundColumns = normalizeStringArray(confounds.columns);
+      window.modelEditorTransRotConfounds = normalizeStringArray(confounds.trans_rot_present);
+    } catch (e) {
+      window.modelEditorInterestRegressors = [];
+      window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      if (!prepDir) {
+        window.modelEditorConfoundColumns = [];
+        window.modelEditorTransRotConfounds = [];
+      }
     }
   }
 
@@ -727,8 +851,12 @@
           updateInfo();
           setStatus('Input updated', 'info');
           if (opt.key === 'task') {
-            refreshSpaceInputOptions(false).then(() => {
+            refreshSpaceInputOptions(false).then(async () => {
+              await refreshModelEditorHintData(model);
               if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+              if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+                window.renderModelAccordionEditor();
+              }
             });
           }
         });
@@ -756,8 +884,12 @@
           updateInfo();
           setStatus('Input updated', 'info');
           if (opt.key === 'task') {
-            refreshSpaceInputOptions(false).then(() => {
+            refreshSpaceInputOptions(false).then(async () => {
+              await refreshModelEditorHintData(model);
               if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+              if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+                window.renderModelAccordionEditor();
+              }
             });
           }
         });
@@ -769,8 +901,12 @@
           updateInfo();
           setStatus('Input updated', 'info');
           if (opt.key === 'task') {
-            refreshSpaceInputOptions(false).then(() => {
+            refreshSpaceInputOptions(false).then(async () => {
+              await refreshModelEditorHintData(model);
               if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+              if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+                window.renderModelAccordionEditor();
+              }
             });
           }
         });
@@ -803,8 +939,12 @@
           renderModelStructure();
           setStatus('Input updated', 'info');
           if (opt.key === 'task') {
-            refreshSpaceInputOptions(false).then(() => {
+            refreshSpaceInputOptions(false).then(async () => {
+              await refreshModelEditorHintData(model);
               if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+              if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+                window.renderModelAccordionEditor();
+              }
             });
           }
         });
@@ -1026,71 +1166,292 @@
     xTitle.textContent = 'Design Matrix Regressors (Model.X)';
     xCard.appendChild(xTitle);
 
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+    const trialTypeRegressors = normalizeStringArray(eventSamples.trial_type).map(v => `trial_type.${v}`);
+    const conditionRegressors = normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`);
     const suggestions = Array.from(new Set([
-      ...normalizeStringArray(modelEditorInterestRegressors),
+      ...trialTypeRegressors,
+      ...conditionRegressors,
+      ...normalizeStringArray(window.modelEditorInterestRegressors),
       ...normalizeStringArray(modelObj.X)
     ]));
+    const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
+    const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
+
+    function rerenderModelX(message, tone = 'info'){
+      modelObj.X = normalizeStringArray(modelObj.X);
+      renderModelStructure();
+      renderNodeModelFieldEditor(node, idx);
+      setStatus(message, tone);
+    }
+
+    function addModelXRegressor(value, insertIndex = null){
+      const normalized = String(value || '').trim();
+      if (!normalized) return false;
+      if (!Array.isArray(modelObj.X)) modelObj.X = [];
+      if (modelObj.X.includes(normalized)) {
+        setStatus(`Regressor already present: ${normalized}`, 'warning');
+        return false;
+      }
+
+      if (insertIndex === null || insertIndex === undefined || insertIndex < 0 || insertIndex > modelObj.X.length) {
+        modelObj.X.push(normalized);
+      } else {
+        modelObj.X.splice(insertIndex, 0, normalized);
+      }
+      rerenderModelX('Regressor added to Model.X', 'info');
+      return true;
+    }
+
+    function reorderModelXRegressor(fromIndex, toIndex){
+      if (!Array.isArray(modelObj.X)) return;
+      if (fromIndex === toIndex) return;
+      if (fromIndex < 0 || fromIndex >= modelObj.X.length) return;
+      if (toIndex < 0 || toIndex > modelObj.X.length) return;
+
+      const [moved] = modelObj.X.splice(fromIndex, 1);
+      let targetIndex = toIndex;
+      if (fromIndex < toIndex) targetIndex -= 1;
+      modelObj.X.splice(targetIndex, 0, moved);
+      rerenderModelX('Regressor order updated', 'info');
+    }
+
+    function applyDroppedRegressor(event, targetIndex){
+      const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
+      const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+
+      if (sourceIndexRaw !== '') {
+        const sourceIndex = Number(sourceIndexRaw);
+        if (!Number.isNaN(sourceIndex)) {
+          reorderModelXRegressor(sourceIndex, targetIndex);
+          return;
+        }
+      }
+
+      if (droppedValue) addModelXRegressor(droppedValue, targetIndex);
+    }
 
     if (suggestions.length) {
       const quickAddRow = document.createElement('div');
-      quickAddRow.className = 'd-flex gap-2';
+      quickAddRow.className = 'd-flex flex-wrap gap-2';
+
       const suggestionSelect = document.createElement('select');
       suggestionSelect.className = 'form-select form-select-sm';
+      suggestionSelect.style.maxWidth = '360px';
       suggestions.forEach(reg => {
         const opt = document.createElement('option');
         opt.value = reg;
         opt.textContent = reg;
         suggestionSelect.appendChild(opt);
       });
+
       const addSuggestedBtn = document.createElement('button');
       addSuggestedBtn.type = 'button';
       addSuggestedBtn.className = 'btn btn-sm btn-outline-secondary';
-      addSuggestedBtn.textContent = 'Add Suggested';
-      addSuggestedBtn.addEventListener('click', ()=>{
-        const val = (suggestionSelect.value || '').trim();
-        if (!val) return;
-        if (!Array.isArray(modelObj.X)) modelObj.X = [];
-        if (modelObj.X.includes(val)) {
-          setStatus(`Regressor already present: ${val}`, 'warning');
-          return;
-        }
-        modelObj.X.push(val);
-        renderModelStructure();
-        renderNodeModelFieldEditor(node, idx);
-        setStatus('Regressor added to Model.X', 'info');
-      });
+      addSuggestedBtn.textContent = 'Add Selected';
+      addSuggestedBtn.addEventListener('click', ()=> addModelXRegressor(suggestionSelect.value));
+
       quickAddRow.appendChild(suggestionSelect);
       quickAddRow.appendChild(addSuggestedBtn);
       xCard.appendChild(quickAddRow);
     }
 
+    const trialPoolCard = document.createElement('div');
+    trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
+    const trialPoolTitle = document.createElement('div');
+    trialPoolTitle.className = 'small fw-bold mb-1';
+    trialPoolTitle.textContent = 'Trial Types from events.tsv';
+    trialPoolCard.appendChild(trialPoolTitle);
+
+    const trialPoolHint = document.createElement('div');
+    trialPoolHint.className = 'small text-muted mb-2';
+    trialPoolHint.textContent = 'Click or drag a badge into the design matrix list.';
+    trialPoolCard.appendChild(trialPoolHint);
+
+    const trialPool = document.createElement('div');
+    trialPool.className = 'modelx-pool';
+    if (!trialTypeRegressors.length) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted';
+      empty.textContent = 'No trial_type values detected. Check BIDS folder and events files.';
+      trialPool.appendChild(empty);
+    } else {
+      trialTypeRegressors.forEach(reg => {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
+        badge.textContent = reg;
+        badge.draggable = true;
+        badge.addEventListener('click', ()=> addModelXRegressor(reg));
+        badge.addEventListener('dragstart', (event)=>{
+          event.dataTransfer.effectAllowed = 'copy';
+          event.dataTransfer.setData('application/x-modelx-regressor', reg);
+          event.dataTransfer.setData('text/plain', reg);
+        });
+        trialPool.appendChild(badge);
+      });
+    }
+    trialPoolCard.appendChild(trialPool);
+    xCard.appendChild(trialPoolCard);
+
+    if (conditionRegressors.length) {
+      const condPool = document.createElement('div');
+      condPool.className = 'modelx-pool';
+      const condLabel = document.createElement('div');
+      condLabel.className = 'small text-muted w-100';
+      condLabel.textContent = 'Optional condition.* regressors';
+      condPool.appendChild(condLabel);
+      conditionRegressors.forEach(reg => {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
+        badge.textContent = reg;
+        badge.draggable = true;
+        badge.addEventListener('click', ()=> addModelXRegressor(reg));
+        badge.addEventListener('dragstart', (event)=>{
+          event.dataTransfer.effectAllowed = 'copy';
+          event.dataTransfer.setData('application/x-modelx-regressor', reg);
+          event.dataTransfer.setData('text/plain', reg);
+        });
+        condPool.appendChild(badge);
+      });
+      xCard.appendChild(condPool);
+    }
+
+    const nuisanceCard = document.createElement('div');
+    nuisanceCard.className = 'border rounded p-2';
+    const nuisanceTitle = document.createElement('div');
+    nuisanceTitle.className = 'small fw-bold mb-1';
+    nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
+    nuisanceCard.appendChild(nuisanceTitle);
+
+    const nuisanceHint = document.createElement('div');
+    nuisanceHint.className = 'small text-muted mb-2';
+    nuisanceHint.textContent = confoundColumns.length
+      ? `Detected ${confoundColumns.length} confound columns. Checked items can be added safely.`
+      : 'No confounds file detected yet. Set fMRIPrep folder to validate trans/rot columns.';
+    nuisanceCard.appendChild(nuisanceHint);
+
+    const nuisanceOptions = Array.from(new Set([
+      ...DEFAULT_TRANS_ROT_REGRESSORS,
+      'framewise_displacement',
+      ...transRotConfounds,
+      ...normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor)
+    ]));
+    const nuisanceGrid = document.createElement('div');
+    nuisanceGrid.className = 'modelx-nuisance-grid';
+    const nuisanceCheckboxes = [];
+
+    nuisanceOptions.forEach(reg => {
+      const wrap = document.createElement('label');
+      wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'form-check-input mt-0';
+
+      const presentInConfounds = confoundColumnExists(reg, confoundColumns) || transRotConfounds.includes(reg);
+      const alreadyInModel = modelObj.X.includes(reg);
+      checkbox.checked = alreadyInModel || presentInConfounds;
+      checkbox.disabled = !presentInConfounds && !alreadyInModel;
+
+      const label = document.createElement('span');
+      label.className = 'small';
+      label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
+
+      wrap.appendChild(checkbox);
+      wrap.appendChild(label);
+      nuisanceGrid.appendChild(wrap);
+      nuisanceCheckboxes.push({ checkbox, reg, presentInConfounds, alreadyInModel });
+    });
+    nuisanceCard.appendChild(nuisanceGrid);
+
+    const nuisanceActions = document.createElement('div');
+    nuisanceActions.className = 'd-flex gap-2 mt-2';
+    const addCheckedNuisanceBtn = document.createElement('button');
+    addCheckedNuisanceBtn.type = 'button';
+    addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
+    addCheckedNuisanceBtn.textContent = 'Add Checked Nuisance';
+    addCheckedNuisanceBtn.addEventListener('click', ()=>{
+      if (!Array.isArray(modelObj.X)) modelObj.X = [];
+      let added = 0;
+      nuisanceCheckboxes.forEach(entry => {
+        if (!entry.checkbox.checked) return;
+        if (modelObj.X.includes(entry.reg)) return;
+        modelObj.X.push(entry.reg);
+        added += 1;
+      });
+      if (!added) {
+        setStatus('No new nuisance regressors were added.', 'info');
+        return;
+      }
+      rerenderModelX(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
+    });
+    nuisanceActions.appendChild(addCheckedNuisanceBtn);
+    nuisanceCard.appendChild(nuisanceActions);
+    xCard.appendChild(nuisanceCard);
+
     const xList = document.createElement('div');
-    xList.className = 'd-flex flex-column gap-2';
+    xList.className = 'd-flex flex-column gap-2 modelx-drop-zone';
+    xList.addEventListener('dragover', (event)=>{
+      event.preventDefault();
+      xList.classList.add('is-over');
+    });
+    xList.addEventListener('dragleave', ()=>{
+      xList.classList.remove('is-over');
+    });
+    xList.addEventListener('drop', (event)=>{
+      event.preventDefault();
+      xList.classList.remove('is-over');
+      applyDroppedRegressor(event, modelObj.X.length);
+    });
+
     if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'small text-muted';
-      empty.textContent = 'No regressors yet. Add one below.';
+      empty.textContent = 'Drop trial-type badges here to build Model.X.';
       xList.appendChild(empty);
     } else {
       modelObj.X.forEach((reg, regIdx) => {
         const regRow = document.createElement('div');
-        regRow.className = 'd-flex gap-2';
-        const regInput = document.createElement('input');
-        regInput.type = 'text';
-        regInput.className = 'form-control form-control-sm';
-        regInput.value = String(reg);
-        regInput.addEventListener('change', ()=>{
-          const next = regInput.value.trim();
-          if (!next) {
-            modelObj.X.splice(regIdx, 1);
-          } else {
-            modelObj.X[regIdx] = next;
-          }
-          modelObj.X = normalizeStringArray(modelObj.X);
-          renderModelStructure();
-          renderNodeModelFieldEditor(node, idx);
-          setStatus('Model.X updated', 'info');
+        regRow.className = 'modelx-reg-row d-flex align-items-center gap-2';
+        regRow.draggable = true;
+        regRow.dataset.regressorIndex = String(regIdx);
+
+        regRow.addEventListener('dragstart', (event)=>{
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('application/x-modelx-index', String(regIdx));
+          event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
         });
+        regRow.addEventListener('dragover', (event)=>{
+          event.preventDefault();
+          regRow.classList.add('is-drop-target');
+        });
+        regRow.addEventListener('dragleave', ()=>{
+          regRow.classList.remove('is-drop-target');
+        });
+        regRow.addEventListener('drop', (event)=>{
+          event.preventDefault();
+          event.stopPropagation();
+          regRow.classList.remove('is-drop-target');
+          applyDroppedRegressor(event, regIdx);
+        });
+
+        const handle = document.createElement('span');
+        handle.className = 'modelx-reg-handle';
+        handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+
+        const regBadge = document.createElement('span');
+        regBadge.className = 'badge text-bg-light border flex-grow-1 text-start';
+        regBadge.textContent = String(reg);
+
+        const roleBadge = document.createElement('span');
+        roleBadge.className = isLikelyNuisanceRegressor(String(reg))
+          ? 'badge text-bg-secondary'
+          : 'badge text-bg-success';
+        roleBadge.textContent = isLikelyNuisanceRegressor(String(reg)) ? 'Nuisance' : 'Interest';
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
@@ -1098,23 +1459,31 @@
         removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
         removeBtn.addEventListener('click', ()=>{
           modelObj.X.splice(regIdx, 1);
-          renderModelStructure();
-          renderNodeModelFieldEditor(node, idx);
-          setStatus('Regressor removed', 'info');
+          rerenderModelX('Regressor removed', 'info');
         });
-        regRow.appendChild(regInput);
+
+        regRow.appendChild(handle);
+        regRow.appendChild(regBadge);
+        regRow.appendChild(roleBadge);
         regRow.appendChild(removeBtn);
         xList.appendChild(regRow);
       });
     }
     xCard.appendChild(xList);
 
+    const advancedCustom = document.createElement('details');
+    advancedCustom.className = 'mt-1';
+    const advSummary = document.createElement('summary');
+    advSummary.className = 'small fw-bold';
+    advSummary.textContent = 'Add custom regressor (advanced)';
+    advancedCustom.appendChild(advSummary);
+
     const addCustomRow = document.createElement('div');
-    addCustomRow.className = 'd-flex gap-2';
+    addCustomRow.className = 'd-flex gap-2 mt-2';
     const newReg = document.createElement('input');
     newReg.type = 'text';
     newReg.className = 'form-control form-control-sm';
-    newReg.placeholder = 'Add custom regressor';
+    newReg.placeholder = 'e.g. custom_modulator';
     const addCustomBtn = document.createElement('button');
     addCustomBtn.type = 'button';
     addCustomBtn.className = 'btn btn-sm btn-outline-secondary';
@@ -1122,19 +1491,16 @@
     addCustomBtn.addEventListener('click', ()=>{
       const val = (newReg.value || '').trim();
       if (!val) return;
-      if (!Array.isArray(modelObj.X)) modelObj.X = [];
-      if (modelObj.X.includes(val)) {
-        setStatus(`Regressor already present: ${val}`, 'warning');
+      if (/\s/.test(val)) {
+        setStatus('Custom regressor names cannot contain spaces.', 'warning');
         return;
       }
-      modelObj.X.push(val);
-      renderModelStructure();
-      renderNodeModelFieldEditor(node, idx);
-      setStatus('Regressor added to Model.X', 'info');
+      addModelXRegressor(val);
     });
     addCustomRow.appendChild(newReg);
     addCustomRow.appendChild(addCustomBtn);
-    xCard.appendChild(addCustomRow);
+    advancedCustom.appendChild(addCustomRow);
+    xCard.appendChild(advancedCustom);
 
     const addInterceptBtn = document.createElement('button');
     addInterceptBtn.type = 'button';
@@ -1142,12 +1508,12 @@
     addInterceptBtn.textContent = 'Add Intercept (1)';
     addInterceptBtn.addEventListener('click', ()=>{
       if (!Array.isArray(modelObj.X)) modelObj.X = [];
-      if (!modelObj.X.includes('1')) {
-        modelObj.X.unshift('1');
-        renderModelStructure();
-        renderNodeModelFieldEditor(node, idx);
-        setStatus('Intercept added to Model.X', 'info');
+      if (modelObj.X.includes('1')) {
+        setStatus('Intercept already present.', 'info');
+        return;
       }
+      modelObj.X.unshift('1');
+      rerenderModelX('Intercept added to Model.X', 'info');
     });
     xCard.appendChild(addInterceptBtn);
 
@@ -1674,45 +2040,63 @@
 
   const bidsInputEl = document.getElementById('input-BIDS_DIR');
   if (bidsInputEl) {
-    bidsInputEl.addEventListener('change', ()=> {
-      refreshInputEntityOptions(true);
+    bidsInputEl.addEventListener('change', async ()=> {
+      await refreshInputEntityOptions(true);
+      await refreshModelEditorHintData(model);
+      rerenderCurrentSelection();
+      if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+        window.renderModelAccordionEditor();
+      }
     });
   }
 
   const browseBidsBtn = document.getElementById('btn-browse-bids');
   if (browseBidsBtn) {
-    browseBidsBtn.addEventListener('click', ()=> {
+    browseBidsBtn.addEventListener('click', async ()=> {
       const current = bidsInputEl ? bidsInputEl.value : '';
       const entered = window.prompt('Enter BIDS folder path', current || '');
       if (entered === null) return;
       if (bidsInputEl) bidsInputEl.value = entered.trim();
-      refreshInputEntityOptions(true);
+      await refreshInputEntityOptions(true);
+      await refreshModelEditorHintData(model);
+      rerenderCurrentSelection();
+      if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+        window.renderModelAccordionEditor();
+      }
     });
   }
 
   const prepInputEl = document.getElementById('input-FMRIPREP_DIR');
   if (prepInputEl) {
-    prepInputEl.addEventListener('change', ()=> {
-      refreshSpaceInputOptions(true).then(() => {
-        if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
-      });
+    prepInputEl.addEventListener('change', async ()=> {
+      await refreshSpaceInputOptions(true);
+      await refreshModelEditorHintData(model);
+      if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+      rerenderCurrentSelection();
+      if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+        window.renderModelAccordionEditor();
+      }
     });
   }
 
   const browsePrepBtn = document.getElementById('btn-browse-fmriprep');
   if (browsePrepBtn) {
-    browsePrepBtn.addEventListener('click', ()=> {
+    browsePrepBtn.addEventListener('click', async ()=> {
       const current = prepInputEl ? prepInputEl.value : '';
       const entered = window.prompt('Enter fMRIPrep folder path', current || '');
       if (entered === null) return;
       if (prepInputEl) prepInputEl.value = entered.trim();
-      refreshSpaceInputOptions(true).then(() => {
-        if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
-      });
+      await refreshSpaceInputOptions(true);
+      await refreshModelEditorHintData(model);
+      if (selectedLabel && selectedLabel.textContent === 'Model — Input') renderInputFieldEditor();
+      rerenderCurrentSelection();
+      if (typeof window.renderModelAccordionEditor === 'function' && editorMode === 'full') {
+        window.renderModelAccordionEditor();
+      }
     });
   }
 
-  document.getElementById('btn-toggle-raw').addEventListener('click', ()=>{
+  document.getElementById('btn-toggle-raw').addEventListener('click', async ()=>{
     const shell = document.getElementById('model-editor-shell');
     const trans = document.getElementById('transformations-editor');
     if (!model) {
@@ -1740,6 +2124,7 @@
       const parsed = JSON.parse(rawEditor.value);
       applyRawValueToSelection(parsed);
       modelEditorDraft = model;
+      await refreshModelEditorHintData(model);
       renderNodeList();
       renderModelStructure();
       setRawMode(false);
@@ -1893,7 +2278,10 @@
   function removeArrayItem(path){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; if (index<0||index>=arr.length) return; arr.splice(index,1); }
   function isModelXPath(path){ return /\.Model\.X\[\d+\]$/.test(path); }
   function isDuplicateModelXRegressor(path, candidate){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return false; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return false; const normalized = String(candidate||'').trim(); return arr.some((val,i) => i!==index && String(val||'').trim()===normalized); }
-  function addRegressorToModelX(arrayPath, regressor){ const status = document.getElementById('model-editor-status'); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; const normalized = String(regressor||'').trim(); if(!normalized) return; if (arr.some(v=>String(v||'').trim()===normalized)){ status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${normalized}</div>`; return; } arr.push(normalized); status.innerHTML=''; renderModelAccordionEditor(); }
+  function hasConfoundColumn(columns, confoundName){ const normalized = String(confoundName || '').trim(); if (!normalized) return false; return (Array.isArray(columns) ? columns : []).some(col => { const candidate = String(col || '').trim(); return candidate === normalized || candidate.startsWith(`${normalized}_`); }); }
+  function setModelEditorStatus(message = '', tone = 'info'){ const status = document.getElementById('model-editor-status'); if (!status) return; if (!message) { status.innerHTML = ''; return; } status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-2">${message}</div>`; }
+  function moveRegressorToIndex(arrayPath, fromIndex, toIndex){ const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; if (fromIndex === toIndex) return; if (fromIndex < 0 || fromIndex >= arr.length) return; if (toIndex < 0 || toIndex > arr.length) return; const [moved] = arr.splice(fromIndex, 1); let targetIndex = toIndex; if (fromIndex < toIndex) targetIndex -= 1; arr.splice(targetIndex, 0, moved); setModelEditorStatus('Regressor order updated', 'info'); renderModelAccordionEditor(); }
+  function addRegressorToModelX(arrayPath, regressor, insertIndex = null){ const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; const normalized = String(regressor||'').trim(); if(!normalized) return; if (arr.some(v=>String(v||'').trim()===normalized)){ setModelEditorStatus(`Regressor already selected: ${normalized}`, 'warning'); return; } if (insertIndex === null || insertIndex === undefined || insertIndex < 0 || insertIndex > arr.length) arr.push(normalized); else arr.splice(insertIndex, 0, normalized); setModelEditorStatus('', 'info'); renderModelAccordionEditor(); }
 
   function createPrimitiveRow(container, label, value, path, locked = false, depth = 0) {
     const row = document.createElement('div'); row.className = `json-row d-flex align-items-center gap-2 json-row-depth-${Math.min(depth,4)}`;
@@ -2076,9 +2464,324 @@
 
   function renderJsonEditor(container, node, basePath = '', inheritedLocked = false, depth = 0) {
     if (Array.isArray(node)) {
-      const listWrap = document.createElement('div'); listWrap.className='accordion';
+      const listWrap = document.createElement('div');
+      listWrap.className = 'accordion';
+
       if (/\.Model\.X$/.test(basePath)) {
-        const controls = document.createElement('div'); controls.className='d-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white'; const select = document.createElement('select'); select.className='form-select form-select-sm'; select.style.maxWidth='340px'; const uniqueRegs = Array.from(new Set(modelEditorInterestRegressors||[])); if (uniqueRegs.length===0){ const opt=document.createElement('option'); opt.value=''; opt.textContent='No event regressors detected'; select.appendChild(opt); } else { uniqueRegs.forEach(reg=>{ const opt=document.createElement('option'); opt.value=reg; opt.textContent=reg; select.appendChild(opt); }); } controls.appendChild(select); const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-sm btn-outline-success'; addBtn.textContent='+ Add regressor'; addBtn.disabled = uniqueRegs.length===0; addBtn.addEventListener('click', ()=>addRegressorToModelX(basePath, select.value)); controls.appendChild(addBtn); const customInput = document.createElement('input'); customInput.type='text'; customInput.className='form-control form-control-sm'; customInput.placeholder='Custom regressor'; customInput.style.maxWidth='240px'; controls.appendChild(customInput); const customBtn = document.createElement('button'); customBtn.type='button'; customBtn.className='btn btn-sm btn-outline-secondary'; customBtn.textContent='Add custom'; customBtn.addEventListener('click', ()=>addRegressorToModelX(basePath, customInput.value)); controls.appendChild(customBtn); listWrap.appendChild(controls); }
+        const normalizeList = (value) => Array.isArray(value) ? value.map(v => String(v).trim()).filter(Boolean) : [];
+        const modelX = getByPath(modelEditorDraft, basePath);
+        const currentRegs = normalizeList(Array.isArray(modelX) ? modelX : node);
+        const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+          ? window.modelEditorEventSamples
+          : { trial_type: [], condition: [] };
+        const trialTypeRegressors = normalizeList(eventSamples.trial_type).map(v => `trial_type.${v}`);
+        const conditionRegressors = normalizeList(eventSamples.condition).map(v => `condition.${v}`);
+        const interestRegressors = Array.from(new Set([
+          ...trialTypeRegressors,
+          ...conditionRegressors,
+          ...normalizeList(window.modelEditorInterestRegressors),
+          ...currentRegs
+        ]));
+        const confoundColumns = normalizeList(window.modelEditorConfoundColumns);
+        const transRotConfounds = normalizeList(window.modelEditorTransRotConfounds);
+        const defaultTransRot = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
+
+        const controls = document.createElement('div');
+        controls.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
+
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        select.style.maxWidth = '360px';
+        if (!interestRegressors.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No event regressors detected';
+          select.appendChild(opt);
+        } else {
+          interestRegressors.forEach(reg => {
+            const opt = document.createElement('option');
+            opt.value = reg;
+            opt.textContent = reg;
+            select.appendChild(opt);
+          });
+        }
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-outline-success';
+        addBtn.textContent = '+ Add selected';
+        addBtn.disabled = !interestRegressors.length;
+        addBtn.addEventListener('click', ()=> addRegressorToModelX(basePath, select.value));
+
+        controls.appendChild(select);
+        controls.appendChild(addBtn);
+        listWrap.appendChild(controls);
+
+        const trialPoolCard = document.createElement('div');
+        trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
+        const trialPoolTitle = document.createElement('div');
+        trialPoolTitle.className = 'small fw-bold mb-1';
+        trialPoolTitle.textContent = 'Trial Types from events.tsv';
+        trialPoolCard.appendChild(trialPoolTitle);
+
+        const trialPoolHint = document.createElement('div');
+        trialPoolHint.className = 'small text-muted mb-2';
+        trialPoolHint.textContent = 'Click or drag badges into Model.X.';
+        trialPoolCard.appendChild(trialPoolHint);
+
+        const trialPool = document.createElement('div');
+        trialPool.className = 'modelx-pool';
+        if (!trialTypeRegressors.length) {
+          const empty = document.createElement('div');
+          empty.className = 'small text-muted';
+          empty.textContent = 'No trial_type values detected for the current BIDS/task selection.';
+          trialPool.appendChild(empty);
+        } else {
+          trialTypeRegressors.forEach(reg => {
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
+            badge.textContent = reg;
+            badge.draggable = true;
+            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+            badge.addEventListener('dragstart', (event)=>{
+              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.setData('application/x-modelx-regressor', reg);
+              event.dataTransfer.setData('text/plain', reg);
+            });
+            trialPool.appendChild(badge);
+          });
+        }
+        trialPoolCard.appendChild(trialPool);
+        listWrap.appendChild(trialPoolCard);
+
+        if (conditionRegressors.length) {
+          const condPool = document.createElement('div');
+          condPool.className = 'modelx-pool mb-2';
+          const condLabel = document.createElement('div');
+          condLabel.className = 'small text-muted w-100';
+          condLabel.textContent = 'Optional condition.* regressors';
+          condPool.appendChild(condLabel);
+
+          conditionRegressors.forEach(reg => {
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
+            badge.textContent = reg;
+            badge.draggable = true;
+            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+            badge.addEventListener('dragstart', (event)=>{
+              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.setData('application/x-modelx-regressor', reg);
+              event.dataTransfer.setData('text/plain', reg);
+            });
+            condPool.appendChild(badge);
+          });
+          listWrap.appendChild(condPool);
+        }
+
+        const nuisanceCard = document.createElement('div');
+        nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
+        const nuisanceTitle = document.createElement('div');
+        nuisanceTitle.className = 'small fw-bold mb-1';
+        nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
+        nuisanceCard.appendChild(nuisanceTitle);
+
+        const nuisanceHint = document.createElement('div');
+        nuisanceHint.className = 'small text-muted mb-2';
+        nuisanceHint.textContent = confoundColumns.length
+          ? `Detected ${confoundColumns.length} confound columns.`
+          : 'No confounds file detected yet. Set fMRIPrep folder to validate columns.';
+        nuisanceCard.appendChild(nuisanceHint);
+
+        const nuisanceOptions = Array.from(new Set([
+          ...defaultTransRot,
+          'framewise_displacement',
+          ...transRotConfounds,
+          ...currentRegs.filter(isNuisanceRegressor)
+        ]));
+        const nuisanceGrid = document.createElement('div');
+        nuisanceGrid.className = 'modelx-nuisance-grid';
+        const nuisanceCheckboxes = [];
+
+        nuisanceOptions.forEach(reg => {
+          const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
+          const alreadySelected = currentRegs.includes(reg);
+
+          const wrap = document.createElement('label');
+          wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'form-check-input mt-0';
+          checkbox.checked = alreadySelected || presentInConfounds;
+          checkbox.disabled = !presentInConfounds && !alreadySelected;
+
+          const label = document.createElement('span');
+          label.className = 'small';
+          label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
+
+          wrap.appendChild(checkbox);
+          wrap.appendChild(label);
+          nuisanceGrid.appendChild(wrap);
+          nuisanceCheckboxes.push({ checkbox, reg });
+        });
+        nuisanceCard.appendChild(nuisanceGrid);
+
+        const nuisanceActions = document.createElement('div');
+        nuisanceActions.className = 'd-flex gap-2 mt-2';
+        const addCheckedNuisanceBtn = document.createElement('button');
+        addCheckedNuisanceBtn.type = 'button';
+        addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
+        addCheckedNuisanceBtn.textContent = 'Add checked nuisance';
+        addCheckedNuisanceBtn.addEventListener('click', ()=>{
+          const arr = getByPath(modelEditorDraft, basePath);
+          if (!Array.isArray(arr)) return;
+          let added = 0;
+          nuisanceCheckboxes.forEach(entry => {
+            if (!entry.checkbox.checked) return;
+            if (arr.includes(entry.reg)) return;
+            arr.push(entry.reg);
+            added += 1;
+          });
+          if (!added) {
+            setModelEditorStatus('No new nuisance regressors were added.', 'info');
+            return;
+          }
+          setModelEditorStatus(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
+          renderModelAccordionEditor();
+        });
+        nuisanceActions.appendChild(addCheckedNuisanceBtn);
+        nuisanceCard.appendChild(nuisanceActions);
+        listWrap.appendChild(nuisanceCard);
+
+        const dropZone = document.createElement('div');
+        dropZone.className = 'd-flex flex-column gap-2 modelx-drop-zone mb-2';
+        const onDropAtIndex = (event, index) => {
+          const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
+          const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+          if (sourceIndexRaw !== '') {
+            const sourceIndex = Number(sourceIndexRaw);
+            if (!Number.isNaN(sourceIndex)) {
+              moveRegressorToIndex(basePath, sourceIndex, index);
+              return;
+            }
+          }
+          if (droppedValue) addRegressorToModelX(basePath, droppedValue, index);
+        };
+
+        dropZone.addEventListener('dragover', (event)=>{
+          event.preventDefault();
+          dropZone.classList.add('is-over');
+        });
+        dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('is-over'));
+        dropZone.addEventListener('drop', (event)=>{
+          event.preventDefault();
+          dropZone.classList.remove('is-over');
+          onDropAtIndex(event, currentRegs.length);
+        });
+
+        if (!currentRegs.length) {
+          const empty = document.createElement('div');
+          empty.className = 'small text-muted';
+          empty.textContent = 'Drop trial-type badges here to build Model.X.';
+          dropZone.appendChild(empty);
+        } else {
+          currentRegs.forEach((reg, idx) => {
+            const row = document.createElement('div');
+            row.className = 'modelx-reg-row d-flex align-items-center gap-2';
+            row.draggable = true;
+
+            row.addEventListener('dragstart', (event)=>{
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('application/x-modelx-index', String(idx));
+              event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
+              event.dataTransfer.setData('text/plain', String(reg));
+            });
+            row.addEventListener('dragover', (event)=>{
+              event.preventDefault();
+              row.classList.add('is-drop-target');
+            });
+            row.addEventListener('dragleave', ()=> row.classList.remove('is-drop-target'));
+            row.addEventListener('drop', (event)=>{
+              event.preventDefault();
+              event.stopPropagation();
+              row.classList.remove('is-drop-target');
+              onDropAtIndex(event, idx);
+            });
+
+            const handle = document.createElement('span');
+            handle.className = 'modelx-reg-handle';
+            handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+
+            const label = document.createElement('span');
+            label.className = 'badge text-bg-light border flex-grow-1 text-start';
+            label.textContent = reg;
+
+            const role = document.createElement('span');
+            role.className = isNuisanceRegressor(reg) ? 'badge text-bg-secondary' : 'badge text-bg-success';
+            role.textContent = isNuisanceRegressor(reg) ? 'Nuisance' : 'Interest';
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'btn btn-sm btn-outline-danger';
+            delBtn.title = 'Remove regressor';
+            delBtn.innerHTML = '<i class="fas fa-times"></i>';
+            delBtn.addEventListener('click', ()=>{
+              removeArrayItem(`${basePath}[${idx}]`);
+              renderModelAccordionEditor();
+            });
+
+            row.appendChild(handle);
+            row.appendChild(label);
+            row.appendChild(role);
+            row.appendChild(delBtn);
+            dropZone.appendChild(row);
+          });
+        }
+        listWrap.appendChild(dropZone);
+
+        const advanced = document.createElement('details');
+        advanced.className = 'mb-2';
+        const advSummary = document.createElement('summary');
+        advSummary.className = 'small fw-bold';
+        advSummary.textContent = 'Add custom regressor (advanced)';
+        advanced.appendChild(advSummary);
+
+        const customRow = document.createElement('div');
+        customRow.className = 'd-flex gap-2 mt-2';
+        const customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.className = 'form-control form-control-sm';
+        customInput.placeholder = 'e.g. custom_modulator';
+        const customBtn = document.createElement('button');
+        customBtn.type = 'button';
+        customBtn.className = 'btn btn-sm btn-outline-secondary';
+        customBtn.textContent = 'Add';
+        customBtn.addEventListener('click', ()=>{
+          const value = (customInput.value || '').trim();
+          if (!value) return;
+          if (/\s/.test(value)) {
+            setModelEditorStatus('Custom regressor names cannot contain spaces.', 'warning');
+            return;
+          }
+          addRegressorToModelX(basePath, value);
+        });
+        customRow.appendChild(customInput);
+        customRow.appendChild(customBtn);
+        advanced.appendChild(customRow);
+        listWrap.appendChild(advanced);
+
+        const interceptBtn = document.createElement('button');
+        interceptBtn.type = 'button';
+        interceptBtn.className = 'btn btn-sm btn-outline-secondary';
+        interceptBtn.textContent = 'Add intercept (1)';
+        interceptBtn.addEventListener('click', ()=> addRegressorToModelX(basePath, '1', 0));
+        listWrap.appendChild(interceptBtn);
+
+        container.appendChild(listWrap);
+        return;
+      }
+
       if (/\.GroupBy$/.test(basePath)) { const controls = document.createElement('div'); controls.className='d-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white'; const current = Array.isArray(node)?node:[]; const remaining = (modelEditorGroupByOptions||['subject']).filter(opt=>!current.includes(opt)); const select = document.createElement('select'); select.className='form-select form-select-sm'; select.style.maxWidth='260px'; const sourceOptions = remaining.length ? remaining : (modelEditorGroupByOptions || ['subject']); sourceOptions.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; select.appendChild(opt); }); controls.appendChild(select); const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-sm btn-outline-success'; addBtn.textContent='+ Add'; addBtn.disabled = remaining.length===0; addBtn.addEventListener('click', ()=>{ const value = select.value; const arr = getByPath(modelEditorDraft, basePath); if (!Array.isArray(arr)) return; if (arr.includes(value)) { const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`; return; } arr.push(value); renderModelAccordionEditor(); }); controls.appendChild(addBtn); listWrap.appendChild(controls); }
       node.forEach((item, idx) => { const itemPath = `${basePath}[${idx}]`; const locked = inheritedLocked || isReadonlyModelPath(itemPath); let displayLabel; if (item !== null && typeof item === 'object') displayLabel = item.Name || `#${idx+1}`; else displayLabel = item !== null && item !== '' ? String(item) : `#${idx+1}`; if (item !== null && typeof item === 'object') createBranchAccordion(listWrap, displayLabel, itemPath, item, locked, depth); else createPrimitiveRow(listWrap, `#${idx+1}`, item, itemPath, locked, depth); }); container.appendChild(listWrap); return; }
     if (node !== null && typeof node === 'object') { const objWrap = document.createElement('div'); objWrap.className='accordion'; Object.entries(node).forEach(([key, value])=>{ if (/^Nodes\[\d+\]$/.test(basePath) && (key==='Level' || key==='Name')) return; const path = basePath ? `${basePath}.${key}` : key; const locked = inheritedLocked || isReadonlyModelPath(path); if (value !== null && typeof value === 'object') createBranchAccordion(objWrap, key, path, value, locked, depth); else createPrimitiveRow(objWrap, key, value, path, locked, depth); }); container.appendChild(objWrap); return; }

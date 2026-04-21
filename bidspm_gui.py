@@ -464,6 +464,61 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
     }
 
 
+def _discover_confound_info(
+    fmriprep_dir: Path,
+    tasks_filter: Optional[List[str]] = None,
+    max_files: int = 120
+) -> Dict[str, Any]:
+    """Collect confound column names from fMRIPrep desc-confounds_timeseries TSV files."""
+    if not fmriprep_dir.exists() or not fmriprep_dir.is_dir():
+        return {
+            "files_scanned": 0,
+            "columns": [],
+            "trans_rot_present": [],
+            "sample_status": "missing-dir"
+        }
+
+    task_tokens = set(tasks_filter or [])
+    confound_files = sorted(fmriprep_dir.glob('sub-*/ses-*/func/*desc-confounds_timeseries.tsv')) + \
+        sorted(fmriprep_dir.glob('sub-*/func/*desc-confounds_timeseries.tsv'))
+    confound_files = sorted(set(confound_files))
+
+    if task_tokens:
+        confound_files = [
+            f for f in confound_files
+            if any(f"task-{task}_" in f.name or f"task-{task}." in f.name for task in task_tokens)
+        ]
+
+    if not confound_files:
+        return {
+            "files_scanned": 0,
+            "columns": [],
+            "trans_rot_present": [],
+            "sample_status": "missing-files"
+        }
+
+    columns = set()
+    for confound_file in confound_files[:max_files]:
+        try:
+            with open(confound_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f, delimiter='\t')
+                if not reader.fieldnames:
+                    continue
+                columns.update(name.strip() for name in reader.fieldnames if name and name.strip())
+        except Exception:
+            continue
+
+    trans_rot_defaults = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z']
+    trans_rot_present = [name for name in trans_rot_defaults if name in columns]
+
+    return {
+        "files_scanned": min(len(confound_files), max_files),
+        "columns": sorted(columns),
+        "trans_rot_present": trans_rot_present,
+        "sample_status": "present" if columns else "empty"
+    }
+
+
 def _build_model_warnings(model_hints: Dict[str, Any], bids_tasks: List[str], event_info: Dict[str, Any]) -> List[str]:
     """Generate typo-oriented warnings from model and dataset context."""
     warnings = []
@@ -1573,6 +1628,7 @@ def api_model_hints():
     model_content = data.get('model_content')
     model_path = data.get('model_path')
     bids_dir = data.get('bids_dir', '')
+    fmriprep_dir = data.get('fmriprep_dir', '')
 
     if model_content is None and model_path:
         if not os.path.isfile(model_path):
@@ -1593,6 +1649,12 @@ def api_model_hints():
 
     bids_tasks = []
     event_info = {"files_scanned": 0, "event_columns": [], "sample_values": {}}
+    confound_info = {
+        "files_scanned": 0,
+        "columns": [],
+        "trans_rot_present": [],
+        "sample_status": "missing-dir"
+    }
     if bids_dir and os.path.isdir(bids_dir):
         bids_tasks = discover_tasks(Path(bids_dir))
         event_info = _discover_event_info(Path(bids_dir), model_hints.get('model_tasks', []))
@@ -1601,13 +1663,17 @@ def api_model_hints():
                 "error": "No BIDS *_events.tsv files found in BIDS folder. Event files are required."
             }), 400
 
+    if fmriprep_dir and os.path.isdir(fmriprep_dir):
+        confound_info = _discover_confound_info(Path(fmriprep_dir), model_hints.get('model_tasks', []))
+
     warnings = _build_model_warnings(model_hints, bids_tasks, event_info)
 
     return jsonify({
         "model": model_hints,
         "dataset": {
             "bids_tasks": bids_tasks,
-            "events": event_info
+            "events": event_info,
+            "confounds": confound_info
         },
         "warnings": warnings,
         "ok": len(warnings) == 0
