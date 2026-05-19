@@ -11,8 +11,9 @@
   "main": "src/main.js",
   "type": "module",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
+    "start": "bash ./scripts/start-electron.sh",
+    "dev": "bash ./scripts/start-electron.sh",
+    "start:xvfb": "bash ./scripts/start-electron-xvfb.sh",
     "pack": "electron-builder --dir --publish never",
     "dist": "electron-builder --publish never",
     "dist:linux": "electron-builder --linux AppImage deb tar.gz --publish never",

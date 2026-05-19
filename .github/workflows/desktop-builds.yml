@@ -2,6 +2,25 @@ name: Desktop Builds
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish artifacts to a GitHub Release"
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: "Release tag (required when publish_release=true), e.g. v0.1.0"
+        required: false
+        type: string
+      release_name:
+        description: "Optional release title (defaults to release_tag)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark GitHub Release as pre-release"
+        required: false
+        default: true
+        type: boolean
   push:
     branches:
       - main
@@ -9,6 +28,9 @@ on:
     paths:
       - frontend_desktop/**
       - .github/workflows/desktop-builds.yml
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -70,3 +92,39 @@ jobs:
             frontend_desktop/dist/latest*.yml
           if-no-files-found: warn
           retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release == true && inputs.release_tag != '' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Show collected release files
+        run: |
+          echo "Collected files for release:"
+          find release-artifacts -maxdepth 2 -type f | sort
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_name != '' && inputs.release_name || inputs.release_tag }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            release-artifacts/*.AppImage
+            release-artifacts/*.deb
+            release-artifacts/*.tar.gz
+            release-artifacts/*.dmg
+            release-artifacts/*.zip
+            release-artifacts/*.exe
+            release-artifacts/*.blockmap
+            release-artifacts/latest*.yml

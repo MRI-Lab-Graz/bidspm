@@ -36,6 +36,27 @@ npm install
 npm start
 ```
 
+## Running On Remote Headless Servers
+
+If you are connected to a remote Ubuntu server (for example from macOS) and see:
+
+```text
+Missing X server or $DISPLAY
+```
+
+that means Electron has no GUI display and cannot open an interactive window on that host.
+
+Use one of these approaches:
+
+1) Preferred: run desktop artifacts locally on your machine (macOS/Windows/Linux).
+2) Remote smoke run only:
+
+```bash
+npm run start:xvfb
+```
+
+3) Remote interactive GUI: use X forwarding (for example `ssh -Y`) with a local X server.
+
 Optional custom backend URL:
 
 ```bash
@@ -75,3 +96,30 @@ frontend_desktop/dist/
 ```
 
 Unsigned builds are produced by default. Code-signing and notarization can be layered in later.
+
+## One-Command CI Release (Linux + macOS + Windows)
+
+Use GitHub Actions workflow [desktop-builds.yml](../.github/workflows/desktop-builds.yml) to build all platforms and optionally publish a GitHub Release.
+
+Build artifacts only:
+
+```bash
+gh workflow run desktop-builds.yml
+```
+
+Build plus publish release assets in one command:
+
+```bash
+gh workflow run desktop-builds.yml \
+	-f publish_release=true \
+	-f release_tag=v0.1.0 \
+	-f release_name="BIDSPM Desktop v0.1.0" \
+	-f prerelease=true
+```
+
+Track progress:
+
+```bash
+gh run list --workflow desktop-builds.yml
+gh run watch
+```
