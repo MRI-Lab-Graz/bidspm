@@ -636,6 +636,23 @@ def model_editor_page(project_id: Optional[str] = None):
 # Utility API Endpoints
 # =============================================================================
 
+
+@app.route('/transformer-builder')
+@app.route('/transformer-builder/<project_id>')
+def transformer_builder_page(project_id: Optional[str] = None):
+    """Visual transformer builder for creating BIDS model transformations."""
+    project = None
+    projects = project_manager.list_projects()
+    if project_id:
+        project = project_manager.load_project(project_id)
+
+    return render_template(
+        'transformer_builder.html',
+        project=project,
+        projects=projects,
+        current_project_id=project_id,
+        current_project=project
+    )
 @app.route('/api/detect-spaces', methods=['POST'])
 def api_detect_spaces():
     """Detect available spaces from fMRIPrep folder."""
