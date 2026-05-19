@@ -150,6 +150,11 @@ Thumbs.db
 *.backup
 bidspm_runner.egg-info/
 
+# Desktop frontend dependencies/build outputs
+frontend_desktop/node_modules/
+frontend_desktop/dist/
+frontend_desktop/.cache/
+
 # Data directories (typically large, should be specified separately)
 data/
 rawdata/

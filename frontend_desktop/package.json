@@ -1,0 +1,64 @@
+{
+  "name": "bidspm-frontend-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron frontend scaffold for BIDSPM",
+  "homepage": "https://github.com/MRI-Lab-Graz/bidspm",
+  "author": {
+    "name": "MRI-Lab Graz",
+    "email": "mri-lab@uni-graz.at"
+  },
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never",
+    "dist:linux": "electron-builder --linux AppImage deb tar.gz --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --publish never",
+    "dist:win": "electron-builder --win nsis zip --publish never"
+  },
+  "build": {
+    "appId": "org.mrilabgraz.bidspm.desktop",
+    "productName": "BIDSPM Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.science",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "category": "Science"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}

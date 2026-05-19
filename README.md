@@ -29,6 +29,31 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - `logs/` – auto-generated run logs (e.g., `run_bidspm.log`, `model_*_timestamp.log`)
 - `tests/` – automated tests for API and feature behavior
 - `docs/repository_notes.md` – engineering notes (OO direction and test policy)
+- `frontend_desktop/` – experimental Electron frontend scaffold (project migration track)
+
+## Desktop Frontend Scaffold (Experimental)
+
+An initial desktop frontend migration scaffold is available in `frontend_desktop/`.
+
+It follows a DataLad-desktop style architecture:
+
+- Electron main process as backend adapter boundary
+- Preload bridge for renderer APIs
+- Renderer app for frontend UI
+
+Current slice focuses on Project workflow via existing Flask APIs (`/api/projects*`).
+
+Quick start:
+
+```bash
+python bidspm_gui.py
+cd frontend_desktop
+npm install
+npm start
+```
+
+Release packaging targets are configured for Linux, macOS, and Windows via Electron Builder.
+See `frontend_desktop/README.md` for build commands and artifact output paths.
 
 ## ⚠️ Known Issues and Solutions
 

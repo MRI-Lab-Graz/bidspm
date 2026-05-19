@@ -24,6 +24,7 @@ It does NOT handle:
 
 import os
 import json
+import random
 import secrets
 import socket
 import subprocess
@@ -65,6 +66,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 # Version info
 __version__ = "2.0.0"
 app.config['APP_VERSION'] = __version__
+APP_ROOT = Path(__file__).resolve().parent
 
 # Execution state
 BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
@@ -287,6 +289,28 @@ def _is_inside_bids_dir(target_path: str) -> bool:
         if target == bids_dir or target.startswith(bids_dir + os.sep):
             return True
     return False
+
+
+def _resolve_fs_path(path: str) -> str:
+    """Resolve user-supplied paths with stable app-root fallback for relative values."""
+    raw_path = (path or '').strip()
+    if not raw_path:
+        return ''
+
+    expanded = os.path.expanduser(raw_path)
+    if os.path.isabs(expanded):
+        return os.path.normpath(os.path.abspath(expanded))
+
+    app_candidate = os.path.normpath(os.path.abspath(str(APP_ROOT / expanded)))
+    cwd_candidate = os.path.normpath(os.path.abspath(expanded))
+
+    if os.path.exists(app_candidate):
+        return app_candidate
+    if os.path.exists(cwd_candidate):
+        return cwd_candidate
+
+    # For new files/directories, keep relative targets anchored to the app root.
+    return app_candidate
 
 
 def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -630,6 +654,22 @@ def model_editor_page(project_id: Optional[str] = None):
                            current_project_id=project_id,
                            current_project=project,
                            model_path=model_path)
+
+
+@app.route('/transformer-builder')
+@app.route('/transformer-builder/<project_id>')
+def transformer_builder_page(project_id: Optional[str] = None):
+    """Visual transformer builder for creating BIDS model transformations."""
+    project = None
+    projects = project_manager.list_projects()
+    if project_id:
+        project = project_manager.load_project(project_id)
+
+    return render_template('transformer_builder.html',
+                           project=project,
+                           projects=projects,
+                           current_project_id=project_id,
+                           current_project=project)
 
 
 # =============================================================================
@@ -1800,11 +1840,18 @@ def load_container_file():
 @app.route('/browse')
 def browse_fs():
     """Browse filesystem for file/directory selection."""
-    path = request.args.get('path', os.getcwd())
+    path = _resolve_fs_path(request.args.get('path', '')) or str(APP_ROOT)
     only_dirs = request.args.get('only_dirs', 'false').lower() == 'true'
+    extensions_raw = (request.args.get('extensions', '') or '').strip()
+    allowed_extensions = None
+    if extensions_raw:
+        parsed = [e.strip().lower() for e in extensions_raw.split(',') if e.strip()]
+        normalized = [e if e.startswith('.') else f'.{e}' for e in parsed]
+        if normalized:
+            allowed_extensions = tuple(normalized)
     
     if not os.path.exists(path):
-        path = os.getcwd()
+        path = str(APP_ROOT)
     elif os.path.isfile(path):
         path = os.path.dirname(os.path.abspath(path)) or os.getcwd()
     
@@ -1818,7 +1865,11 @@ def browse_fs():
                 if entry.is_dir():
                     items.append({'name': entry.name, 'path': entry.path, 'type': 'dir'})
                 elif not only_dirs:
-                    if entry.name.endswith(('.json', '.sif')):
+                    entry_name_lc = entry.name.lower()
+                    if allowed_extensions:
+                        if entry_name_lc.endswith(allowed_extensions):
+                            items.append({'name': entry.name, 'path': entry.path, 'type': 'file'})
+                    elif entry_name_lc.endswith(('.json', '.sif')):
                         items.append({'name': entry.name, 'path': entry.path, 'type': 'file'})
         
         items.sort(key=lambda x: (x['type'] != 'dir', x['name'].lower()))
@@ -1830,12 +1881,12 @@ def browse_fs():
 @app.route('/file_content')
 def file_content():
     """Get content of a file."""
-    path = request.args.get('path')
+    path = _resolve_fs_path(request.args.get('path', ''))
     if not path or not os.path.isfile(path):
         return "File not found", 404
     
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
         return f"Error reading file: {str(e)}", 500
@@ -1845,7 +1896,7 @@ def file_content():
 def save_file_content():
     """Save content to a file (used by in-browser model editor)."""
     data = request.json or {}
-    path = data.get('path')
+    path = _resolve_fs_path(data.get('path', ''))
     content = data.get('content', '')
     validate_json = data.get('validate_json', False)
 
@@ -1878,7 +1929,7 @@ def save_file_content():
 def create_directory():
     """Create a directory."""
     data = request.json
-    path = data.get('path')
+    path = _resolve_fs_path((data or {}).get('path', ''))
     
     if not path:
         return jsonify({"success": False, "error": "No path provided"}), 400
@@ -1944,6 +1995,166 @@ def api_load_config():
     
     with open(filepath, 'r') as f:
         return jsonify(json.load(f))
+
+
+# =============================================================================
+# Transformer Builder API
+# =============================================================================
+
+@app.route('/api/scan_events_columns', methods=['POST'])
+def api_scan_events_columns():
+    """Scan a BIDS directory for events files and extract column names."""
+    try:
+        data = request.json or {}
+        bids_dir = data.get('bids_dir', '').strip().strip('"\'')
+        events_file = data.get('events_file', '').strip().strip('"\'')
+        preview_file = data.get('preview_file', '').strip()
+        preview_max_rows = data.get('preview_max_rows', 200)
+
+        # preview_max_rows: 0 means "all rows"
+        try:
+            preview_max_rows = int(preview_max_rows)
+            if preview_max_rows < 0:
+                preview_max_rows = 200
+        except (TypeError, ValueError):
+            preview_max_rows = 200
+        
+        if events_file:
+            events_file = _resolve_fs_path(events_file)
+
+        if bids_dir:
+            bids_dir = _resolve_fs_path(bids_dir)
+            if not os.path.isdir(bids_dir):
+                return jsonify({"error": f"Directory not found: {bids_dir}"}), 404
+        elif events_file:
+            bids_dir = os.path.dirname(os.path.abspath(events_file)) or str(APP_ROOT)
+        else:
+            return jsonify({"error": "No BIDS directory or events file specified"}), 400
+
+        if events_file:
+            if not os.path.isfile(events_file):
+                return jsonify({"error": f"Events file not found: {events_file}"}), 404
+            if not events_file.lower().endswith('.tsv'):
+                return jsonify({"error": "Selected file must be a .tsv file"}), 400
+        
+        # Scan for events files
+        events_files = []
+        tasks = set()
+        all_columns = set()
+        columns_by_type = {}
+        
+        if events_file:
+            events_files = [events_file]
+            file = os.path.basename(events_file)
+            parts = file.split('_')
+            for part in parts:
+                if part.startswith('task-'):
+                    tasks.add(part[5:])
+        else:
+            for root, dirs, files in os.walk(bids_dir):
+                for file in files:
+                    if file.endswith('_events.tsv'):
+                        events_files.append(os.path.join(root, file))
+                        # Extract task name from filename
+                        parts = file.split('_')
+                        for part in parts:
+                            if part.startswith('task-'):
+                                tasks.add(part[5:])
+        
+        # Read columns from first few events files
+        for events_file in events_files[:5]:  # Limit to first 5 to avoid slowdown
+            try:
+                with open(events_file, 'r') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    if reader.fieldnames:
+                        for col in reader.fieldnames:
+                            all_columns.add(col)
+                            if col in ['trial_type', 'condition', 'response', 'accuracy']:
+                                columns_by_type.setdefault(col, [])
+                            
+                            # Read unique values
+                            f.seek(0)
+                            reader = csv.DictReader(f, delimiter='\t')
+                            values = set()
+                            for row in reader:
+                                val = row.get(col, '').strip()
+                                if val and val != 'n/a':
+                                    values.add(val)
+                            if values and col not in ['onset', 'duration', 'framewise_displacement']:
+                                if col not in columns_by_type:
+                                    columns_by_type[col] = []
+                                columns_by_type[col] = sorted(list(values))[:10]  # Limit to 10 values
+            except Exception as e:
+                print(f"Error reading {events_file}: {e}")
+                continue
+        
+        # Pick an events file to show as a preview.
+        # If preview_file is provided, try that first; otherwise pick randomly.
+        # We then try other files to avoid empty/malformed picks.
+        sample_file = None
+        sample_headers = []
+        sample_rows = []
+        sample_total_rows = 0
+        sample_truncated = False
+        if events_files:
+            candidate_files = events_files[:]
+            random.shuffle(candidate_files)
+
+            if preview_file:
+                if os.path.isabs(preview_file):
+                    preview_abs = os.path.normpath(preview_file)
+                else:
+                    preview_abs = os.path.normpath(os.path.join(bids_dir, preview_file))
+                if preview_abs in events_files:
+                    candidate_files = [preview_abs] + [f for f in candidate_files if f != preview_abs]
+
+            for chosen in candidate_files:
+                try:
+                    with open(chosen, 'r') as f:
+                        reader = csv.DictReader(f, delimiter='\t')
+                        headers = list(reader.fieldnames or [])
+                        if not headers:
+                            continue
+
+                        rows = []
+                        total_rows = 0
+                        for row in reader:
+                            total_rows += 1
+                            if preview_max_rows == 0 or len(rows) < preview_max_rows:
+                                rows.append([row.get(h, '') for h in headers])
+
+                        try:
+                            bids_root = os.path.abspath(bids_dir)
+                            chosen_abs = os.path.abspath(chosen)
+                            if os.path.commonpath([bids_root, chosen_abs]) == bids_root:
+                                sample_file = os.path.relpath(chosen_abs, bids_root)
+                            else:
+                                sample_file = chosen_abs
+                        except Exception:
+                            sample_file = os.path.abspath(chosen)
+                        sample_headers = headers
+                        sample_rows = rows
+                        sample_total_rows = total_rows
+                        sample_truncated = preview_max_rows != 0 and total_rows > len(rows)
+                        break
+                except Exception as e:
+                    print(f"Error reading sample file {chosen}: {e}")
+
+        return jsonify({
+            "bids_dir": bids_dir,
+            "events_files": len(events_files),
+            "columns": sorted(list(all_columns)),
+            "columns_by_type": {k: v for k, v in columns_by_type.items()},
+            "tasks": sorted(list(tasks)),
+            "sample_file": sample_file,
+            "sample_headers": sample_headers,
+            "sample_rows": sample_rows,
+            "sample_total_rows": sample_total_rows,
+            "sample_truncated": sample_truncated
+        })
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # =============================================================================

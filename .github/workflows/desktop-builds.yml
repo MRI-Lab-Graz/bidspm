@@ -1,0 +1,72 @@
+name: Desktop Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feat/frontend-migration-datalad-desktop
+    paths:
+      - frontend_desktop/**
+      - .github/workflows/desktop-builds.yml
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux
+            script: dist:linux
+            artifact_name: bidspm-desktop-linux
+          - os: macos-latest
+            label: macOS
+            script: dist:mac
+            artifact_name: bidspm-desktop-macos
+          - os: windows-latest
+            label: Windows
+            script: dist:win
+            artifact_name: bidspm-desktop-windows
+
+    defaults:
+      run:
+        working-directory: frontend_desktop
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend_desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build desktop artifacts
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            frontend_desktop/dist/*.AppImage
+            frontend_desktop/dist/*.deb
+            frontend_desktop/dist/*.tar.gz
+            frontend_desktop/dist/*.dmg
+            frontend_desktop/dist/*.zip
+            frontend_desktop/dist/*.exe
+            frontend_desktop/dist/*.blockmap
+            frontend_desktop/dist/latest*.yml
+          if-no-files-found: warn
+          retention-days: 14

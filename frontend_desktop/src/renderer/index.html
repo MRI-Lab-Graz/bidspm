@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BIDSPM Desktop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="card hero reveal reveal-1">
+        <p class="eyebrow">BIDSPM Desktop</p>
+        <h1>Frontend Migration Scaffold</h1>
+        <p class="lede">
+          First slice: project-centered workflow on top of your existing Flask backend.
+        </p>
+      </header>
+
+      <section class="card project-strip reveal reveal-2" aria-labelledby="current-backend-title">
+        <div>
+          <p id="current-backend-title" class="strip-label">Connected Backend</p>
+          <p id="backend-url-display" class="strip-path">Not connected</p>
+        </div>
+        <span id="connection-state" class="state-pill state-idle">Not checked</span>
+      </section>
+
+      <main class="grid">
+        <section class="card reveal reveal-3" aria-labelledby="connect-title">
+          <div class="section-head">
+            <h2 id="connect-title">1. Connection</h2>
+            <button id="check-connection" class="button button-ghost" type="button">Check</button>
+          </div>
+
+          <label class="field">
+            <span>Backend URL</span>
+            <div class="field-row">
+              <input id="backend-url" type="text" placeholder="http://127.0.0.1:5100" />
+              <button id="set-backend-url" class="button button-primary button-inline" type="button">Apply</button>
+            </div>
+          </label>
+
+          <p class="hint">Use the same URL where bidspm_gui.py is running.</p>
+        </section>
+
+        <section class="card reveal reveal-4" aria-labelledby="create-project-title">
+          <div class="section-head">
+            <h2 id="create-project-title">2. New Project</h2>
+          </div>
+
+          <form id="create-project-form" class="stack-form">
+            <label class="field">
+              <span>Project Name</span>
+              <input id="project-name" type="text" placeholder="visual-language-study" required />
+            </label>
+
+            <label class="field">
+              <span>Description (optional)</span>
+              <textarea
+                id="project-description"
+                rows="3"
+                placeholder="Short notes about data scope, tasks, or model intent"
+              ></textarea>
+            </label>
+
+            <div class="row-actions">
+              <button class="button button-primary" type="submit">Create Project</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card reveal reveal-5 full-span" aria-labelledby="projects-title">
+          <div class="section-head">
+            <h2 id="projects-title">3. Projects</h2>
+            <button id="refresh-projects" class="button button-ghost" type="button">Refresh</button>
+          </div>
+
+          <p class="lede-small">Open existing analysis/model pages while migration is in progress.</p>
+          <div id="projects-output" class="project-list">Loading projects...</div>
+        </section>
+      </main>
+
+      <aside class="card reveal reveal-6" aria-labelledby="details-title">
+        <div class="section-head">
+          <h2 id="details-title">Technical Details</h2>
+        </div>
+        <pre id="details-output" class="panel panel-code">No actions yet.</pre>
+      </aside>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
