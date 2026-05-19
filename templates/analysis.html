@@ -159,6 +159,9 @@
                                                 <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-open-contrast-builder">
                                                     <i class="fas fa-puzzle-piece me-1"></i> Contrast Builder
                                                 </button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-open-transformer-builder">
+                                                    <i class="fas fa-magic me-1"></i> Transformer Builder
+                                                </button>
                                                 <button type="button" class="btn btn-outline-info btn-sm" id="btn-model-hints">
                                                     <i class="fas fa-lightbulb me-1"></i> Validate + Hints
                                                 </button>
@@ -2458,6 +2461,9 @@
         const btnCreateModel = document.getElementById('btn-create-model');
         if (btnCreateModel) btnCreateModel.addEventListener('click', createNewModel);
 
+        const btnTransformerBuilder = document.getElementById('btn-open-transformer-builder');
+        if (btnTransformerBuilder) btnTransformerBuilder.addEventListener('click', openTransformerBuilder);
+
         const btnHints = document.getElementById('btn-model-hints');
         if (btnHints) btnHints.addEventListener('click', refreshModelHints);
 
@@ -2906,6 +2912,13 @@
         } else {
             window.location.href = `${baseUrl}?path=${encodeURIComponent(modelPath)}`;
         }
+    }
+
+    function openTransformerBuilder() {
+        const baseUrl = currentProjectId
+            ? `/transformer-builder/${encodeURIComponent(currentProjectId)}`
+            : '/transformer-builder';
+        window.location.href = baseUrl;
     }
 
     async function saveModelEditor() {
