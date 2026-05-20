@@ -35,6 +35,121 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 0.35rem 0.8rem;
   }
+  .model-workspace-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .model-node-card,
+  .model-edge-card {
+    border: 1px solid #d9e3f0;
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    box-shadow: 0 8px 20px rgba(13, 110, 253, 0.06);
+    overflow: hidden;
+  }
+  .model-node-card.is-selected {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.12);
+  }
+  .model-node-card-header,
+  .model-edge-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid #e5edf7;
+    background: rgba(13, 110, 253, 0.03);
+  }
+  .model-node-card-body,
+  .model-edge-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1rem;
+  }
+  .model-node-card-title,
+  .model-edge-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+  }
+  .model-node-index,
+  .model-edge-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 999px;
+    background: #0d6efd;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .model-node-grid,
+  .model-edge-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem;
+  }
+  .model-node-panel {
+    border: 1px solid #e3e9f2;
+    border-radius: 0.8rem;
+    background: #fff;
+    padding: 0.9rem;
+  }
+  .model-node-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .model-node-panel-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .model-node-panel-hint {
+    font-size: 0.78rem;
+    color: #6c757d;
+  }
+  .model-node-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .model-node-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid #bcd1ee;
+    border-radius: 999px;
+    background: #eef5ff;
+    color: #1f4f92;
+    padding: 0.28rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+  .model-node-chip button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    line-height: 1;
+  }
+  .model-node-card .accordion-item,
+  .model-edge-card .accordion-item {
+    border: 0;
+  }
+  .model-contrast-card {
+    border: 1px solid #dfe7f2;
+    border-radius: 0.75rem;
+    padding: 0.85rem;
+    background: #fbfdff;
+  }
 </style>
 {% endblock %}
 
@@ -95,7 +210,7 @@
           <div class="d-flex gap-2">
             <button id="btn-save-model" class="btn btn-primary btn-sm">Save Model</button>
             <button id="btn-toggle-raw" class="btn btn-outline-secondary btn-sm">Raw JSON</button>
-            <button id="btn-open-full-editor" class="btn btn-outline-info btn-sm">Friendly View</button>
+            <button id="btn-open-full-editor" class="btn btn-outline-info btn-sm">Field View</button>
           </div>
         </div>
 
@@ -105,12 +220,12 @@
           <textarea id="raw-editor" class="form-control font-monospace" style="min-height: 360px; display:none;"></textarea>
         </div>
 
-        <!-- Full model JSON editor (default) -->
+        <!-- Workflow editor (default) -->
         <div id="model-editor-shell">
           <div class="small text-muted mb-2" id="model-editor-path">No model selected.</div>
           <div class="d-flex justify-content-between align-items-center mb-2">
             <div class="small" id="model-editor-help">
-              Sectioned editor for BIDS model JSON: full model editing (nodes, contrasts, transformations and metadata).
+              Workflow editor for BIDS Stats Models: define nodes, edges, transformations, design matrices and contrasts.
             </div>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="model-show-paths">
@@ -293,7 +408,7 @@
     rawMode = Boolean(active);
     rawEditor.style.display = rawMode ? 'block' : 'none';
     friendlyEditor.style.display = rawMode ? 'none' : 'block';
-    if (rawToggleBtn) rawToggleBtn.textContent = rawMode ? 'Friendly View' : 'Raw JSON';
+    if (rawToggleBtn) rawToggleBtn.textContent = rawMode ? 'Workflow View' : 'Raw JSON';
   }
 
   function ensureSelectionDrivenRightPane(){
@@ -398,6 +513,8 @@
       // reset selection to show all sections, then render full editor
       currentSelection = { type: 'model' };
       window.currentSelection = currentSelection;
+      selectedLabel.textContent = 'Model Workspace';
+      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
       if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
       refreshRawEditorFromSelection();
       if (pendingTransformerResult?.message) {
@@ -1670,10 +1787,10 @@
 
     const advanced = document.createElement('details');
     advanced.className = 'border rounded p-2';
-    const advSummary = document.createElement('summary');
-    advSummary.className = 'small fw-bold';
-    advSummary.textContent = 'Advanced JSON (Model only)';
-    advanced.appendChild(advSummary);
+    const advJsonSummary = document.createElement('summary');
+    advJsonSummary.className = 'small fw-bold';
+    advJsonSummary.textContent = 'Advanced JSON (Model only)';
+    advanced.appendChild(advJsonSummary);
 
     const advHelp = document.createElement('div');
     advHelp.className = 'small text-muted mt-2';
@@ -2191,7 +2308,7 @@
         shell.style.display = 'none';
         trans.style.display = 'block';
         const fullBtn = document.getElementById('btn-open-full-editor');
-        if (fullBtn) fullBtn.textContent = 'Full JSON Editor';
+        if (fullBtn) fullBtn.textContent = 'Workflow View';
       }
       setRawMode(true);
       refreshRawEditorFromSelection();
@@ -2213,7 +2330,7 @@
         trans.style.display = 'none';
         shell.style.display = 'block';
         const fullBtn = document.getElementById('btn-open-full-editor');
-        if (fullBtn) fullBtn.textContent = 'Friendly View';
+        if (fullBtn) fullBtn.textContent = 'Field View';
         if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
       } else {
         rerenderCurrentSelection();
@@ -2252,27 +2369,27 @@
     }
   });
 
-  // Toggle between full JSON editor and friendly per-field editor
+  // Toggle between workflow editor and per-field editor
   document.getElementById('btn-open-full-editor').addEventListener('click', ()=>{
     const shell = document.getElementById('model-editor-shell');
     const trans = document.getElementById('transformations-editor');
     const btn = document.getElementById('btn-open-full-editor');
     if(!shell || !trans) return;
     if (editorMode === 'full') {
-      // Switch to friendly view
+      // Switch to per-field view
       editorMode = 'friendly';
       setRawMode(false);
       trans.style.display = 'block';
       shell.style.display = 'none';
-      if (btn) btn.textContent = 'Full JSON Editor';
+      if (btn) btn.textContent = 'Workflow View';
       rerenderCurrentSelection();
     } else {
-      // Switch to full JSON editor
+      // Switch to workflow editor
       editorMode = 'full';
       setRawMode(false);
       trans.style.display = 'none';
       shell.style.display = 'block';
-      if (btn) btn.textContent = 'Friendly View';
+      if (btn) btn.textContent = 'Field View';
       if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
     }
   });
@@ -2286,7 +2403,7 @@
     editorMode = 'friendly';
     shell.style.display = 'none';
     trans.style.display = 'block';
-    if (btn) btn.textContent = 'Full JSON Editor';
+    if (btn) btn.textContent = 'Workflow View';
     rerenderCurrentSelection();
   });
 
@@ -2345,6 +2462,7 @@
 
   function defaultArrayItemForPath(path) {
     if (path === 'Nodes') return { Level: 'Run', Name: 'subject_level', GroupBy: ['run','subject'], Model: { X: ['trial_type'], HRF: { Variables: ['trial_type'], Model: 'spm' }, Type: 'glm' }, Contrasts: [] };
+    if (path === 'Edges') return getEdgeDefaultValue();
     if (/\.Contrasts$/.test(path)) return { Name: `Contrast_${Date.now().toString().slice(-4)}`, ConditionList: ['trial_type.active','trial_type.control'], Weights: [1,-1], Test: 't' };
     if (/\.ConditionList$/.test(path)) return 'trial_type.active';
     if (/\.Weights$/.test(path)) return 0;
@@ -2483,64 +2601,903 @@
     title.textContent = 'Input.task (required)';
     wrap.appendChild(title);
 
+    const datasetTasks = Array.from(new Set([
+      ...normalizeEditorStringArray(modelEditorInputEntityValues?.task),
+      ...normalizeEditorStringArray(modelEditorBidsTasks)
+    ]));
+    const currentTasks = normalizeEditorStringArray(modelEditorDraft.Input.task);
+    const allTasks = Array.from(new Set([...datasetTasks, ...currentTasks]));
+
+    async function applySelectedTasks(tasks) {
+      modelEditorDraft.Input.task = normalizeEditorStringArray(tasks);
+      await refreshSpaceInputOptions(false);
+      await refreshModelEditorHintData(modelEditorDraft);
+      renderModelAccordionEditor();
+      setModelEditorStatus(modelEditorDraft.Input.task.length
+        ? `Input.task updated from detected dataset tasks (${modelEditorDraft.Input.task.length} selected).`
+        : 'Input.task cleared.', modelEditorDraft.Input.task.length ? 'info' : 'warning');
+    }
+
     const hint = document.createElement('div');
     hint.className = 'small text-muted';
-    hint.textContent = 'Enter one or more task labels separated by commas.';
+    hint.textContent = datasetTasks.length
+      ? 'Select one or more tasks detected in the BIDS func files.'
+      : 'No tasks were detected automatically. Enter one or more task labels separated by commas.';
     wrap.appendChild(hint);
 
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'form-control form-control-sm';
-    input.placeholder = 'e.g. motor, stroop';
-    input.value = (modelEditorDraft.Input.task || []).map(v => String(v)).join(', ');
-    wrap.appendChild(input);
-
     const actions = document.createElement('div');
-    actions.className = 'd-flex gap-2';
+    actions.className = 'd-flex gap-2 flex-wrap';
 
-    const applyBtn = document.createElement('button');
-    applyBtn.type = 'button';
-    applyBtn.className = 'btn btn-sm btn-outline-secondary';
-    applyBtn.textContent = 'Apply';
-    applyBtn.addEventListener('click', ()=>{
-      modelEditorDraft.Input.task = parseCsvValues(input.value);
-      renderModelAccordionEditor();
-    });
+    if (allTasks.length) {
+      const select = document.createElement('select');
+      select.className = 'form-select form-select-sm';
+      select.multiple = true;
+      select.size = Math.min(8, Math.max(3, allTasks.length));
 
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'btn btn-sm btn-outline-secondary';
-    clearBtn.textContent = 'Clear';
-    clearBtn.addEventListener('click', ()=>{
-      input.value = '';
-      modelEditorDraft.Input.task = [];
-      renderModelAccordionEditor();
-    });
+      const selectedSet = new Set(currentTasks);
+      allTasks.forEach(task => {
+        const option = document.createElement('option');
+        option.value = task;
+        option.textContent = datasetTasks.includes(task) ? task : `${task} (from model)`;
+        option.selected = selectedSet.has(task);
+        select.appendChild(option);
+      });
+      wrap.appendChild(select);
 
-    actions.appendChild(applyBtn);
-    actions.appendChild(clearBtn);
+      const selectAllBtn = document.createElement('button');
+      selectAllBtn.type = 'button';
+      selectAllBtn.className = 'btn btn-sm btn-outline-secondary';
+      selectAllBtn.textContent = 'Select all';
+      selectAllBtn.addEventListener('click', () => {
+        Array.from(select.options).forEach(option => { option.selected = true; });
+      });
+      actions.appendChild(selectAllBtn);
+
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'btn btn-sm btn-outline-secondary';
+      applyBtn.textContent = 'Apply';
+      applyBtn.addEventListener('click', async ()=>{
+        const selected = Array.from(select.selectedOptions).map(option => option.value);
+        await applySelectedTasks(selected);
+      });
+      actions.appendChild(applyBtn);
+
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'btn btn-sm btn-outline-secondary';
+      clearBtn.textContent = 'Clear';
+      clearBtn.addEventListener('click', async ()=>{
+        Array.from(select.options).forEach(option => { option.selected = false; });
+        await applySelectedTasks([]);
+      });
+      actions.appendChild(clearBtn);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'form-control form-control-sm';
+      input.placeholder = 'e.g. motor, stroop';
+      input.value = currentTasks.join(', ');
+      wrap.appendChild(input);
+
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'btn btn-sm btn-outline-secondary';
+      applyBtn.textContent = 'Apply';
+      applyBtn.addEventListener('click', async ()=>{
+        await applySelectedTasks(parseCsvValues(input.value));
+      });
+
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'btn btn-sm btn-outline-secondary';
+      clearBtn.textContent = 'Clear';
+      clearBtn.addEventListener('click', async ()=>{
+        input.value = '';
+        await applySelectedTasks([]);
+      });
+
+      actions.appendChild(applyBtn);
+      actions.appendChild(clearBtn);
+    }
+
     wrap.appendChild(actions);
 
     return wrap;
   }
 
   function getModelEditorSections(model) {
-    const sections = [ { id:'__section_overview', label:'Model Overview', path:'', statePath:'__section_overview', value: getOverviewSectionValue(model), kind:'overview', icon:'fa-file-lines', stats: getOverviewSectionStats(model) }, { id:'Input', label:'Input', path:'Input', statePath:'Input', value: model?.Input ?? {}, kind:'input', icon:'fa-sliders', stats: getInputSectionStats(model?.Input) }, { id:'Nodes', label:'Nodes', path:'Nodes', statePath:'Nodes', value: Array.isArray(model?.Nodes)?model.Nodes:[], kind:'nodes', icon:'fa-diagram-project', stats: getNodesSectionStats(model?.Nodes) } ]; Object.entries(model||{}).forEach(([key,value])=>{ if (key==='Input' || key==='Nodes' || value===null || typeof value!=='object') return; sections.push({ id:key, label: formatModelSectionLabel(key), path:key, statePath:key, value, kind: Array.isArray(value)?'array':'object', icon: Array.isArray(value)?'fa-layer-group':'fa-folder-tree', stats: getGenericSectionStats(value,key) }); }); return sections; }
+    const sections = [
+      { id:'__section_overview', label:'Model Overview', path:'', statePath:'__section_overview', value: getOverviewSectionValue(model), kind:'overview', icon:'fa-file-lines', stats: getOverviewSectionStats(model) },
+      { id:'Input', label:'Input', path:'Input', statePath:'Input', value: model?.Input ?? {}, kind:'input', icon:'fa-sliders', stats: getInputSectionStats(model?.Input) },
+      { id:'Nodes', label:'Nodes', path:'Nodes', statePath:'Nodes', value: Array.isArray(model?.Nodes) ? model.Nodes : [], kind:'nodes', icon:'fa-diagram-project', stats: getNodesSectionStats(model?.Nodes) },
+      { id:'Edges', label:'Edges', path:'Edges', statePath:'Edges', value: Array.isArray(model?.Edges) ? model.Edges : [], kind:'edges', icon:'fa-share-nodes', stats: getEdgesSectionStats(model?.Edges) }
+    ];
+
+    Object.entries(model || {}).forEach(([key, value]) => {
+      if (key === 'Input' || key === 'Nodes' || key === 'Edges' || value === null || typeof value !== 'object') {
+        return;
+      }
+      sections.push({
+        id: key,
+        label: formatModelSectionLabel(key),
+        path: key,
+        statePath: key,
+        value,
+        kind: Array.isArray(value) ? 'array' : 'object',
+        icon: Array.isArray(value) ? 'fa-layer-group' : 'fa-folder-tree',
+        stats: getGenericSectionStats(value, key)
+      });
+    });
+
+    return sections;
+  }
 
   function getOverviewSectionValue(model) { const primitiveKeys = Object.entries(model || {}).filter(([key,value]) => key!=='Input' && key!=='Nodes' && (value===null || typeof value !== 'object')).map(([key])=>key); const keys = Array.from(new Set(['Name','BIDSModelVersion','Description', ...primitiveKeys])); return Object.fromEntries(keys.map(key => [key, model?.[key] ?? ''])); }
   function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and global metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
   function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and model-level input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Node stack, grouping and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Node stack with transformations, design matrices and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Connect nodes with source → destination edges', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
+
+  function normalizeEditorStringArray(value) {
+    return Array.isArray(value)
+      ? value.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+  }
+
+  function getNodeWorkspaceLabel(node, idx) {
+    return node?.Name || `node_${idx + 1}`;
+  }
+
+  function getNodeWorkspaceLevel(node) {
+    return node?.Level || 'Run';
+  }
+
+  function ensureWorkspaceNodeModel(node) {
+    if (!node.Model || typeof node.Model !== 'object' || Array.isArray(node.Model)) {
+      node.Model = { Type: 'glm', X: [] };
+    }
+    if (!Array.isArray(node.Model.X)) node.Model.X = [];
+    if (!node.Model.Type) node.Model.Type = 'glm';
+    return node.Model;
+  }
+
+  function createWorkspacePanel(title, hint) {
+    const panel = document.createElement('section');
+    panel.className = 'model-node-panel';
+
+    const header = document.createElement('div');
+    header.className = 'model-node-panel-header';
+
+    const heading = document.createElement('div');
+    const titleEl = document.createElement('div');
+    titleEl.className = 'model-node-panel-title';
+    titleEl.textContent = title;
+    heading.appendChild(titleEl);
+
+    if (hint) {
+      const hintEl = document.createElement('div');
+      hintEl.className = 'model-node-panel-hint';
+      hintEl.textContent = hint;
+      heading.appendChild(hintEl);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'd-flex flex-wrap gap-2';
+
+    header.appendChild(heading);
+    header.appendChild(actions);
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'd-flex flex-column gap-2';
+    panel.appendChild(body);
+
+    return { panel, actions, body };
+  }
+
+  function renderNodeGroupByPanel(container, node, idx) {
+    const current = Array.isArray(node.GroupBy) ? node.GroupBy.slice() : [];
+    const groupBy = Array.from(new Set(current));
+    node.GroupBy = groupBy;
+
+    const panel = createWorkspacePanel('GroupBy', 'Define how this node aggregates data before fitting the model.');
+
+    const chips = document.createElement('div');
+    chips.className = 'model-node-chip-row';
+    if (!groupBy.length) {
+      chips.appendChild(createInlineNote('No grouping fields set yet. Run-level nodes typically use run and subject.'));
+    } else {
+      groupBy.forEach((value, valueIdx) => {
+        const chip = document.createElement('span');
+        chip.className = 'model-node-chip';
+        chip.textContent = value;
+
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.setAttribute('aria-label', `Remove ${value}`);
+        rm.innerHTML = '&times;';
+        rm.addEventListener('click', () => {
+          node.GroupBy.splice(valueIdx, 1);
+          renderModelAccordionEditor();
+          setModelEditorStatus('GroupBy updated.', 'info');
+        });
+        chip.appendChild(rm);
+        chips.appendChild(chip);
+      });
+    }
+    panel.body.appendChild(chips);
+
+    const quick = document.createElement('div');
+    quick.className = 'd-flex flex-wrap gap-2';
+    Array.from(new Set([...(modelEditorGroupByOptions || []), 'run', 'session', 'subject', 'contrast'])).forEach(option => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-sm btn-outline-secondary';
+      btn.textContent = option;
+      btn.disabled = node.GroupBy.includes(option);
+      btn.addEventListener('click', () => {
+        node.GroupBy.push(option);
+        renderModelAccordionEditor();
+        setModelEditorStatus('GroupBy updated.', 'info');
+      });
+      quick.appendChild(btn);
+    });
+    panel.body.appendChild(quick);
+
+    const addRow = document.createElement('div');
+    addRow.className = 'd-flex gap-2';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-control form-control-sm';
+    input.placeholder = 'Add custom metadata key';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn btn-sm btn-outline-secondary';
+    addBtn.textContent = 'Add';
+    addBtn.addEventListener('click', () => {
+      const value = input.value.trim();
+      if (!value) return;
+      if (!node.GroupBy.includes(value)) node.GroupBy.push(value);
+      renderModelAccordionEditor();
+      setModelEditorStatus('GroupBy updated.', 'info');
+    });
+    addRow.appendChild(input);
+    addRow.appendChild(addBtn);
+    panel.body.appendChild(addRow);
+
+    container.appendChild(panel.panel);
+  }
+
+  function renderNodeTransformationsPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Transformations', 'Optional event-level transformer pipeline used before variables enter Model.X.');
+    const path = `Nodes[${idx}].Transformations`;
+
+    if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
+      panel.body.appendChild(createInlineNote('No transformations defined for this node.'));
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn btn-sm btn-outline-primary';
+      addBtn.textContent = 'Initialize Transformations';
+      addBtn.addEventListener('click', () => {
+        node.Transformations = { Transformer: 'bidspm', Instructions: [], GeneratedColumns: [] };
+        renderModelAccordionEditor();
+        setModelEditorStatus('Transformations initialized.', 'info');
+      });
+      panel.actions.appendChild(addBtn);
+      container.appendChild(panel.panel);
+      return;
+    }
+
+    const instructionCount = Array.isArray(node.Transformations.Instructions) ? node.Transformations.Instructions.length : 0;
+    const generatedCount = Array.isArray(node.Transformations.GeneratedColumns) ? node.Transformations.GeneratedColumns.length : 0;
+    const summary = document.createElement('div');
+    summary.className = 'd-flex flex-wrap gap-2';
+    appendModelMetaPill(summary, node.Transformations.Transformer || 'bidspm', 'success');
+    appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
+    appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
+    panel.body.appendChild(summary);
+
+    panel.body.appendChild(createInlineNote('Use the Transformer Builder for guided authoring, or edit the JSON below directly.'));
+    renderJsonEditor(panel.body, node.Transformations, path, false, 0);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'btn btn-sm btn-outline-danger';
+    clearBtn.textContent = 'Remove Transformations';
+    clearBtn.addEventListener('click', () => {
+      delete node.Transformations;
+      renderModelAccordionEditor();
+      setModelEditorStatus('Transformations removed.', 'info');
+    });
+    panel.actions.appendChild(clearBtn);
+
+    container.appendChild(panel.panel);
+  }
+
+  function renderNodeModelPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Design Matrix', 'Define Model.Type, Model.X, HRF and advanced model options for this node.');
+    ensureWorkspaceNodeModel(node);
+    renderJsonEditor(panel.body, node.Model, `Nodes[${idx}].Model`, false, 0);
+    container.appendChild(panel.panel);
+  }
+
+  function renderNodeDummyContrastsPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Dummy Contrasts', 'Generate simple baseline contrasts automatically when appropriate.');
+    if (!node.DummyContrasts || typeof node.DummyContrasts !== 'object' || Array.isArray(node.DummyContrasts)) {
+      node.DummyContrasts = { Test: 't', Contrasts: [] };
+    }
+
+    const testRow = document.createElement('div');
+    testRow.className = 'row g-2';
+    const testCol = document.createElement('div');
+    testCol.className = 'col-md-4';
+    const testLabel = document.createElement('label');
+    testLabel.className = 'form-label small mb-1';
+    testLabel.textContent = 'Test';
+    const testSelect = document.createElement('select');
+    testSelect.className = 'form-select form-select-sm';
+    ['t', 'F'].forEach(value => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      testSelect.appendChild(option);
+    });
+    testSelect.value = node.DummyContrasts.Test || 't';
+    testSelect.addEventListener('change', () => {
+      node.DummyContrasts.Test = testSelect.value;
+      setModelEditorStatus('Dummy contrasts updated.', 'info');
+    });
+    testCol.appendChild(testLabel);
+    testCol.appendChild(testSelect);
+    testRow.appendChild(testCol);
+
+    const contrastsCol = document.createElement('div');
+    contrastsCol.className = 'col-md-8';
+    const contrastsLabel = document.createElement('label');
+    contrastsLabel.className = 'form-label small mb-1';
+    contrastsLabel.textContent = 'Contrasts';
+    const contrastsInput = document.createElement('input');
+    contrastsInput.type = 'text';
+    contrastsInput.className = 'form-control form-control-sm';
+    contrastsInput.placeholder = 'trial_type.go, trial_type.stop';
+    contrastsInput.value = normalizeEditorStringArray(node.DummyContrasts.Contrasts).join(', ');
+    contrastsInput.addEventListener('change', () => {
+      node.DummyContrasts.Contrasts = parseCsvValues(contrastsInput.value);
+      renderModelAccordionEditor();
+      setModelEditorStatus('Dummy contrasts updated.', 'info');
+    });
+    contrastsCol.appendChild(contrastsLabel);
+    contrastsCol.appendChild(contrastsInput);
+    testRow.appendChild(contrastsCol);
+    panel.body.appendChild(testRow);
+
+    container.appendChild(panel.panel);
+  }
+
+  function renderNodeContrastsPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Contrasts', 'Define named contrasts over the current node design matrix.');
+    if (!Array.isArray(node.Contrasts)) node.Contrasts = [];
+
+    if (!node.Contrasts.length) {
+      panel.body.appendChild(createInlineNote('No explicit contrasts defined yet.'));
+    }
+
+    node.Contrasts.forEach((contrast, contrastIdx) => {
+      if (!contrast || typeof contrast !== 'object') {
+        node.Contrasts[contrastIdx] = contrast = { Name: '', ConditionList: [], Weights: [], Test: 't' };
+      }
+
+      const card = document.createElement('div');
+      card.className = 'model-contrast-card';
+
+      const top = document.createElement('div');
+      top.className = 'd-flex justify-content-between align-items-start gap-2 mb-2';
+      const title = document.createElement('div');
+      title.className = 'small fw-bold';
+      title.textContent = contrast.Name || `Contrast ${contrastIdx + 1}`;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-sm btn-outline-danger';
+      removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
+      removeBtn.addEventListener('click', () => {
+        node.Contrasts.splice(contrastIdx, 1);
+        renderModelAccordionEditor();
+        setModelEditorStatus('Contrast removed.', 'info');
+      });
+      top.appendChild(title);
+      top.appendChild(removeBtn);
+      card.appendChild(top);
+
+      const grid = document.createElement('div');
+      grid.className = 'row g-2';
+
+      const nameCol = document.createElement('div');
+      nameCol.className = 'col-md-6';
+      const nameLabel = document.createElement('label');
+      nameLabel.className = 'form-label small mb-1';
+      nameLabel.textContent = 'Name';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'form-control form-control-sm';
+      nameInput.value = contrast.Name || '';
+      nameInput.addEventListener('change', () => {
+        contrast.Name = nameInput.value.trim();
+        renderModelAccordionEditor();
+        setModelEditorStatus('Contrast updated.', 'info');
+      });
+      nameCol.appendChild(nameLabel);
+      nameCol.appendChild(nameInput);
+
+      const testCol = document.createElement('div');
+      testCol.className = 'col-md-2';
+      const testLabel = document.createElement('label');
+      testLabel.className = 'form-label small mb-1';
+      testLabel.textContent = 'Test';
+      const testSelect = document.createElement('select');
+      testSelect.className = 'form-select form-select-sm';
+      ['t', 'F'].forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        testSelect.appendChild(option);
+      });
+      testSelect.value = contrast.Test || 't';
+      testSelect.addEventListener('change', () => {
+        contrast.Test = testSelect.value;
+        setModelEditorStatus('Contrast updated.', 'info');
+      });
+      testCol.appendChild(testLabel);
+      testCol.appendChild(testSelect);
+
+      const conditionCol = document.createElement('div');
+      conditionCol.className = 'col-12';
+      const conditionLabel = document.createElement('label');
+      conditionLabel.className = 'form-label small mb-1';
+      conditionLabel.textContent = 'ConditionList';
+      const conditionInput = document.createElement('input');
+      conditionInput.type = 'text';
+      conditionInput.className = 'form-control form-control-sm';
+      conditionInput.placeholder = 'trial_type.go, trial_type.stop';
+      conditionInput.value = normalizeEditorStringArray(contrast.ConditionList).join(', ');
+      conditionInput.addEventListener('change', () => {
+        contrast.ConditionList = parseCsvValues(conditionInput.value);
+        renderModelAccordionEditor();
+        setModelEditorStatus('Contrast updated.', 'info');
+      });
+      conditionCol.appendChild(conditionLabel);
+      conditionCol.appendChild(conditionInput);
+
+      const weightCol = document.createElement('div');
+      weightCol.className = 'col-12';
+      const weightLabel = document.createElement('label');
+      weightLabel.className = 'form-label small mb-1';
+      weightLabel.textContent = 'Weights';
+      const weightInput = document.createElement('input');
+      weightInput.type = 'text';
+      weightInput.className = 'form-control form-control-sm';
+      weightInput.placeholder = '1, -1';
+      weightInput.value = Array.isArray(contrast.Weights) ? contrast.Weights.join(', ') : '';
+      weightInput.addEventListener('change', () => {
+        contrast.Weights = parseCsvValues(weightInput.value).map(value => {
+          const num = Number(value);
+          return Number.isNaN(num) ? value : num;
+        });
+        renderModelAccordionEditor();
+        setModelEditorStatus('Contrast updated.', 'info');
+      });
+      weightCol.appendChild(weightLabel);
+      weightCol.appendChild(weightInput);
+
+      grid.appendChild(nameCol);
+      grid.appendChild(testCol);
+      grid.appendChild(conditionCol);
+      grid.appendChild(weightCol);
+      card.appendChild(grid);
+
+      const mismatch = Array.isArray(contrast.ConditionList) && Array.isArray(contrast.Weights) && contrast.ConditionList.length !== contrast.Weights.length;
+      if (mismatch) {
+        const note = document.createElement('div');
+        note.className = 'small text-warning mt-2';
+        note.textContent = 'ConditionList and Weights should have the same length.';
+        card.appendChild(note);
+      }
+
+      panel.body.appendChild(card);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn btn-sm btn-outline-primary';
+    addBtn.textContent = 'Add Contrast';
+    addBtn.addEventListener('click', () => {
+      node.Contrasts.push({ Name: '', ConditionList: [], Weights: [], Test: 't' });
+      renderModelAccordionEditor();
+      setModelEditorStatus('Contrast added.', 'info');
+    });
+    panel.actions.appendChild(addBtn);
+
+    container.appendChild(panel.panel);
+  }
+
+  function createNodeWorkspaceCard(node, idx) {
+    if (!Array.isArray(node.GroupBy)) node.GroupBy = [];
+
+    const card = document.createElement('div');
+    const selected = currentSelection?.type === 'nodeField' && Number(currentSelection.idx) === idx;
+    card.className = `model-node-card${selected ? ' is-selected' : ''}`;
+
+    const header = document.createElement('div');
+    header.className = 'model-node-card-header';
+
+    const title = document.createElement('div');
+    title.className = 'model-node-card-title';
+    const index = document.createElement('span');
+    index.className = 'model-node-index';
+    index.textContent = String(idx + 1);
+    const heading = document.createElement('div');
+    heading.className = 'd-flex flex-column gap-1';
+    const strong = document.createElement('strong');
+    strong.textContent = getNodeWorkspaceLabel(node, idx);
+    const meta = document.createElement('div');
+    meta.className = 'd-flex flex-wrap gap-2';
+    appendModelMetaPill(meta, getNodeWorkspaceLevel(node), 'success');
+    appendModelMetaPill(meta, `${normalizeEditorStringArray(node.GroupBy).length} group by`, normalizeEditorStringArray(node.GroupBy).length ? 'warning' : 'neutral');
+    appendModelMetaPill(meta, `${Array.isArray(node.Model?.X) ? node.Model.X.length : 0} regressors`, Array.isArray(node.Model?.X) && node.Model.X.length ? 'success' : 'neutral');
+    appendModelMetaPill(meta, `${Array.isArray(node.Contrasts) ? node.Contrasts.length : 0} contrasts`, Array.isArray(node.Contrasts) && node.Contrasts.length ? 'success' : 'neutral');
+    heading.appendChild(strong);
+    heading.appendChild(meta);
+    title.appendChild(index);
+    title.appendChild(heading);
+    header.appendChild(title);
+
+    const actions = document.createElement('div');
+    actions.className = 'd-flex gap-2';
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'btn btn-sm btn-outline-secondary';
+    upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+    upBtn.disabled = idx === 0;
+    upBtn.addEventListener('click', () => {
+      moveArrayItem(`Nodes[${idx}]`, 'up');
+      renderModelAccordionEditor();
+      setModelEditorStatus('Node order updated.', 'info');
+    });
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'btn btn-sm btn-outline-secondary';
+    downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+    downBtn.disabled = idx === ((Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes.length : 1) - 1);
+    downBtn.addEventListener('click', () => {
+      moveArrayItem(`Nodes[${idx}]`, 'down');
+      renderModelAccordionEditor();
+      setModelEditorStatus('Node order updated.', 'info');
+    });
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-sm btn-outline-danger';
+    removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
+    removeBtn.addEventListener('click', () => {
+      removeArrayItem(`Nodes[${idx}]`);
+      renderModelAccordionEditor();
+      setModelEditorStatus('Node removed.', 'info');
+    });
+    actions.appendChild(upBtn);
+    actions.appendChild(downBtn);
+    actions.appendChild(removeBtn);
+    header.appendChild(actions);
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'model-node-card-body';
+
+    const basics = document.createElement('div');
+    basics.className = 'model-node-grid';
+
+    const levelWrap = document.createElement('div');
+    const levelLabel = document.createElement('label');
+    levelLabel.className = 'form-label small mb-1';
+    levelLabel.textContent = 'Level';
+    const levelSelect = document.createElement('select');
+    levelSelect.className = 'form-select form-select-sm';
+    ['Run', 'Session', 'Subject', 'Dataset'].forEach(level => {
+      const option = document.createElement('option');
+      option.value = level;
+      option.textContent = level;
+      levelSelect.appendChild(option);
+    });
+    const rawLevel = String(node.Level || 'Run');
+    levelSelect.value = ['Run', 'Session', 'Subject', 'Dataset'].find(level => level.toLowerCase() === rawLevel.toLowerCase()) || 'Run';
+    levelSelect.addEventListener('change', () => {
+      node.Level = levelSelect.value;
+      currentSelection = { type: 'nodeField', idx, field: 'Level' };
+      window.currentSelection = currentSelection;
+      selectedLabel.textContent = `${node.Level} — ${getNodeWorkspaceLabel(node, idx)}`;
+      selectedMeta.textContent = 'Node workspace';
+      renderModelStructure();
+      renderNodeList();
+      renderModelAccordionEditor();
+      setModelEditorStatus('Node level updated.', 'info');
+    });
+    levelWrap.appendChild(levelLabel);
+    levelWrap.appendChild(levelSelect);
+
+    const nameWrap = document.createElement('div');
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'form-label small mb-1';
+    nameLabel.textContent = 'Name';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'form-control form-control-sm';
+    nameInput.placeholder = `node_${idx + 1}`;
+    nameInput.value = node.Name || '';
+    nameInput.addEventListener('change', () => {
+      node.Name = nameInput.value.trim();
+      currentSelection = { type: 'nodeField', idx, field: 'Name' };
+      window.currentSelection = currentSelection;
+      selectedLabel.textContent = `${getNodeWorkspaceLevel(node)} — ${getNodeWorkspaceLabel(node, idx)}`;
+      selectedMeta.textContent = 'Node workspace';
+      renderModelStructure();
+      renderNodeList();
+      renderModelAccordionEditor();
+      setModelEditorStatus('Node name updated.', 'info');
+    });
+    nameWrap.appendChild(nameLabel);
+    nameWrap.appendChild(nameInput);
+
+    basics.appendChild(levelWrap);
+    basics.appendChild(nameWrap);
+    body.appendChild(basics);
+
+    renderNodeGroupByPanel(body, node, idx);
+    renderNodeTransformationsPanel(body, node, idx);
+    renderNodeModelPanel(body, node, idx);
+    renderNodeDummyContrastsPanel(body, node, idx);
+    renderNodeContrastsPanel(body, node, idx);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function renderNodesWorkspace(body) {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    if (!nodes.length) {
+      body.appendChild(createInlineNote('No nodes defined yet. Use Add Node to create the first analysis node.'));
+      return;
+    }
+
+    const stack = document.createElement('div');
+    stack.className = 'model-workspace-stack';
+    nodes.forEach((node, idx) => {
+      stack.appendChild(createNodeWorkspaceCard(node, idx));
+    });
+    body.appendChild(stack);
+  }
+
+  function getEdgeDefaultValue() {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const source = nodes[0]?.Name || '';
+    const destination = nodes[1]?.Name || nodes[0]?.Name || '';
+    return { Source: source, Destination: destination };
+  }
+
+  function renderEdgesWorkspace(body) {
+    if (!Array.isArray(modelEditorDraft.Edges)) modelEditorDraft.Edges = [];
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const nodeNames = nodes.map((node, idx) => node?.Name || `node_${idx + 1}`);
+
+    const stack = document.createElement('div');
+    stack.className = 'model-workspace-stack';
+
+    if (!modelEditorDraft.Edges.length) {
+      stack.appendChild(createInlineNote('No edges defined yet. Add an edge to connect nodes in the BIDS model graph.'));
+    }
+
+    modelEditorDraft.Edges.forEach((edge, idx) => {
+      if (!edge || typeof edge !== 'object') {
+        modelEditorDraft.Edges[idx] = edge = getEdgeDefaultValue();
+      }
+
+      const card = document.createElement('div');
+      card.className = 'model-edge-card';
+
+      const header = document.createElement('div');
+      header.className = 'model-edge-card-header';
+      const title = document.createElement('div');
+      title.className = 'model-edge-card-title';
+      const index = document.createElement('span');
+      index.className = 'model-edge-index';
+      index.textContent = String(idx + 1);
+      const heading = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = `${edge.Source || '?'} → ${edge.Destination || '?'}`;
+      const hint = document.createElement('div');
+      hint.className = 'small text-muted';
+      hint.textContent = 'Connect source and destination nodes, optionally filtering propagated contrasts.';
+      heading.appendChild(strong);
+      heading.appendChild(hint);
+      title.appendChild(index);
+      title.appendChild(heading);
+      header.appendChild(title);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-sm btn-outline-danger';
+      removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
+      removeBtn.addEventListener('click', () => {
+        modelEditorDraft.Edges.splice(idx, 1);
+        renderModelAccordionEditor();
+        setModelEditorStatus('Edge removed.', 'info');
+      });
+      header.appendChild(removeBtn);
+      card.appendChild(header);
+
+      const bodyWrap = document.createElement('div');
+      bodyWrap.className = 'model-edge-card-body';
+      const grid = document.createElement('div');
+      grid.className = 'model-edge-grid';
+
+      ['Source', 'Destination'].forEach(field => {
+        const wrap = document.createElement('div');
+        const label = document.createElement('label');
+        label.className = 'form-label small mb-1';
+        label.textContent = field;
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        const values = Array.from(new Set([edge[field] || '', ...nodeNames])).filter(Boolean);
+        values.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = value;
+          select.appendChild(option);
+        });
+        if (!values.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'No nodes available';
+          select.appendChild(option);
+        }
+        select.value = edge[field] || values[0] || '';
+        select.addEventListener('change', () => {
+          edge[field] = select.value;
+          renderModelAccordionEditor();
+          setModelEditorStatus('Edge updated.', 'info');
+        });
+        wrap.appendChild(label);
+        wrap.appendChild(select);
+        grid.appendChild(wrap);
+      });
+      bodyWrap.appendChild(grid);
+
+      const filterWrap = document.createElement('div');
+      const filterLabel = document.createElement('label');
+      filterLabel.className = 'form-label small mb-1';
+      filterLabel.textContent = 'Filter.contrast (optional)';
+      const filterInput = document.createElement('input');
+      filterInput.type = 'text';
+      filterInput.className = 'form-control form-control-sm';
+      filterInput.placeholder = 'contrast_a, contrast_b';
+      filterInput.value = normalizeEditorStringArray(edge.Filter?.contrast).join(', ');
+      filterInput.addEventListener('change', () => {
+        const values = parseCsvValues(filterInput.value);
+        if (!values.length) {
+          if (edge.Filter && typeof edge.Filter === 'object') {
+            delete edge.Filter.contrast;
+            if (!Object.keys(edge.Filter).length) delete edge.Filter;
+          }
+        } else {
+          if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
+          edge.Filter.contrast = values;
+        }
+        renderModelAccordionEditor();
+        setModelEditorStatus('Edge updated.', 'info');
+      });
+      filterWrap.appendChild(filterLabel);
+      filterWrap.appendChild(filterInput);
+      bodyWrap.appendChild(filterWrap);
+
+      card.appendChild(bodyWrap);
+      stack.appendChild(card);
+    });
+
+    body.appendChild(stack);
+  }
 
   function renderModelSectionContent(body, section) {
     if (section.kind === 'input') { body.appendChild(createModelTaskPicker()); const extraInput = section.value && typeof section.value === 'object' ? Object.fromEntries(Object.entries(section.value).filter(([key])=>key!=='task')) : {}; if (Object.keys(extraInput).length > 0) { renderJsonEditor(body, extraInput, 'Input', false, 0); } else { body.appendChild(createInlineNote('Additional input properties will appear here if the model defines them.')); } return; }
     if (section.kind === 'overview') { renderJsonEditor(body, section.value, '', false, 0); return; }
-    if (section.kind === 'nodes' && (!Array.isArray(section.value) || section.value.length === 0)) { body.appendChild(createInlineNote('No nodes defined yet. Use Add Node in the header to create the first analysis node.')); return; }
+    if (section.kind === 'nodes') { renderNodesWorkspace(body); return; }
+    if (section.kind === 'edges') { renderEdgesWorkspace(body); return; }
     if ((section.kind==='array' || section.kind==='object') && !isFilledModelValue(section.value)) { body.appendChild(createInlineNote(`${section.label} is currently empty.`)); return; }
     renderJsonEditor(body, section.value, section.path, false, 0);
   }
 
-  function createModelSectionCard(container, section) { const card = document.createElement('div'); card.className='model-section-card'; const idBase = `model-section-${section.statePath.replace(/[^a-zA-Z0-9]/g,'-')}`; const headerId = `${idBase}-h`; const collapseId = `${idBase}-c`; const header = document.createElement('h2'); header.className='accordion-header'; header.id = headerId; const headerWrap = document.createElement('div'); headerWrap.className='d-flex align-items-center gap-2'; const button = document.createElement('button'); button.className='accordion-button model-section-toggle'; button.type='button'; button.setAttribute('data-bs-toggle','collapse'); button.setAttribute('data-bs-target', `#${collapseId}`); button.setAttribute('aria-controls', collapseId); const title = document.createElement('span'); title.className='model-section-title'; const icon = document.createElement('span'); icon.className='model-section-icon'; icon.innerHTML = `<i class="fas ${section.icon}"></i>`; const heading = document.createElement('span'); heading.className='model-section-heading'; const label = document.createElement('span'); label.className='model-section-label'; label.textContent = section.label; const subtitle = document.createElement('span'); subtitle.className='model-section-subtitle'; subtitle.textContent = showModelTechnicalPaths && section.path ? section.path : section.stats.subtitle; heading.appendChild(label); heading.appendChild(subtitle); title.appendChild(icon); title.appendChild(heading); const meta = document.createElement('span'); meta.className='model-section-meta'; section.stats.badges.forEach(badge=>appendModelMetaPill(meta, badge.text, badge.tone)); button.appendChild(title); button.appendChild(meta); headerWrap.appendChild(button); if (section.kind==='nodes' || section.kind==='array'){ const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-sm btn-outline-success json-add-btn'; addBtn.textContent = section.kind === 'nodes' ? '+ Add Node' : '+ Add'; addBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const current = getByPath(modelEditorDraft, section.path); if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []); if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = []; addArrayItem(section.path); renderModelAccordionEditor(); }); headerWrap.appendChild(addBtn); } header.appendChild(headerWrap); const collapse = document.createElement('div'); collapse.id = collapseId; collapse.dataset.jsonPath = section.statePath; const wasOpen = modelEditorOpenPaths.has(section.statePath) || (!modelEditorOpenPaths.size && ['overview','input','nodes'].includes(section.kind)); collapse.className = `accordion-collapse collapse ${wasOpen ? 'show' : ''}`; button.className = `accordion-button model-section-toggle ${wasOpen ? '' : 'collapsed'}`; button.setAttribute('aria-expanded', wasOpen ? 'true' : 'false'); collapse.setAttribute('aria-labelledby', headerId); const body = document.createElement('div'); body.className='model-section-body'; renderModelSectionContent(body, section); collapse.appendChild(body); card.appendChild(header); card.appendChild(collapse); container.appendChild(card); }
+  function createModelSectionCard(container, section) {
+    const card = document.createElement('div');
+    card.className = 'model-section-card';
+
+    const idBase = `model-section-${section.statePath.replace(/[^a-zA-Z0-9]/g, '-')}`;
+    const headerId = `${idBase}-h`;
+    const collapseId = `${idBase}-c`;
+
+    const header = document.createElement('h2');
+    header.className = 'accordion-header';
+    header.id = headerId;
+
+    const headerWrap = document.createElement('div');
+    headerWrap.className = 'd-flex align-items-center gap-2';
+
+    const button = document.createElement('button');
+    button.className = 'accordion-button model-section-toggle';
+    button.type = 'button';
+    button.setAttribute('data-bs-toggle', 'collapse');
+    button.setAttribute('data-bs-target', `#${collapseId}`);
+    button.setAttribute('aria-controls', collapseId);
+
+    const title = document.createElement('span');
+    title.className = 'model-section-title';
+    const icon = document.createElement('span');
+    icon.className = 'model-section-icon';
+    icon.innerHTML = `<i class="fas ${section.icon}"></i>`;
+    const heading = document.createElement('span');
+    heading.className = 'model-section-heading';
+    const label = document.createElement('span');
+    label.className = 'model-section-label';
+    label.textContent = section.label;
+    const subtitle = document.createElement('span');
+    subtitle.className = 'model-section-subtitle';
+    subtitle.textContent = showModelTechnicalPaths && section.path ? section.path : section.stats.subtitle;
+    heading.appendChild(label);
+    heading.appendChild(subtitle);
+    title.appendChild(icon);
+    title.appendChild(heading);
+
+    const meta = document.createElement('span');
+    meta.className = 'model-section-meta';
+    section.stats.badges.forEach(badge => appendModelMetaPill(meta, badge.text, badge.tone));
+
+    button.appendChild(title);
+    button.appendChild(meta);
+    headerWrap.appendChild(button);
+
+    if (section.kind === 'nodes' || section.kind === 'array' || section.kind === 'edges') {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn btn-sm btn-outline-success json-add-btn';
+      addBtn.textContent = section.kind === 'nodes' ? '+ Add Node' : (section.kind === 'edges' ? '+ Add Edge' : '+ Add');
+      addBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = getByPath(modelEditorDraft, section.path);
+        if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
+        if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
+        if (section.kind === 'edges') modelEditorDraft[section.path].push(getEdgeDefaultValue());
+        else addArrayItem(section.path);
+        renderModelAccordionEditor();
+      });
+      headerWrap.appendChild(addBtn);
+    }
+
+    header.appendChild(headerWrap);
+
+    const collapse = document.createElement('div');
+    collapse.id = collapseId;
+    collapse.dataset.jsonPath = section.statePath;
+    const wasOpen = modelEditorOpenPaths.has(section.statePath) || (!modelEditorOpenPaths.size && ['overview', 'input', 'nodes', 'edges'].includes(section.kind));
+    collapse.className = `accordion-collapse collapse ${wasOpen ? 'show' : ''}`;
+    button.className = `accordion-button model-section-toggle ${wasOpen ? '' : 'collapsed'}`;
+    button.setAttribute('aria-expanded', wasOpen ? 'true' : 'false');
+    collapse.setAttribute('aria-labelledby', headerId);
+
+    const body = document.createElement('div');
+    body.className = 'model-section-body';
+    renderModelSectionContent(body, section);
+    collapse.appendChild(body);
+
+    card.appendChild(header);
+    card.appendChild(collapse);
+    container.appendChild(card);
+  }
 
   function renderJsonEditor(container, node, basePath = '', inheritedLocked = false, depth = 0) {
     if (Array.isArray(node)) {
