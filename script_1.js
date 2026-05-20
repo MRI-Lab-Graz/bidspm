@@ -152,6 +152,10 @@
     return note;
   }
 
+  function getSelectedModelTasks(){
+    return normalizeEditorStringArray(modelEditorDraft?.Input?.task);
+  }
+
   function parseCsvValues(raw){
     return String(raw || '')
       .split(',')
@@ -189,24 +193,28 @@
       ...normalizeEditorStringArray(sharedInputEntityValues.task),
       ...normalizeEditorStringArray(sharedBidsTasks)
     ]));
-    const currentTasks = normalizeEditorStringArray(modelEditorDraft.Input.task);
+    const currentTasks = getSelectedModelTasks();
     const allTasks = Array.from(new Set([...datasetTasks, ...currentTasks]));
 
-    async function applySelectedTasks(tasks) {
-      modelEditorDraft.Input.task = normalizeEditorStringArray(tasks);
-      await refreshSpaceInputOptions(false);
-      await refreshModelEditorHintData(modelEditorDraft);
+    async function applySelectedTask(task) {
+      modelEditorDraft.Input.task = task ? [String(task).trim()] : [];
+      if (typeof window.refreshSpaceInputOptions === 'function') {
+        await window.refreshSpaceInputOptions(false);
+      }
+      if (typeof window.refreshModelEditorHintData === 'function') {
+        await window.refreshModelEditorHintData(modelEditorDraft);
+      }
       renderModelAccordionEditor();
       setModelEditorStatus(modelEditorDraft.Input.task.length
-        ? `Input.task updated from detected dataset tasks (${modelEditorDraft.Input.task.length} selected).`
+        ? `Input.task set to ${modelEditorDraft.Input.task[0]}.`
         : 'Input.task cleared.', modelEditorDraft.Input.task.length ? 'info' : 'warning');
     }
 
     const hint = document.createElement('div');
     hint.className = 'small text-muted';
     hint.textContent = datasetTasks.length
-      ? 'Select one or more tasks detected in the BIDS func files.'
-      : 'No tasks were detected automatically. Enter one or more task labels separated by commas.';
+      ? 'Choose one task from the detected BIDS func files. Task-derived trial types are filtered to this selection.'
+      : 'No tasks were detected automatically. Enter a single task label manually.';
     wrap.appendChild(hint);
 
     const actions = document.createElement('div');
@@ -215,53 +223,47 @@
     if (allTasks.length) {
       const select = document.createElement('select');
       select.className = 'form-select form-select-sm';
-      select.multiple = true;
-      select.size = Math.min(8, Math.max(3, allTasks.length));
-
-      const selectedSet = new Set(currentTasks);
+      const currentValue = currentTasks.length === 1 ? currentTasks[0] : '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = currentTasks.length > 1
+        ? `Multiple tasks selected in JSON (${currentTasks.join(', ')})`
+        : 'Select a task';
+      select.appendChild(placeholder);
       allTasks.forEach(task => {
         const option = document.createElement('option');
         option.value = task;
         option.textContent = datasetTasks.includes(task) ? task : `${task} (from model)`;
-        option.selected = selectedSet.has(task);
         select.appendChild(option);
       });
+      select.value = currentValue;
+      select.addEventListener('change', async ()=>{
+        await applySelectedTask(select.value);
+      });
       wrap.appendChild(select);
-
-      const selectAllBtn = document.createElement('button');
-      selectAllBtn.type = 'button';
-      selectAllBtn.className = 'btn btn-sm btn-outline-secondary';
-      selectAllBtn.textContent = 'Select all';
-      selectAllBtn.addEventListener('click', () => {
-        Array.from(select.options).forEach(option => { option.selected = true; });
-      });
-      actions.appendChild(selectAllBtn);
-
-      const applyBtn = document.createElement('button');
-      applyBtn.type = 'button';
-      applyBtn.className = 'btn btn-sm btn-outline-secondary';
-      applyBtn.textContent = 'Apply';
-      applyBtn.addEventListener('click', async ()=>{
-        const selected = Array.from(select.selectedOptions).map(option => option.value);
-        await applySelectedTasks(selected);
-      });
-      actions.appendChild(applyBtn);
 
       const clearBtn = document.createElement('button');
       clearBtn.type = 'button';
       clearBtn.className = 'btn btn-sm btn-outline-secondary';
       clearBtn.textContent = 'Clear';
       clearBtn.addEventListener('click', async ()=>{
-        Array.from(select.options).forEach(option => { option.selected = false; });
-        await applySelectedTasks([]);
+        select.value = '';
+        await applySelectedTask('');
       });
       actions.appendChild(clearBtn);
+
+      if (currentTasks.length > 1) {
+        const warn = document.createElement('div');
+        warn.className = 'small text-warning';
+        warn.textContent = 'Multiple tasks are currently stored in the model. Task-specific previews are hidden until you choose a single task here.';
+        wrap.appendChild(warn);
+      }
     } else {
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'form-control form-control-sm';
-      input.placeholder = 'e.g. motor, stroop';
-      input.value = currentTasks.join(', ');
+      input.placeholder = 'e.g. motor';
+      input.value = currentTasks[0] || '';
       wrap.appendChild(input);
 
       const applyBtn = document.createElement('button');
@@ -269,7 +271,7 @@
       applyBtn.className = 'btn btn-sm btn-outline-secondary';
       applyBtn.textContent = 'Apply';
       applyBtn.addEventListener('click', async ()=>{
-        await applySelectedTasks(parseCsvValues(input.value));
+        await applySelectedTask(input.value.trim());
       });
 
       const clearBtn = document.createElement('button');
@@ -278,7 +280,7 @@
       clearBtn.textContent = 'Clear';
       clearBtn.addEventListener('click', async ()=>{
         input.value = '';
-        await applySelectedTasks([]);
+        await applySelectedTask('');
       });
 
       actions.appendChild(applyBtn);
@@ -1095,12 +1097,18 @@
         const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
           ? window.modelEditorEventSamples
           : { trial_type: [], condition: [] };
-        const trialTypeRegressors = normalizeList(eventSamples.trial_type).map(v => `trial_type.${v}`);
-        const conditionRegressors = normalizeList(eventSamples.condition).map(v => `condition.${v}`);
+        const selectedTasks = normalizeList(modelEditorDraft?.Input?.task);
+        const hasSingleSelectedTask = selectedTasks.length === 1;
+        const trialTypeRegressors = hasSingleSelectedTask
+          ? normalizeList(eventSamples.trial_type).map(v => `trial_type.${v}`)
+          : [];
+        const conditionRegressors = hasSingleSelectedTask
+          ? normalizeList(eventSamples.condition).map(v => `condition.${v}`)
+          : [];
         const interestRegressors = Array.from(new Set([
           ...trialTypeRegressors,
           ...conditionRegressors,
-          ...normalizeList(window.modelEditorInterestRegressors),
+          ...(hasSingleSelectedTask ? normalizeList(window.modelEditorInterestRegressors) : []),
           ...currentRegs
         ]));
         const confoundColumns = normalizeList(window.modelEditorConfoundColumns);
@@ -1147,7 +1155,9 @@
 
         const trialPoolHint = document.createElement('div');
         trialPoolHint.className = 'small text-muted mb-2';
-        trialPoolHint.textContent = 'Click or drag badges into Model.X.';
+        trialPoolHint.textContent = hasSingleSelectedTask
+          ? 'Click or drag badges into Model.X.'
+          : 'Select exactly one task in Input.task to load task-specific trial types.';
         trialPoolCard.appendChild(trialPoolHint);
 
         const trialPool = document.createElement('div');
@@ -1155,7 +1165,9 @@
         if (!trialTypeRegressors.length) {
           const empty = document.createElement('div');
           empty.className = 'small text-muted';
-          empty.textContent = 'No trial_type values detected for the current BIDS/task selection.';
+          empty.textContent = hasSingleSelectedTask
+            ? 'No trial_type values detected for the current BIDS/task selection.'
+            : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
           trialPool.appendChild(empty);
         } else {
           trialTypeRegressors.forEach(reg => {
@@ -1413,7 +1425,19 @@
 
   function renderModelEditorSummary(summary){ const summaryPanel = document.getElementById('model-editor-summary'); const progressBar = document.getElementById('model-editor-progress-bar'); const score = document.getElementById('model-editor-score'); const ring = document.getElementById('model-editor-score-ring'); const ringLabel = document.getElementById('model-editor-score-ring-label'); const sectionSummary = document.getElementById('model-editor-section-summary'); if (!summaryPanel || !progressBar || !score || !ring || !ringLabel || !sectionSummary) return; if (!summary) { summaryPanel.classList.add('d-none'); sectionSummary.innerHTML=''; return; } summaryPanel.classList.remove('d-none'); progressBar.style.width = `${summary.score}%`; score.textContent = `${summary.score}%`; ring.style.setProperty('--model-progress', String(summary.score)); ringLabel.textContent = `${summary.score}%`; sectionSummary.innerHTML=''; summary.sections.forEach(section=>{ const row = document.createElement('div'); row.className='model-section-summary-row'; const label = document.createElement('span'); label.className='section-label'; label.textContent = section.label; const dot = document.createElement('span'); dot.className = `completeness-dot ${section.stats.dotClass}`; dot.title = `${section.stats.filled}/${section.stats.total}`; const pills = document.createElement('div'); pills.className='model-meta-pills'; section.stats.badges.forEach(badge=>appendModelMetaPill(pills, badge.text, badge.tone)); row.appendChild(label); row.appendChild(dot); row.appendChild(pills); sectionSummary.appendChild(row); }); }
 
-  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); modelEditorOpenPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
+  function updateModelJsonPreview(){
+    const preview = document.getElementById('model-json-preview');
+    if (!preview) return;
+    if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
+      preview.textContent = 'Load a model to see the live JSON preview.';
+      preview.classList.add('model-editor-preview-empty');
+      return;
+    }
+    preview.textContent = JSON.stringify(modelEditorDraft, null, 2);
+    preview.classList.remove('model-editor-preview-empty');
+  }
+
+  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); modelEditorOpenPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); updateModelJsonPreview(); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
   // Filter sections to display based on current left-pane selection
   const sel = window.currentSelection || { type: 'model' };
   let sectionsToRender = summary.sections;
@@ -1436,7 +1460,7 @@
       if (sel.field) modelEditorOpenPaths.add(`${nodePath}.${sel.field}`);
     }
   }
-  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); }
+  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); updateModelJsonPreview(); }
 
   // expose saveModelEditor for the outer script
   async function saveModelEditor(){

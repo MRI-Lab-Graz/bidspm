@@ -510,6 +510,9 @@
     }
   }
 
+  window.refreshSpaceInputOptions = refreshSpaceInputOptions;
+  window.refreshModelEditorHintData = refreshModelEditorHintData;
+
   function inputValueAsSelection(value){
     if (Array.isArray(value)) return value.map(v => String(v));
     if (value === undefined || value === null || value === '') return [];
@@ -1125,12 +1128,18 @@
     const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
       ? window.modelEditorEventSamples
       : { trial_type: [], condition: [] };
-    const trialTypeRegressors = normalizeStringArray(eventSamples.trial_type).map(v => `trial_type.${v}`);
-    const conditionRegressors = normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`);
+    const selectedTasks = normalizeStringArray(modelEditorDraft?.Input?.task);
+    const hasSingleSelectedTask = selectedTasks.length === 1;
+    const trialTypeRegressors = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.trial_type).map(v => `trial_type.${v}`)
+      : [];
+    const conditionRegressors = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`)
+      : [];
     const suggestions = Array.from(new Set([
       ...trialTypeRegressors,
       ...conditionRegressors,
-      ...normalizeStringArray(window.modelEditorInterestRegressors),
+      ...(hasSingleSelectedTask ? normalizeStringArray(window.modelEditorInterestRegressors) : []),
       ...normalizeStringArray(modelObj.X)
     ]));
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
@@ -1223,7 +1232,9 @@
 
     const trialPoolHint = document.createElement('div');
     trialPoolHint.className = 'small text-muted mb-2';
-    trialPoolHint.textContent = 'Click or drag a badge into the design matrix list.';
+    trialPoolHint.textContent = hasSingleSelectedTask
+      ? 'Click or drag a badge into the design matrix list.'
+      : 'Select exactly one task in Input.task to load task-specific trial types.';
     trialPoolCard.appendChild(trialPoolHint);
 
     const trialPool = document.createElement('div');
@@ -1231,7 +1242,9 @@
     if (!trialTypeRegressors.length) {
       const empty = document.createElement('div');
       empty.className = 'small text-muted';
-      empty.textContent = 'No trial_type values detected. Check BIDS folder and events files.';
+      empty.textContent = hasSingleSelectedTask
+        ? 'No trial_type values detected. Check BIDS folder and events files.'
+        : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
       trialPool.appendChild(empty);
     } else {
       trialTypeRegressors.forEach(reg => {
