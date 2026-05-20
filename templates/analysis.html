@@ -1047,6 +1047,7 @@
     // Project context
     const currentProjectId = '{{ current_project_id or "" }}';
     const hasProject = {{ 'true' if project else 'false' }};
+    const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
     
     const terminal = document.getElementById('terminal');
     const execStatus = document.getElementById('exec-status');
@@ -2238,11 +2239,18 @@
             });
             const data = await response.json();
             const sample = data?.dataset?.events?.sample_values || {};
+            const transformed = Array.isArray(data?.model?.transformed_columns)
+                ? data.model.transformed_columns.map(v => String(v || '').trim()).filter(Boolean)
+                : [];
 
             const trialRegs = (sample.trial_type || []).map(v => `trial_type.${v}`);
             const conditionRegs = (sample.condition || []).map(v => `condition.${v}`);
 
-            modelEditorInterestRegressors = Array.from(new Set([...trialRegs, ...conditionRegs])).filter(Boolean);
+            modelEditorInterestRegressors = Array.from(new Set([
+                ...trialRegs,
+                ...conditionRegs,
+                ...transformed
+            ])).filter(Boolean);
             return modelEditorInterestRegressors;
         } catch (e) {
             console.warn('Could not load interest regressors:', e);
@@ -2914,7 +2922,22 @@
         }
     }
 
+    function persistTransformerLaunchContext() {
+        try {
+            const payload = {
+                projectId: currentProjectId || '',
+                modelPath: document.getElementById('input-MODELS_FILE')?.value?.trim() || '',
+                bidsDir: document.getElementById('input-BIDS_DIR')?.value?.trim() || '',
+                fmriprepDir: document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || ''
+            };
+            sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
+        } catch (e) {
+            console.warn('Could not persist transformer launch context:', e);
+        }
+    }
+
     function openTransformerBuilder() {
+        persistTransformerLaunchContext();
         const baseUrl = currentProjectId
             ? `/transformer-builder/${encodeURIComponent(currentProjectId)}`
             : '/transformer-builder';

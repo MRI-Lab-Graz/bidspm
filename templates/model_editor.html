@@ -145,6 +145,8 @@
 <script>
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
+  const CURRENT_PROJECT_ID = '{{ current_project_id or "" }}';
+  const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
   let model = null;
   window.modelEditorDraft = null;
   let modelEditorBidsTasks = [];
@@ -173,6 +175,79 @@
   let editorMode = 'full'; // 'full' or 'friendly'
   let rawMode = false;
   let rawModeReturnEditor = 'full';
+
+  function readPendingTransformerPayload() {
+    try {
+      const raw = sessionStorage.getItem(PENDING_TRANSFORMER_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function extendInterestRegressorPool(names) {
+    const normalized = normalizeStringArray(names);
+    if (!normalized.length) return;
+    window.modelEditorInterestRegressors = Array.from(new Set([
+      ...normalizeStringArray(window.modelEditorInterestRegressors),
+      ...normalized
+    ]));
+  }
+
+  function consumePendingTransformerPayload(targetModelPath) {
+    const payload = readPendingTransformerPayload();
+    if (!payload || !model || typeof model !== 'object') return null;
+
+    const payloadProjectId = String(payload.projectId || '').trim();
+    const currentProjectId = String(CURRENT_PROJECT_ID || '').trim();
+    if (payloadProjectId && currentProjectId && payloadProjectId !== currentProjectId) {
+      return null;
+    }
+
+    const payloadModelPath = String(payload.modelPath || '').trim();
+    const normalizedTargetPath = String(targetModelPath || '').trim();
+    if (payloadModelPath && normalizedTargetPath && payloadModelPath !== normalizedTargetPath) {
+      return null;
+    }
+
+    sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
+
+    const generatedColumns = normalizeStringArray(payload.generatedColumns);
+    const instructions = Array.isArray(payload.transformations?.Instructions)
+      ? structuredClone(payload.transformations.Instructions)
+      : [];
+    const runNodes = Array.isArray(model.Nodes)
+      ? model.Nodes.filter(node => node && typeof node === 'object' && String(node.Level || '').trim() === 'Run')
+      : [];
+
+    if (!runNodes.length) {
+      return {
+        tone: 'warning',
+        message: 'Pending transformer output found, but the model has no Run-level nodes to apply it to.'
+      };
+    }
+
+    runNodes.forEach(node => {
+      const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+        ? node.Transformations
+        : {};
+      const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
+      node.Transformations = {
+        ...existingTransformations,
+        Transformer: payload.transformations?.Transformer || 'bidspm',
+        Instructions: instructions,
+        GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
+      };
+    });
+
+    extendInterestRegressorPool(generatedColumns);
+
+    return {
+      tone: 'success',
+      message: `Applied transformer pipeline to ${runNodes.length} Run-level node(s) with ${generatedColumns.length} generated variable(s). Save Model to persist it.`
+    };
+  }
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
 
@@ -313,6 +388,7 @@
       model = JSON.parse(txt);
       // mirror into full-editor draft
       modelEditorDraft = model;
+      const pendingTransformerResult = consumePendingTransformerPayload(path);
       const pathLabel = document.getElementById('model-editor-path');
       if(pathLabel) pathLabel.textContent = path;
       await refreshInputEntityOptions(false);
@@ -324,7 +400,11 @@
       window.currentSelection = currentSelection;
       if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
       refreshRawEditorFromSelection();
-      setStatus('Model loaded.', 'success');
+      if (pendingTransformerResult?.message) {
+        setStatus(pendingTransformerResult.message, pendingTransformerResult.tone || 'success');
+      } else {
+        setStatus('Model loaded.', 'success');
+      }
     }catch(e){
       model = null;
       nodeListEl.innerHTML = '';

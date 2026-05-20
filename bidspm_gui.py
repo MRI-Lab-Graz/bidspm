@@ -33,6 +33,7 @@ import time
 import re
 import csv
 import shlex
+import random
 import urllib.request
 from difflib import get_close_matches
 from pathlib import Path
@@ -289,12 +290,35 @@ def _is_inside_bids_dir(target_path: str) -> bool:
     return False
 
 
+def _resolve_fs_path(path: str) -> str:
+    """Resolve user-supplied paths with stable app-root fallback for relative values."""
+    raw_path = (path or '').strip()
+    if not raw_path:
+        return ''
+
+    expanded = os.path.expanduser(raw_path)
+    if os.path.isabs(expanded):
+        return os.path.normpath(os.path.abspath(expanded))
+
+    app_candidate = os.path.normpath(os.path.abspath(str(APP_ROOT / expanded)))
+    cwd_candidate = os.path.normpath(os.path.abspath(expanded))
+
+    if os.path.exists(app_candidate):
+        return app_candidate
+    if os.path.exists(cwd_candidate):
+        return cwd_candidate
+
+    # For new files/directories, keep relative targets anchored to the app root.
+    return app_candidate
+
+
 def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract tasks, contrast levels, and replacement values from a BIDS model."""
     field_status = {
         "model_tasks": "absent",
         "replace_values": "absent",
-        "contrast_levels": "absent"
+        "contrast_levels": "absent",
+        "transformed_columns": "absent"
     }
 
     raw_input = model_data.get('Input', {})
@@ -310,8 +334,10 @@ def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
     replace_values = set()
     contrast_levels = set()
     contrast_terms = set()
+    transformed_columns = set()
     saw_replace_instruction = False
     saw_contrast_term = False
+    saw_transformations = False
 
     nodes = model_data.get('Nodes', [])
     if not isinstance(nodes, list):
@@ -329,11 +355,37 @@ def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
         instructions = transformations.get('Instructions', []) if isinstance(transformations, dict) else []
         if transformations and not isinstance(transformations, dict):
             field_status["replace_values"] = "invalid"
+            field_status["transformed_columns"] = "invalid"
+
+        if isinstance(transformations, dict):
+            saw_transformations = True
+            generated_columns = transformations.get('GeneratedColumns', [])
+            if generated_columns not in (None, []):
+                if not isinstance(generated_columns, list):
+                    field_status["transformed_columns"] = "invalid"
+                else:
+                    for column_name in generated_columns:
+                        if isinstance(column_name, str) and column_name.strip():
+                            transformed_columns.add(column_name.strip())
 
         for instruction in instructions if isinstance(instructions, list) else []:
             if not isinstance(instruction, dict):
                 field_status["replace_values"] = "invalid"
+                field_status["transformed_columns"] = "invalid"
                 continue
+
+            output_value = instruction.get('Output')
+            if isinstance(output_value, str) and output_value.strip():
+                transformed_columns.add(output_value.strip())
+            elif isinstance(output_value, list):
+                for output_name in output_value:
+                    if isinstance(output_name, str) and output_name.strip():
+                        transformed_columns.add(output_name.strip())
+                    elif output_name not in (None, ''):
+                        field_status["transformed_columns"] = "invalid"
+            elif output_value not in (None, ''):
+                field_status["transformed_columns"] = "invalid"
+
             if instruction.get('Name') == 'Replace':
                 saw_replace_instruction = True
                 replace_entries = instruction.get('Replace', [])
@@ -390,11 +442,17 @@ def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
     elif field_status["contrast_levels"] != "invalid":
         field_status["contrast_levels"] = "absent" if saw_contrast_term or nodes else "absent"
 
+    if transformed_columns:
+        field_status["transformed_columns"] = "present"
+    elif field_status["transformed_columns"] != "invalid":
+        field_status["transformed_columns"] = "absent" if saw_transformations or nodes else "absent"
+
     return {
         "model_tasks": model_tasks,
         "replace_values": sorted(replace_values),
         "contrast_levels": sorted(contrast_levels),
         "contrast_terms": sorted(contrast_terms),
+        "transformed_columns": sorted(transformed_columns),
         "field_status": field_status
     }
 
@@ -525,6 +583,7 @@ def _build_model_warnings(model_hints: Dict[str, Any], bids_tasks: List[str], ev
     model_tasks = model_hints.get('model_tasks', [])
     replace_values = set(model_hints.get('replace_values', []))
     contrast_levels = model_hints.get('contrast_levels', [])
+    transformed_columns = set(model_hints.get('transformed_columns', []))
 
     if bids_tasks and model_tasks:
         missing_tasks = [task for task in model_tasks if task not in bids_tasks]
@@ -539,7 +598,7 @@ def _build_model_warnings(model_hints: Dict[str, Any], bids_tasks: List[str], ev
 
     if replace_values and contrast_levels:
         for level in contrast_levels:
-            if level in replace_values:
+            if level in replace_values or level in transformed_columns:
                 continue
             suggestions = get_close_matches(level, list(replace_values), n=3, cutoff=0.6)
             if suggestions:
@@ -552,7 +611,7 @@ def _build_model_warnings(model_hints: Dict[str, Any], bids_tasks: List[str], ev
     )
     if raw_conditions and not replace_values and contrast_levels:
         for level in contrast_levels:
-            if level in raw_conditions:
+            if level in raw_conditions or level in transformed_columns:
                 continue
             suggestions = get_close_matches(level, list(raw_conditions), n=3, cutoff=0.7)
             if suggestions:
@@ -1817,8 +1876,15 @@ def load_container_file():
 @app.route('/browse')
 def browse_fs():
     """Browse filesystem for file/directory selection."""
-    path = request.args.get('path', os.getcwd())
+    path = _resolve_fs_path(request.args.get('path', '')) or os.getcwd()
     only_dirs = request.args.get('only_dirs', 'false').lower() == 'true'
+    extensions_raw = (request.args.get('extensions', '') or '').strip()
+    allowed_extensions = None
+    if extensions_raw:
+        parsed = [e.strip().lower() for e in extensions_raw.split(',') if e.strip()]
+        normalized = [e if e.startswith('.') else f'.{e}' for e in parsed]
+        if normalized:
+            allowed_extensions = tuple(normalized)
     
     if not os.path.exists(path):
         path = os.getcwd()
@@ -1835,7 +1901,11 @@ def browse_fs():
                 if entry.is_dir():
                     items.append({'name': entry.name, 'path': entry.path, 'type': 'dir'})
                 elif not only_dirs:
-                    if entry.name.endswith(('.json', '.sif')):
+                    entry_name_lc = entry.name.lower()
+                    if allowed_extensions:
+                        if entry_name_lc.endswith(allowed_extensions):
+                            items.append({'name': entry.name, 'path': entry.path, 'type': 'file'})
+                    elif entry_name_lc.endswith(('.json', '.sif')):
                         items.append({'name': entry.name, 'path': entry.path, 'type': 'file'})
         
         items.sort(key=lambda x: (x['type'] != 'dir', x['name'].lower()))
@@ -1961,6 +2031,159 @@ def api_load_config():
     
     with open(filepath, 'r') as f:
         return jsonify(json.load(f))
+
+
+# =============================================================================
+# Transformer Builder API
+# =============================================================================
+
+@app.route('/api/scan_events_columns', methods=['POST'])
+def api_scan_events_columns():
+    """Scan a BIDS directory for events files and extract column names."""
+    try:
+        data = request.json or {}
+        bids_dir = data.get('bids_dir', '').strip().strip('"\'')
+        events_file = data.get('events_file', '').strip().strip('"\'')
+        preview_file = data.get('preview_file', '').strip()
+        preview_max_rows = data.get('preview_max_rows', 200)
+
+        # preview_max_rows: 0 means "all rows"
+        try:
+            preview_max_rows = int(preview_max_rows)
+            if preview_max_rows < 0:
+                preview_max_rows = 200
+        except (TypeError, ValueError):
+            preview_max_rows = 200
+
+        if events_file:
+            events_file = _resolve_fs_path(events_file)
+
+        if bids_dir:
+            bids_dir = _resolve_fs_path(bids_dir)
+            if not os.path.isdir(bids_dir):
+                return jsonify({"error": f"Directory not found: {bids_dir}"}), 404
+        elif events_file:
+            bids_dir = os.path.dirname(os.path.abspath(events_file)) or str(APP_ROOT)
+        else:
+            return jsonify({"error": "No BIDS directory or events file specified"}), 400
+
+        if events_file:
+            if not os.path.isfile(events_file):
+                return jsonify({"error": f"Events file not found: {events_file}"}), 404
+            if not events_file.lower().endswith('.tsv'):
+                return jsonify({"error": "Selected file must be a .tsv file"}), 400
+
+        events_files = []
+        tasks = set()
+        all_columns = set()
+        columns_by_type = {}
+
+        if events_file:
+            events_files = [events_file]
+            file_name = os.path.basename(events_file)
+            parts = file_name.split('_')
+            for part in parts:
+                if part.startswith('task-'):
+                    tasks.add(part[5:])
+        else:
+            for root, _dirs, files in os.walk(bids_dir):
+                for file_name in files:
+                    if file_name.endswith('_events.tsv'):
+                        events_files.append(os.path.join(root, file_name))
+                        parts = file_name.split('_')
+                        for part in parts:
+                            if part.startswith('task-'):
+                                tasks.add(part[5:])
+
+        # Read columns from a subset to keep scanning responsive.
+        for path in events_files[:5]:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f, delimiter='\t')
+                    if reader.fieldnames:
+                        for col in reader.fieldnames:
+                            all_columns.add(col)
+                            if col in ['trial_type', 'condition', 'response', 'accuracy']:
+                                columns_by_type.setdefault(col, [])
+
+                            f.seek(0)
+                            reader = csv.DictReader(f, delimiter='\t')
+                            values = set()
+                            for row in reader:
+                                val = row.get(col, '').strip()
+                                if val and val != 'n/a':
+                                    values.add(val)
+                            if values and col not in ['onset', 'duration', 'framewise_displacement']:
+                                if col not in columns_by_type:
+                                    columns_by_type[col] = []
+                                columns_by_type[col] = sorted(list(values))[:10]
+            except Exception:
+                continue
+
+        sample_file = None
+        sample_headers = []
+        sample_rows = []
+        sample_total_rows = 0
+        sample_truncated = False
+        if events_files:
+            candidate_files = events_files[:]
+            random.shuffle(candidate_files)
+
+            if preview_file:
+                if os.path.isabs(preview_file):
+                    preview_abs = os.path.normpath(preview_file)
+                else:
+                    preview_abs = os.path.normpath(os.path.join(bids_dir, preview_file))
+                if preview_abs in events_files:
+                    candidate_files = [preview_abs] + [f for f in candidate_files if f != preview_abs]
+
+            for chosen in candidate_files:
+                try:
+                    with open(chosen, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f, delimiter='\t')
+                        headers = list(reader.fieldnames or [])
+                        if not headers:
+                            continue
+
+                        rows = []
+                        total_rows = 0
+                        for row in reader:
+                            total_rows += 1
+                            if preview_max_rows == 0 or len(rows) < preview_max_rows:
+                                rows.append([row.get(h, '') for h in headers])
+
+                        try:
+                            bids_root = os.path.abspath(bids_dir)
+                            chosen_abs = os.path.abspath(chosen)
+                            if os.path.commonpath([bids_root, chosen_abs]) == bids_root:
+                                sample_file = os.path.relpath(chosen_abs, bids_root)
+                            else:
+                                sample_file = chosen_abs
+                        except Exception:
+                            sample_file = os.path.abspath(chosen)
+
+                        sample_headers = headers
+                        sample_rows = rows
+                        sample_total_rows = total_rows
+                        sample_truncated = preview_max_rows != 0 and total_rows > len(rows)
+                        break
+                except Exception:
+                    continue
+
+        return jsonify({
+            "bids_dir": bids_dir,
+            "events_files": len(events_files),
+            "columns": sorted(list(all_columns)),
+            "columns_by_type": {k: v for k, v in columns_by_type.items()},
+            "tasks": sorted(list(tasks)),
+            "sample_file": sample_file,
+            "sample_headers": sample_headers,
+            "sample_rows": sample_rows,
+            "sample_total_rows": sample_total_rows,
+            "sample_truncated": sample_truncated
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # =============================================================================
