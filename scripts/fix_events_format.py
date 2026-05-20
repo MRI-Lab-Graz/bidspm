@@ -15,6 +15,9 @@ from pathlib import Path
 from glob import glob
 
 
+PASSTHROUGH_TASKS = {'MRECO', 'MREOC'}
+
+
 def fix_events_dataframe(df):
     """Fix the events dataframe formatting."""
 
@@ -24,6 +27,15 @@ def fix_events_dataframe(df):
             return default
         val = row[name]
         return default if (val != val or val is None) else val  # NaN check
+
+    def numeric_response_time(value):
+        """Return a float response time when valid, otherwise None."""
+        if value == 'n/a' or value is None or not pd.notna(value):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     # Create output dataframe
     new_rows = []
@@ -136,35 +148,35 @@ def fix_events_dataframe(df):
         if has_keyboard_pair:
             kb_response_time = col(keyboard_row, 'response_time', 'n/a')
             kb_trial_type = str(col(keyboard_row, 'trial_type', ''))
-            
-            # Calculate new onset: original onset + response_time from keyboard row
-            if kb_response_time != 'n/a' and pd.notna(kb_response_time):
-                new_onset = onset + float(kb_response_time)
-            else:
-                new_onset = onset
-            
-            # Determine button type from trial_type (remove _key suffix)
-            button_type = kb_trial_type.replace('_key', '')
-            # Map specific button types
-            button_type_map = {
-                'AUTidea': 'idea',
-                'rating': 'rating',
-                'insight': 'insight',
-                'insight_intensity': 'insight_intensity'
-            }
-            button_type = button_type_map.get(button_type, button_type)
-            
-            kb_event = {
-                'onset': round(new_onset, 4),
-                'duration': 0,
-                'trial_type': 'button_press',
-                'item': 'n/a',
-                'rating': 'n/a',
-                'rating_type': 'n/a',
-                'button_type': button_type,
-                'response_time': 'n/a'
-            }
-            new_rows.append(kb_event)
+            rt_value = numeric_response_time(kb_response_time)
+
+            # Only emit paired button events when we have a valid response time.
+            # Timeout rows often carry a Keyboard placeholder with missing response time.
+            if rt_value is not None:
+                new_onset = onset + rt_value
+
+                # Determine button type from trial_type (remove _key suffix)
+                button_type = kb_trial_type.replace('_key', '')
+                # Map specific button types
+                button_type_map = {
+                    'AUTidea': 'idea',
+                    'rating': 'rating',
+                    'insight': 'insight',
+                    'insight_intensity': 'insight_intensity'
+                }
+                button_type = button_type_map.get(button_type, button_type)
+
+                kb_event = {
+                    'onset': round(new_onset, 4),
+                    'duration': 0,
+                    'trial_type': 'button_press',
+                    'item': 'n/a',
+                    'rating': 'n/a',
+                    'rating_type': 'n/a',
+                    'button_type': button_type,
+                    'response_time': 'n/a'
+                }
+                new_rows.append(kb_event)
             
             # Skip the keyboard row
             i += 1
@@ -208,21 +220,28 @@ def parse_bids_filename(filename):
     return entities
 
 
-def find_matching_bold(events_file, bids_func_folder):
-    """Find the matching bold file for an events file based on sub/ses."""
+def find_matching_bold(events_file, bids_func_folder, preferred_task=None):
+    """Find the matching bold file for an events file based on sub/ses/task."""
     events_entities = parse_bids_filename(events_file.name)
     
     sub = events_entities.get('sub')
     ses = events_entities.get('ses')
+    source_task = preferred_task if preferred_task else events_entities.get('task')
     
     if not sub:
         return None
     
-    # Build search pattern
+    # Build search pattern. Prefer exact task matching to avoid cross-task collisions.
     if ses:
-        pattern = f"sub-{sub}_ses-{ses}_task-*_bold.nii*"
+        if source_task:
+            pattern = f"sub-{sub}_ses-{ses}_task-{source_task}_bold.nii*"
+        else:
+            pattern = f"sub-{sub}_ses-{ses}_task-*_bold.nii*"
     else:
-        pattern = f"sub-{sub}_task-*_bold.nii*"
+        if source_task:
+            pattern = f"sub-{sub}_task-{source_task}_bold.nii*"
+        else:
+            pattern = f"sub-{sub}_task-*_bold.nii*"
     
     bold_files = list(Path(bids_func_folder).glob(pattern))
     
@@ -331,8 +350,9 @@ def process_folder(source_folder, dest_folder, force=False, dry_run=False):
     print(f"Processed {processed} file(s)")
 
 
-def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=None,
-                          run=None, force=False, backup=False, dry_run=False):
+def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None,
+                          ses_override=None, run=None, force=False,
+                          backup=False, dry_run=False):
     """
     Process all events files in source folder and copy to correct BIDS paths.
 
@@ -344,6 +364,9 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
         bids_root:     Root of the BIDS dataset
         task:          Task label for output filename (e.g. 'crom').
                        When given, bold-file matching is skipped.
+        source_task:   Source task label filter from input filenames
+                       (e.g. 'MRAUT'). Use this when source folder contains
+                       multiple tasks and only one should be converted.
         ses_override:  Session label override (e.g. '1'). Replaces value
                        parsed from the source filename.
         run:           Run index to include in output filename (e.g. '1').
@@ -368,13 +391,43 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
         print(f"No *_events.tsv files found in {source_folder}")
         return
 
+    # Build a source-task inventory so multi-task folders can be handled safely.
+    file_info = []
+    source_tasks_found = set()
+    for events_file in events_files:
+        entities = parse_bids_filename(events_file.name)
+        src_task = entities.get('task')
+        if src_task:
+            source_tasks_found.add(src_task)
+        file_info.append((events_file, entities, src_task))
+
+    selected_info = file_info
+    if source_task:
+        selected_info = [info for info in file_info if (info[2] or '').lower() == source_task.lower()]
+        if not selected_info:
+            detected = ', '.join(sorted(source_tasks_found)) if source_tasks_found else 'none'
+            print(f"Error: No files matched --source-task {source_task}.")
+            print(f"Detected source tasks: {detected}")
+            return
+    elif task and len(source_tasks_found) > 1:
+        detected = ', '.join(sorted(source_tasks_found))
+        print("Error: Multiple source tasks detected while using a single output --task label.")
+        print(f"Detected source tasks: {detected}")
+        print("Use --source-task <TASK> to convert one task at a time (example: --source-task MRAUT).")
+        return
+
     print(f"Found {len(events_files)} events file(s)")
+    if source_tasks_found:
+        print(f"Detected source tasks: {', '.join(sorted(source_tasks_found))}")
+    if source_task:
+        print(f"Selected source task: {source_task} ({len(selected_info)} file(s))")
     print(f"BIDS root: {bids_root}")
     print("-" * 60)
 
     processed = 0
+    written_outputs = {}
     missing_func_dirs = []
-    for events_file in events_files:
+    for events_file, entities, src_task in selected_info:
         print(f"\nProcessing: {events_file.name}")
 
         # Sanity check – skip tiny files
@@ -383,7 +436,6 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
             print(f"  Warning: File seems too small ({line_count} lines), skipping.")
             continue
 
-        entities = parse_bids_filename(events_file.name)
         sub = entities.get('sub')
         ses = ses_override if ses_override else entities.get('ses')
 
@@ -415,7 +467,7 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
             print(f"  Output name: {new_name}")
         else:
             # Try to match a bold file for proper BIDS naming
-            bold_file = find_matching_bold(events_file, func_dir) if func_dir.exists() else None
+            bold_file = find_matching_bold(events_file, func_dir, preferred_task=src_task) if func_dir.exists() else None
             if bold_file:
                 new_name = generate_bids_events_name(bold_file)
                 print(f"  Matched bold: {bold_file.name} -> {new_name}")
@@ -426,9 +478,19 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
         output_path = func_dir / new_name
         print(f"  Output: {output_path}")
 
+        # Guard against accidental overwrite when multiple source files map to one output.
+        if output_path in written_outputs:
+            prev = written_outputs[output_path]
+            print(f"  Skipping: output already assigned to {prev} in this run.")
+            continue
+
         try:
             df = pd.read_csv(events_file, sep='\t')
-            result_df = fix_events_dataframe(df)
+            if (src_task or '').upper() in PASSTHROUGH_TASKS:
+                print(f"  Pass-through: keeping {src_task} content unchanged.")
+                result_df = df
+            else:
+                result_df = fix_events_dataframe(df)
         except Exception as e:
             print(f"  ERROR reading/processing source: {e}")
             continue
@@ -456,6 +518,7 @@ def process_folder_to_bids(source_folder, bids_root, task=None, ses_override=Non
             result_df.to_csv(output_path, sep='\t', index=False)
             print(f"  Created: {output_path}")
             processed += 1
+            written_outputs[output_path] = events_file.name
         except Exception as e:
             print(f"  ERROR writing output: {e}")
 
@@ -489,7 +552,7 @@ Examples:
   python fix_events_format.py --folder ./raw_events --bids /data/BIDS
 
   # Specify task and session explicitly
-  python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --ses 1
+    python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --source-task MRAUT --ses 1
 
   # Include a run index in the output filename
   python fix_events_format.py --folder ./raw_events --bids /data/BIDS --task crom --ses 1 --run 1
@@ -513,6 +576,10 @@ Examples:
                         help='Task label for output filename (e.g. crom). '
                              'Skips bold-file matching; use when source files '
                              'have a different task name than the BIDS bold files.')
+    parser.add_argument('--source-task', metavar='SOURCE_TASK',
+                        help='Filter source files by task label parsed from filename '
+                            '(e.g. MRAUT). Required when source folder contains '
+                            'multiple tasks and --task is used.')
     parser.add_argument('--ses', metavar='SES',
                         help='Session label override (e.g. 1). '
                              'Overrides the session parsed from the source filename.')
@@ -532,6 +599,7 @@ Examples:
         force = args.force or args.backup  # --backup implies overwrite
         if args.bids:
             process_folder_to_bids(args.folder, args.bids, task=args.task,
+                                   source_task=args.source_task,
                                    ses_override=args.ses, run=args.run,
                                    force=force, backup=args.backup, dry_run=args.dry_run)
         elif args.dest:
