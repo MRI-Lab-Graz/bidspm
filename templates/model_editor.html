@@ -65,6 +65,55 @@
     padding: 0 0.05rem;
     line-height: 1;
   }
+  .me-transformer-builder {
+    border: 1px solid #e3e9f2;
+    border-radius: 0.8rem;
+    background: #fbfdff;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+  .me-transformer-op-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .me-transformer-op-card {
+    border: 1px solid #d9e3f0;
+    border-radius: 0.6rem;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .me-transformer-op-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid #edf2f8;
+    background: #f8fbff;
+  }
+  .me-transformer-op-body {
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .me-transformer-json {
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid #d6e2f0;
+    border-radius: 0.45rem;
+    background: #0f1c2d;
+    color: #dbe8fb;
+    font-size: 0.73rem;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow: auto;
+  }
   .modelx-reg-row {
     border: 1px solid #dee2e6;
     border-radius: 0.4rem;
@@ -682,6 +731,8 @@
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
   const CURRENT_PROJECT_ID = '{{ current_project_id or "" }}';
+  const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
+  const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
   let model = null;
   window.modelEditorDraft = null;
@@ -794,6 +845,71 @@
       message: `Applied transformer pipeline to ${runNodes.length} Run-level node(s) with ${generatedColumns.length} generated variable(s). Save Model to persist it.`
     };
   }
+
+  function getCurrentModelPathValue() {
+    const input = document.getElementById('model-path-input');
+    return String(input?.value || modelPath || '').trim();
+  }
+
+  function getTransformerBuilderUrl() {
+    const projectId = String(CURRENT_PROJECT_ID || '').trim();
+    const baseUrl = projectId
+      ? `/transformer-builder/${encodeURIComponent(projectId)}`
+      : '/transformer-builder';
+    return `${baseUrl}?embedded=1`;
+  }
+
+  function prepareTransformerLaunchContext(nodeIndex = null) {
+    const payload = {
+      projectId: String(CURRENT_PROJECT_ID || '').trim(),
+      modelPath: getCurrentModelPathValue(),
+      bidsDir: String(document.getElementById('input-BIDS_DIR')?.value || '').trim(),
+      nodeIndex: Number.isInteger(nodeIndex) ? nodeIndex : null
+    };
+    try {
+      sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
+    } catch (e) {
+      // Ignore storage failures; builder can still be used with manual inputs.
+    }
+  }
+
+  async function applyPendingTransformerIntoCurrentModel(modelPathHint = '') {
+    const targetPath = String(modelPathHint || getCurrentModelPathValue()).trim();
+    if (!targetPath || !model || typeof model !== 'object') return false;
+
+    const result = consumePendingTransformerPayload(targetPath);
+    if (!result) return false;
+
+    modelEditorDraft = model;
+    await refreshModelEditorHintData(model);
+    renderModelStructure();
+    renderNodeList();
+    currentSelection = { type: 'model' };
+    window.currentSelection = currentSelection;
+    selectedLabel.textContent = 'Model Workspace';
+    selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
+    if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+    refreshRawEditorFromSelection();
+    setStatus(result.message, result.tone || 'success');
+    return true;
+  }
+
+  window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
+  window.getModelEditorTransformerBuilderUrl = getTransformerBuilderUrl;
+  window.modelEditorInlineTransformerNodeIdx = Number.isInteger(window.modelEditorInlineTransformerNodeIdx)
+    ? window.modelEditorInlineTransformerNodeIdx
+    : null;
+
+  window.addEventListener('message', async (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data && typeof event.data === 'object' ? event.data : null;
+    if (!data || data.type !== TRANSFORMER_APPLIED_EVENT) return;
+
+    const applied = await applyPendingTransformerIntoCurrentModel(String(data.modelPath || '').trim());
+    if (!applied) {
+      setStatus('Transformer payload received but could not be applied to the currently loaded model.', 'warning');
+    }
+  });
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
 
@@ -3372,37 +3488,594 @@
     container.appendChild(panel.panel);
   }
 
-  function renderNodeTransformationsPanel(container, node, idx) {
-    const panel = createWorkspacePanel('Transformations', 'Optional event-level transformer pipeline used before variables enter Model.X.');
-    const path = `Nodes[${idx}].Transformations`;
-
+  function ensureNodeTransformationsObject(node) {
     if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
-      panel.body.appendChild(createInlineNote('No transformations defined for this node.'));
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'btn btn-sm btn-outline-primary';
-      addBtn.textContent = 'Initialize Transformations';
-      addBtn.addEventListener('click', () => {
-        node.Transformations = { Transformer: 'pybids-transforms-v1', Instructions: [], GeneratedColumns: [] };
-        renderModelAccordionEditor();
-        setModelEditorStatus('Transformations initialized.', 'info');
-      });
-      panel.actions.appendChild(addBtn);
-      container.appendChild(panel.panel);
-      return;
+      node.Transformations = { Transformer: 'pybids-transforms-v1', Instructions: [], GeneratedColumns: [] };
+    }
+    if (!Array.isArray(node.Transformations.Instructions)) node.Transformations.Instructions = [];
+    if (!Array.isArray(node.Transformations.GeneratedColumns)) node.Transformations.GeneratedColumns = [];
+    if (!node.Transformations.Transformer) node.Transformations.Transformer = 'pybids-transforms-v1';
+    return node.Transformations;
+  }
+
+  function getInlineTransformerColumnSuggestions(node) {
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+    const inferredEventColumns = [];
+    if (normalizeEditorStringArray(eventSamples.trial_type).length) inferredEventColumns.push('trial_type');
+    if (normalizeEditorStringArray(eventSamples.condition).length) inferredEventColumns.push('condition');
+
+    const fromModelX = normalizeEditorStringArray(node?.Model?.X).map(value => {
+      if (value === '1') return '';
+      if (value.startsWith('trial_type.')) return 'trial_type';
+      if (value.startsWith('condition.')) return 'condition';
+      return value;
+    }).filter(Boolean);
+
+    const fromTransformGenerated = normalizeEditorStringArray(node?.Transformations?.GeneratedColumns);
+    const fromGlobalPool = normalizeEditorStringArray(window.modelEditorInterestRegressors)
+      .map(value => {
+        if (value.startsWith('trial_type.')) return 'trial_type';
+        if (value.startsWith('condition.')) return 'condition';
+        return value;
+      })
+      .filter(Boolean);
+
+    return Array.from(new Set([
+      ...inferredEventColumns,
+      ...fromModelX,
+      ...fromTransformGenerated,
+      ...fromGlobalPool
+    ])).sort((a, b) => a.localeCompare(b));
+  }
+
+  function createTransformerInstructionTemplate(opName) {
+    switch (opName) {
+      case 'Filter':
+        return { Name: 'Filter', Input: '', Query: '', Output: '' };
+      case 'Concatenate':
+        return { Name: 'Concatenate', Input: [], Output: '' };
+      case 'Factor':
+        return { Name: 'Factor', Input: [] };
+      case 'Replace':
+        return { Name: 'Replace', Input: '', Replace: [{ key: '', value: '' }], Output: '' };
+      case 'Copy':
+        return { Name: 'Copy', Input: [], Output: [] };
+      case 'Select':
+        return { Name: 'Select', Input: [] };
+      case 'Delete':
+        return { Name: 'Delete', Input: [] };
+      case 'Scale':
+        return { Name: 'Scale', Input: [], Demean: true, Rescale: true, Output: '' };
+      case 'Mean':
+        return { Name: 'Mean', Input: '', OmitNan: false, Output: '' };
+      case 'Threshold':
+        return { Name: 'Threshold', Input: '', Threshold: 0, Binarize: false, Above: true, Output: '' };
+      default:
+        return { Name: opName };
+    }
+  }
+
+  function inferFactorGeneratedColumns(inputs) {
+    const normalizedInputs = normalizeEditorStringArray(inputs);
+    if (!normalizedInputs.length) return [];
+
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+
+    const levelSets = normalizedInputs.map(column => {
+      if (column === 'trial_type') return normalizeEditorStringArray(eventSamples.trial_type);
+      if (column === 'condition') return normalizeEditorStringArray(eventSamples.condition);
+      return [];
+    });
+
+    const hasConcreteLevels = levelSets.every(levels => levels.length > 0);
+    if (!hasConcreteLevels) {
+      return normalizedInputs.map(column => `${column}_*`);
     }
 
-    const instructionCount = Array.isArray(node.Transformations.Instructions) ? node.Transformations.Instructions.length : 0;
-    const generatedCount = Array.isArray(node.Transformations.GeneratedColumns) ? node.Transformations.GeneratedColumns.length : 0;
+    const names = [];
+    const build = (index, parts) => {
+      if (index >= normalizedInputs.length) {
+        names.push(parts.join('_'));
+        return;
+      }
+      const column = normalizedInputs[index];
+      levelSets[index].forEach(level => {
+        build(index + 1, [...parts, column, level]);
+      });
+    };
+    build(0, []);
+    return names;
+  }
+
+  function inferGeneratedColumnsFromInstruction(instruction) {
+    if (!instruction || typeof instruction !== 'object') return [];
+    const opName = String(instruction.Name || '').trim();
+    const outputValues = normalizeEditorStringArray(instruction.Output);
+
+    if (opName === 'Factor') {
+      return inferFactorGeneratedColumns(instruction.Input);
+    }
+
+    if (outputValues.length) return outputValues;
+    return [];
+  }
+
+  function refreshNodeGeneratedColumnsFromInstructions(node) {
+    const transformations = ensureNodeTransformationsObject(node);
+    const generated = [];
+    transformations.Instructions.forEach(instruction => {
+      inferGeneratedColumnsFromInstruction(instruction).forEach(name => generated.push(name));
+    });
+    transformations.GeneratedColumns = Array.from(new Set(normalizeEditorStringArray(generated)));
+  }
+
+  function renderNodeTransformationsPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Transformations', 'Define transformer operations for this node directly in Model Editor.');
+    const path = `Nodes[${idx}].Transformations`;
+    const transformations = ensureNodeTransformationsObject(node);
+
+    const suggestionListId = `transformer-col-suggestions-${idx}`;
+    const columnSuggestions = getInlineTransformerColumnSuggestions(node);
+
+    function rerender(message = '') {
+      refreshNodeGeneratedColumnsFromInstructions(node);
+      renderModelAccordionEditor();
+      if (message) setModelEditorStatus(message, 'info');
+    }
+
+    function addTextField(parent, options) {
+      const group = document.createElement('div');
+      group.className = 'd-flex flex-column gap-1';
+      const label = document.createElement('label');
+      label.className = 'form-label small mb-0';
+      label.textContent = options.label;
+      const input = document.createElement('input');
+      input.type = options.type || 'text';
+      input.className = 'form-control form-control-sm';
+      input.placeholder = options.placeholder || '';
+      input.value = options.value || '';
+      if (options.useSuggestions) input.setAttribute('list', suggestionListId);
+      input.addEventListener('change', () => {
+        options.onChange(input.value);
+      });
+      group.appendChild(label);
+      group.appendChild(input);
+      if (options.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'small text-muted';
+        hint.textContent = options.hint;
+        group.appendChild(hint);
+      }
+      parent.appendChild(group);
+    }
+
+    function addCheckboxField(parent, options) {
+      const wrap = document.createElement('div');
+      wrap.className = 'form-check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'form-check-input';
+      input.checked = Boolean(options.value);
+      const id = `transformer-${idx}-${options.key}-${Math.random().toString(36).slice(2, 7)}`;
+      input.id = id;
+      const label = document.createElement('label');
+      label.className = 'form-check-label small';
+      label.htmlFor = id;
+      label.textContent = options.label;
+      input.addEventListener('change', () => options.onChange(input.checked));
+      wrap.appendChild(input);
+      wrap.appendChild(label);
+      parent.appendChild(wrap);
+    }
+
+    function renderReplaceRows(parent, instruction, instIdx) {
+      if (!Array.isArray(instruction.Replace)) instruction.Replace = [];
+      if (!instruction.Replace.length) instruction.Replace.push({ key: '', value: '' });
+
+      const table = document.createElement('table');
+      table.className = 'table table-sm table-bordered mb-1';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Old value</th><th>New value</th><th style="width:50px;"></th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+
+      instruction.Replace.forEach((row, rowIdx) => {
+        const tr = document.createElement('tr');
+
+        const keyTd = document.createElement('td');
+        const keyInput = document.createElement('input');
+        keyInput.type = 'text';
+        keyInput.className = 'form-control form-control-sm';
+        keyInput.value = String(row?.key || '');
+        keyInput.addEventListener('change', () => {
+          instruction.Replace[rowIdx].key = keyInput.value;
+          rerender();
+        });
+        keyTd.appendChild(keyInput);
+
+        const valueTd = document.createElement('td');
+        const valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.className = 'form-control form-control-sm';
+        valueInput.value = String(row?.value || '');
+        valueInput.addEventListener('change', () => {
+          instruction.Replace[rowIdx].value = valueInput.value;
+          rerender();
+        });
+        valueTd.appendChild(valueInput);
+
+        const removeTd = document.createElement('td');
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn btn-sm btn-outline-danger';
+        removeBtn.textContent = 'x';
+        removeBtn.addEventListener('click', () => {
+          instruction.Replace.splice(rowIdx, 1);
+          rerender('Replacement row removed.');
+        });
+        removeTd.appendChild(removeBtn);
+
+        tr.appendChild(keyTd);
+        tr.appendChild(valueTd);
+        tr.appendChild(removeTd);
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      parent.appendChild(table);
+
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn btn-sm btn-outline-secondary';
+      addBtn.textContent = '+ Add replacement row';
+      addBtn.addEventListener('click', () => {
+        instruction.Replace.push({ key: '', value: '' });
+        rerender('Replacement row added.');
+      });
+      parent.appendChild(addBtn);
+    }
+
+    function renderInstructionCard(opName, instruction, instIdx) {
+      const card = document.createElement('div');
+      card.className = 'me-transformer-op-card';
+
+      const header = document.createElement('div');
+      header.className = 'me-transformer-op-header';
+
+      const title = document.createElement('div');
+      title.className = 'small fw-bold';
+      title.textContent = `${instIdx + 1}. ${opName}`;
+      header.appendChild(title);
+
+      const controls = document.createElement('div');
+      controls.className = 'd-flex gap-1';
+
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'btn btn-sm btn-outline-secondary';
+      upBtn.textContent = 'Up';
+      upBtn.disabled = instIdx === 0;
+      upBtn.addEventListener('click', () => {
+        const instructions = transformations.Instructions;
+        [instructions[instIdx - 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx - 1]];
+        rerender('Instruction moved.');
+      });
+
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.className = 'btn btn-sm btn-outline-secondary';
+      downBtn.textContent = 'Down';
+      downBtn.disabled = instIdx === transformations.Instructions.length - 1;
+      downBtn.addEventListener('click', () => {
+        const instructions = transformations.Instructions;
+        [instructions[instIdx + 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx + 1]];
+        rerender('Instruction moved.');
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-sm btn-outline-danger';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        transformations.Instructions.splice(instIdx, 1);
+        rerender('Instruction removed.');
+      });
+
+      controls.appendChild(upBtn);
+      controls.appendChild(downBtn);
+      controls.appendChild(removeBtn);
+      header.appendChild(controls);
+      card.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'me-transformer-op-body';
+
+      const setSingle = (field, rawValue) => {
+        instruction[field] = parseCsvValues(rawValue)[0] || '';
+        rerender();
+      };
+      const setMulti = (field, rawValue) => {
+        instruction[field] = parseCsvValues(rawValue);
+        rerender();
+      };
+      const setOutput = (rawValue) => {
+        if (opName === 'Copy') {
+          instruction.Output = parseCsvValues(rawValue);
+        } else {
+          instruction.Output = parseCsvValues(rawValue)[0] || '';
+        }
+        rerender();
+      };
+
+      if (opName === 'Filter') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addTextField(body, {
+          label: 'Query',
+          value: String(instruction.Query || ''),
+          placeholder: "trial_type == 'go'",
+          onChange: (value) => {
+            instruction.Query = String(value || '').trim();
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'filtered_col',
+          useSuggestions: true,
+          onChange: setOutput
+        });
+      } else if (opName === 'Concatenate') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Output',
+          value: String(instruction.Output || ''),
+          placeholder: 'trial_combined',
+          onChange: setOutput
+        });
+      } else if (opName === 'Factor') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+      } else if (opName === 'Replace') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        renderReplaceRows(body, instruction, instIdx);
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'trial_type_clean',
+          onChange: setOutput
+        });
+      } else if (opName === 'Copy') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Output names (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'trial_type_copy, condition_copy',
+          onChange: setOutput
+        });
+      } else if (opName === 'Select' || opName === 'Delete') {
+        addTextField(body, {
+          label: `${opName === 'Select' ? 'Columns to keep' : 'Columns to delete'} (comma-separated)`,
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, duration',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+      } else if (opName === 'Scale') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'Demean',
+          label: 'Demean',
+          value: instruction.Demean !== false,
+          onChange: (checked) => {
+            instruction.Demean = checked;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Rescale',
+          label: 'Rescale (divide by SD)',
+          value: instruction.Rescale !== false,
+          onChange: (checked) => {
+            instruction.Rescale = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'scaled_col',
+          onChange: setOutput
+        });
+      } else if (opName === 'Mean') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'OmitNan',
+          label: 'Omit NaN',
+          value: Boolean(instruction.OmitNan),
+          onChange: (checked) => {
+            instruction.OmitNan = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'mean_col',
+          onChange: setOutput
+        });
+      } else if (opName === 'Threshold') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addTextField(body, {
+          label: 'Threshold value',
+          type: 'number',
+          value: String(instruction.Threshold ?? 0),
+          onChange: (value) => {
+            const parsed = Number(value);
+            instruction.Threshold = Number.isFinite(parsed) ? parsed : 0;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Binarize',
+          label: 'Binarize',
+          value: Boolean(instruction.Binarize),
+          onChange: (checked) => {
+            instruction.Binarize = checked;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Above',
+          label: 'Keep above threshold',
+          value: instruction.Above !== false,
+          onChange: (checked) => {
+            instruction.Above = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'thresholded_col',
+          onChange: setOutput
+        });
+      }
+
+      card.appendChild(body);
+      return card;
+    }
+
+    const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
+    refreshNodeGeneratedColumnsFromInstructions(node);
+    const generatedCount = Array.isArray(transformations.GeneratedColumns) ? transformations.GeneratedColumns.length : 0;
     const summary = document.createElement('div');
     summary.className = 'd-flex flex-wrap gap-2';
-    appendModelMetaPill(summary, node.Transformations.Transformer || 'pybids-transforms-v1', 'success');
+    appendModelMetaPill(summary, transformations.Transformer || 'pybids-transforms-v1', 'success');
     appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
     appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
     panel.body.appendChild(summary);
 
-    panel.body.appendChild(createInlineNote('Use the Transformer Builder for guided authoring, or edit the JSON below directly.'));
-    renderJsonEditor(panel.body, node.Transformations, path, false, 0);
+    const builder = document.createElement('div');
+    builder.className = 'me-transformer-builder';
+    builder.appendChild(createInlineNote('Add and edit operations directly here. Changes are applied to this node immediately.'));
+
+    const datalist = document.createElement('datalist');
+    datalist.id = suggestionListId;
+    columnSuggestions.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      datalist.appendChild(option);
+    });
+    builder.appendChild(datalist);
+
+    const opButtonRow = document.createElement('div');
+    opButtonRow.className = 'd-flex flex-wrap gap-1';
+    [
+      'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'Select', 'Delete',
+      'Scale', 'Mean', 'Threshold'
+    ].forEach(opName => {
+      const addOpBtn = document.createElement('button');
+      addOpBtn.type = 'button';
+      addOpBtn.className = 'btn btn-sm btn-outline-primary';
+      addOpBtn.textContent = `+ ${opName}`;
+      addOpBtn.addEventListener('click', () => {
+        transformations.Instructions.push(createTransformerInstructionTemplate(opName));
+        rerender(`Added ${opName} instruction.`);
+      });
+      opButtonRow.appendChild(addOpBtn);
+    });
+    builder.appendChild(opButtonRow);
+
+    const opList = document.createElement('div');
+    opList.className = 'me-transformer-op-list';
+    if (!transformations.Instructions.length) {
+      opList.appendChild(createInlineNote('No instructions yet. Add operations above.'));
+    } else {
+      transformations.Instructions.forEach((instruction, instIdx) => {
+        const opName = String(instruction?.Name || '').trim();
+        if (!opName) {
+          transformations.Instructions[instIdx] = createTransformerInstructionTemplate('Filter');
+        }
+        opList.appendChild(renderInstructionCard(String(transformations.Instructions[instIdx].Name || 'Filter'), transformations.Instructions[instIdx], instIdx));
+      });
+    }
+    builder.appendChild(opList);
+
+    const generatedLabel = document.createElement('div');
+    generatedLabel.className = 'small fw-bold';
+    generatedLabel.textContent = 'Generated JSON Preview';
+    builder.appendChild(generatedLabel);
+
+    const jsonPreview = document.createElement('pre');
+    jsonPreview.className = 'me-transformer-json';
+    jsonPreview.textContent = JSON.stringify(transformations, null, 2);
+    builder.appendChild(jsonPreview);
+
+    panel.body.appendChild(builder);
+
+    const advanced = document.createElement('details');
+    advanced.className = 'mt-1';
+    const advSummary = document.createElement('summary');
+    advSummary.className = 'small fw-bold';
+    advSummary.textContent = 'Advanced Transformations JSON';
+    advanced.appendChild(advSummary);
+    const advWrap = document.createElement('div');
+    advWrap.className = 'mt-2';
+    renderJsonEditor(advWrap, node.Transformations, path, false, 0);
+    advanced.appendChild(advWrap);
+    panel.body.appendChild(advanced);
 
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';

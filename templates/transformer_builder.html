@@ -582,6 +582,8 @@
   const PROJECT_MODELS_FILE = {{ (current_project.config.models_file | replace('"', '') if current_project and current_project.config.models_file else '') | tojson }};
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
+  const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
+  const EMBEDDED_MODE = new URLSearchParams(window.location.search).get('embedded') === '1' || window.self !== window.top;
 
   // ---- State ----
   let availableColumns = [];
@@ -725,6 +727,21 @@
       }));
     } catch (e) {
       setStatus('Could not store transformer payload for model handoff.', 'danger');
+      return;
+    }
+
+    if (EMBEDDED_MODE) {
+      try {
+        window.parent.postMessage({
+          type: TRANSFORMER_APPLIED_EVENT,
+          projectId: targetProjectId,
+          modelPath: targetModelPath
+        }, window.location.origin);
+      } catch (e) {
+        setStatus('Transformer payload prepared, but parent editor could not be notified.', 'warning');
+        return;
+      }
+      setStatus('Transformer applied to current model editor context.', 'success');
       return;
     }
 
