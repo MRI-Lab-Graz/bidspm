@@ -11,13 +11,59 @@
   .modelx-drop-zone {
     border: 1px dashed #c7d4e2;
     border-radius: 0.45rem;
-    padding: 0.5rem;
-    background: #f8fafc;
-    min-height: 3rem;
+    padding: 0.6rem;
+    background: #ffffff;
+    min-height: 8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45rem;
   }
   .modelx-drop-zone.is-over {
     border-color: #0d6efd;
-    background: #edf5ff;
+    background: #ffffff;
+    box-shadow: inset 0 0 0 2px rgba(13, 110, 253, 0.15);
+  }
+  .modelx-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border: 1px solid #d5deea;
+    border-radius: 0.45rem;
+    background: #ffffff;
+    padding: 0.32rem 0.38rem;
+    width: 100%;
+    cursor: grab;
+  }
+  .modelx-chip:active { cursor: grabbing; }
+  .modelx-chip.is-drop-target {
+    border-color: #0d6efd;
+    background: #f1f7ff;
+  }
+  .modelx-chip-label { font-weight: 600; }
+  .modelx-chip-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+  .modelx-chip-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+  }
+  .modelx-chip-handle {
+    color: #6c757d;
+    font-size: 0.78rem;
+  }
+  .modelx-chip-remove {
+    border: 0;
+    background: transparent;
+    color: #dc3545;
+    padding: 0 0.05rem;
+    line-height: 1;
   }
   .modelx-reg-row {
     border: 1px solid #dee2e6;
@@ -181,6 +227,17 @@
   .model-editor-preview-hint {
     font-size: 0.76rem;
     color: #98b3d8;
+  }
+  .model-editor-preview-validation {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .model-editor-preview-validation-text {
+    font-size: 0.73rem;
+    color: #a9c0df;
   }
   .model-editor-preview-body {
     max-height: 70vh;
@@ -495,45 +552,58 @@
   </div>
 </div>
 
-<div class="row">
-  <div class="col-md-4">
+<div class="row mb-3">
+  <div class="col-12">
     <div class="card shadow-sm">
-      <div class="card-body">
-        <div class="mb-3">
-          <label class="form-label small fw-bold">Model Path</label>
-          <div class="input-group input-group-sm">
-            <input id="model-path-input" type="text" class="form-control" value="{{ model_path or '' }}">
-            <button id="btn-load-model" class="btn btn-outline-primary">Load</button>
-          </div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label small fw-bold">BIDS Folder</label>
-          <div class="input-group input-group-sm">
-            <input id="input-BIDS_DIR" type="text" class="form-control" value="{{ current_project.config.bids_folder if current_project else '' }}">
-            <button id="btn-browse-bids" class="btn btn-outline-secondary">Browse</button>
-          </div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label small fw-bold">fMRIPrep Folder</label>
-          <div class="input-group input-group-sm">
-            <input id="input-FMRIPREP_DIR" type="text" class="form-control" value="{{ current_project.config.fmriprep_folder if current_project else '' }}">
-            <button id="btn-browse-fmriprep" class="btn btn-outline-secondary">Browse</button>
-          </div>
-        </div>
-        <div>
-          <label class="form-label small fw-bold">Model Structure</label>
-          <div id="model-structure" class="list-group list-group-flush small mb-2" style="max-height: 24vh; overflow:auto;"></div>
+      <div class="card-header d-flex justify-content-between align-items-center py-2">
+        <strong class="small mb-0">Model Structure + Nodes</strong>
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#model-structure-collapse" aria-expanded="false" aria-controls="model-structure-collapse">
+          Toggle
+        </button>
+      </div>
+      <div class="collapse" id="model-structure-collapse">
+        <div class="card-body">
+          <div>
+            <label class="form-label small fw-bold">Model Structure</label>
+            <div id="model-structure" class="list-group list-group-flush small mb-2" style="max-height: 18vh; overflow:auto;"></div>
 
-          <label class="form-label small fw-bold">Nodes</label>
-          <div id="node-list" class="list-group list-group-flush" style="max-height: 36vh; overflow:auto;"></div>
+            <label class="form-label small fw-bold">Nodes</label>
+            <div id="node-list" class="list-group list-group-flush" style="max-height: 20vh; overflow:auto;"></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
+</div>
 
-  <div class="col-md-8">
+<div class="row">
+  <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col-lg-5">
+            <label class="form-label small fw-bold">Model Path</label>
+            <div class="input-group input-group-sm">
+              <input id="model-path-input" type="text" class="form-control" value="{{ model_path or '' }}">
+              <button id="btn-load-model" class="btn btn-outline-primary">Load</button>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <label class="form-label small fw-bold">BIDS Folder</label>
+            <div class="input-group input-group-sm">
+              <input id="input-BIDS_DIR" type="text" class="form-control" value="{{ current_project.config.bids_folder if current_project else '' }}">
+              <button id="btn-browse-bids" class="btn btn-outline-secondary">Browse</button>
+            </div>
+          </div>
+          <div class="col-lg-3">
+            <label class="form-label small fw-bold">fMRIPrep Folder</label>
+            <div class="input-group input-group-sm">
+              <input id="input-FMRIPREP_DIR" type="text" class="form-control" value="{{ current_project.config.fmriprep_folder if current_project else '' }}">
+              <button id="btn-browse-fmriprep" class="btn btn-outline-secondary">Browse</button>
+            </div>
+          </div>
+        </div>
+
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div>
             <strong id="selected-node-label">No node selected</strong>
@@ -587,6 +657,10 @@
                 <div>
                   <div class="model-editor-preview-title">Live BIDS Stats Model</div>
                   <div class="model-editor-preview-hint">Updates as you change nodes, edges, transformations, design matrices and contrasts.</div>
+                  <div class="model-editor-preview-validation">
+                    <span id="model-preview-validation-badge" class="badge bg-secondary">idle</span>
+                    <span id="model-preview-validation-text" class="model-editor-preview-validation-text">Load a model to run live schema validation.</span>
+                  </div>
                 </div>
               </div>
               <div class="model-editor-preview-body">
@@ -633,6 +707,10 @@
   let modelEditorInputEntityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
     ? window.modelEditorInputEntityValues
     : {};
+  const previewValidationState = window.__modelPreviewValidationState && typeof window.__modelPreviewValidationState === 'object'
+    ? window.__modelPreviewValidationState
+    : { timer: null, runId: 0 };
+  window.__modelPreviewValidationState = previewValidationState;
   window.modelEditorInputEntityValues = modelEditorInputEntityValues;
   let attemptedBidsDirAutofill = false;
   let attemptedFmriprepDirAutofill = false;
@@ -703,7 +781,7 @@
       const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
       node.Transformations = {
         ...existingTransformations,
-        Transformer: payload.transformations?.Transformer || 'bidspm',
+        Transformer: payload.transformations?.Transformer || 'pybids-transforms-v1',
         Instructions: instructions,
         GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
       };
@@ -1742,17 +1820,70 @@
     const conditionRegressors = hasSingleSelectedTask
       ? normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`)
       : [];
-    const suggestions = Array.from(new Set([
-      ...trialTypeRegressors,
-      ...conditionRegressors,
-      ...(hasSingleSelectedTask ? normalizeStringArray(window.modelEditorInterestRegressors) : []),
-      ...normalizeStringArray(modelObj.X)
-    ]));
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
     const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
 
+    function normalizeFriendlyHrfVariables(){
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') return [];
+      return normalizeStringArray(modelObj.HRF.Variables);
+    }
+
+    function syncFriendlyHrfVariables(){
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') return;
+      const selected = new Set(normalizeStringArray(modelObj.X));
+      const kept = normalizeFriendlyHrfVariables().filter(reg => selected.has(reg));
+      if (!kept.length) {
+        delete modelObj.HRF;
+        return;
+      }
+      modelObj.HRF = {
+        ...modelObj.HRF,
+        Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
+        Variables: kept
+      };
+    }
+
+    function isHrfApplicableRegressor(regressor){
+      return String(regressor || '').trim() !== '1';
+    }
+
+    function isFriendlyRegressorHrfEnabled(regressor){
+      return normalizeFriendlyHrfVariables().includes(String(regressor || '').trim());
+    }
+
+    function toggleFriendlyRegressorHrf(regressor){
+      const normalized = String(regressor || '').trim();
+      if (!normalized) return;
+      if (!isHrfApplicableRegressor(normalized)) {
+        setStatus('Intercept is not HRF-convolved.', 'info');
+        return;
+      }
+
+      const currentlyEnabled = isFriendlyRegressorHrfEnabled(normalized);
+      if (currentlyEnabled) {
+        if (modelObj.HRF && typeof modelObj.HRF === 'object') {
+          const nextVars = normalizeFriendlyHrfVariables().filter(reg => reg !== normalized);
+          if (nextVars.length) {
+            modelObj.HRF.Variables = nextVars;
+          } else {
+            delete modelObj.HRF;
+          }
+        }
+        rerenderModelX(`HRF off for ${normalized}`, 'info');
+        return;
+      }
+
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') {
+        modelObj.HRF = { Model: 'spm', Variables: [] };
+      }
+      modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+      modelObj.HRF.Variables = Array.from(new Set([...normalizeFriendlyHrfVariables(), normalized]));
+      rerenderModelX(`HRF on for ${normalized}`, 'info');
+    }
+
     function rerenderModelX(message, tone = 'info'){
       modelObj.X = normalizeStringArray(modelObj.X);
+      syncFriendlyHrfVariables();
       renderModelStructure();
       renderNodeModelFieldEditor(node, idx);
       setStatus(message, tone);
@@ -1804,31 +1935,6 @@
       if (droppedValue) addModelXRegressor(droppedValue, targetIndex);
     }
 
-    if (suggestions.length) {
-      const quickAddRow = document.createElement('div');
-      quickAddRow.className = 'd-flex flex-wrap gap-2';
-
-      const suggestionSelect = document.createElement('select');
-      suggestionSelect.className = 'form-select form-select-sm';
-      suggestionSelect.style.maxWidth = '360px';
-      suggestions.forEach(reg => {
-        const opt = document.createElement('option');
-        opt.value = reg;
-        opt.textContent = reg;
-        suggestionSelect.appendChild(opt);
-      });
-
-      const addSuggestedBtn = document.createElement('button');
-      addSuggestedBtn.type = 'button';
-      addSuggestedBtn.className = 'btn btn-sm btn-outline-secondary';
-      addSuggestedBtn.textContent = 'Add Selected';
-      addSuggestedBtn.addEventListener('click', ()=> addModelXRegressor(suggestionSelect.value));
-
-      quickAddRow.appendChild(suggestionSelect);
-      quickAddRow.appendChild(addSuggestedBtn);
-      xCard.appendChild(quickAddRow);
-    }
-
     const trialPoolCard = document.createElement('div');
     trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
     const trialPoolTitle = document.createElement('div');
@@ -1839,7 +1945,7 @@
     const trialPoolHint = document.createElement('div');
     trialPoolHint.className = 'small text-muted mb-2';
     trialPoolHint.textContent = hasSingleSelectedTask
-      ? 'Click or drag a badge into the design matrix list.'
+      ? 'Drag or click badges into the Design Matrix space below.'
       : 'Select exactly one task in Input.task to load task-specific trial types.';
     trialPoolCard.appendChild(trialPoolHint);
 
@@ -1905,71 +2011,63 @@
     const nuisanceHint = document.createElement('div');
     nuisanceHint.className = 'small text-muted mb-2';
     nuisanceHint.textContent = confoundColumns.length
-      ? `Detected ${confoundColumns.length} confound columns. Checked items can be added safely.`
+      ? `Detected ${confoundColumns.length} confound columns. Drag or click badges into Design Matrix space.`
       : 'No confounds file detected yet. Set fMRIPrep folder to validate trans/rot columns.';
     nuisanceCard.appendChild(nuisanceHint);
+
+    const nuisanceInModelX = normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor);
+    if (nuisanceInModelX.length) {
+      const warning = document.createElement('div');
+      warning.className = 'alert alert-warning py-1 small mb-2';
+      warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+      nuisanceCard.appendChild(warning);
+
+      const removeNuisanceBtn = document.createElement('button');
+      removeNuisanceBtn.type = 'button';
+      removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+      removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+      removeNuisanceBtn.addEventListener('click', ()=>{
+        modelObj.X = normalizeStringArray(modelObj.X).filter(reg => !isLikelyNuisanceRegressor(reg));
+        rerenderModelX('Removed nuisance regressors from Model.X.', 'info');
+      });
+      nuisanceCard.appendChild(removeNuisanceBtn);
+    }
 
     const nuisanceOptions = Array.from(new Set([
       ...DEFAULT_TRANS_ROT_REGRESSORS,
       'framewise_displacement',
-      ...transRotConfounds,
-      ...normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor)
+      ...transRotConfounds
     ]));
     const nuisanceGrid = document.createElement('div');
-    nuisanceGrid.className = 'modelx-nuisance-grid';
-    const nuisanceCheckboxes = [];
+    nuisanceGrid.className = 'modelx-pool';
 
     nuisanceOptions.forEach(reg => {
-      const wrap = document.createElement('label');
-      wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'form-check-input mt-0';
-
       const presentInConfounds = confoundColumnExists(reg, confoundColumns) || transRotConfounds.includes(reg);
-      const alreadyInModel = modelObj.X.includes(reg);
-      checkbox.checked = alreadyInModel || presentInConfounds;
-      checkbox.disabled = !presentInConfounds && !alreadyInModel;
-
-      const label = document.createElement('span');
-      label.className = 'small';
-      label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
-
-      wrap.appendChild(checkbox);
-      wrap.appendChild(label);
-      nuisanceGrid.appendChild(wrap);
-      nuisanceCheckboxes.push({ checkbox, reg, presentInConfounds, alreadyInModel });
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = presentInConfounds
+        ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+        : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+      badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+      badge.draggable = true;
+      badge.addEventListener('click', ()=> addModelXRegressor(reg));
+      badge.addEventListener('dragstart', (event)=>{
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/x-modelx-regressor', reg);
+        event.dataTransfer.setData('text/plain', reg);
+      });
+      nuisanceGrid.appendChild(badge);
     });
     nuisanceCard.appendChild(nuisanceGrid);
-
-    const nuisanceActions = document.createElement('div');
-    nuisanceActions.className = 'd-flex gap-2 mt-2';
-    const addCheckedNuisanceBtn = document.createElement('button');
-    addCheckedNuisanceBtn.type = 'button';
-    addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
-    addCheckedNuisanceBtn.textContent = 'Add Checked Nuisance';
-    addCheckedNuisanceBtn.addEventListener('click', ()=>{
-      if (!Array.isArray(modelObj.X)) modelObj.X = [];
-      let added = 0;
-      nuisanceCheckboxes.forEach(entry => {
-        if (!entry.checkbox.checked) return;
-        if (modelObj.X.includes(entry.reg)) return;
-        modelObj.X.push(entry.reg);
-        added += 1;
-      });
-      if (!added) {
-        setStatus('No new nuisance regressors were added.', 'info');
-        return;
-      }
-      rerenderModelX(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
-    });
-    nuisanceActions.appendChild(addCheckedNuisanceBtn);
-    nuisanceCard.appendChild(nuisanceActions);
     xCard.appendChild(nuisanceCard);
 
+    const xListTitle = document.createElement('div');
+    xListTitle.className = 'small fw-bold';
+    xListTitle.textContent = 'Design Matrix space';
+    xCard.appendChild(xListTitle);
+
     const xList = document.createElement('div');
-    xList.className = 'd-flex flex-column gap-2 modelx-drop-zone';
+    xList.className = 'modelx-drop-zone';
     xList.addEventListener('dragover', (event)=>{
       event.preventDefault();
       xList.classList.add('is-over');
@@ -1985,63 +2083,90 @@
 
     if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
       const empty = document.createElement('div');
-      empty.className = 'small text-muted';
-      empty.textContent = 'Drop trial-type badges here to build Model.X.';
+      empty.className = 'small text-muted w-100';
+      empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
       xList.appendChild(empty);
     } else {
       modelObj.X.forEach((reg, regIdx) => {
-        const regRow = document.createElement('div');
-        regRow.className = 'modelx-reg-row d-flex align-items-center gap-2';
-        regRow.draggable = true;
-        regRow.dataset.regressorIndex = String(regIdx);
+        const regChip = document.createElement('div');
+        regChip.className = 'modelx-chip';
+        regChip.draggable = true;
+        regChip.title = 'Drag to reorder';
 
-        regRow.addEventListener('dragstart', (event)=>{
+        regChip.addEventListener('dragstart', (event)=>{
           event.dataTransfer.effectAllowed = 'move';
           event.dataTransfer.setData('application/x-modelx-index', String(regIdx));
           event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
+          event.dataTransfer.setData('text/plain', String(reg));
         });
-        regRow.addEventListener('dragover', (event)=>{
+        regChip.addEventListener('dragover', (event)=>{
           event.preventDefault();
-          regRow.classList.add('is-drop-target');
+          regChip.classList.add('is-drop-target');
         });
-        regRow.addEventListener('dragleave', ()=>{
-          regRow.classList.remove('is-drop-target');
+        regChip.addEventListener('dragleave', ()=>{
+          regChip.classList.remove('is-drop-target');
         });
-        regRow.addEventListener('drop', (event)=>{
+        regChip.addEventListener('drop', (event)=>{
           event.preventDefault();
           event.stopPropagation();
-          regRow.classList.remove('is-drop-target');
+          regChip.classList.remove('is-drop-target');
           applyDroppedRegressor(event, regIdx);
         });
+        regChip.addEventListener('dragend', ()=>{
+          regChip.classList.remove('is-drop-target');
+        });
+
+        const main = document.createElement('div');
+        main.className = 'modelx-chip-main';
 
         const handle = document.createElement('span');
-        handle.className = 'modelx-reg-handle';
+        handle.className = 'modelx-chip-handle';
         handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
 
         const regBadge = document.createElement('span');
-        regBadge.className = 'badge text-bg-light border flex-grow-1 text-start';
+        regBadge.className = isLikelyNuisanceRegressor(String(reg))
+          ? 'badge text-bg-secondary modelx-chip-label'
+          : 'badge bg-primary modelx-chip-label';
         regBadge.textContent = String(reg);
 
-        const roleBadge = document.createElement('span');
-        roleBadge.className = isLikelyNuisanceRegressor(String(reg))
-          ? 'badge text-bg-secondary'
-          : 'badge text-bg-success';
-        roleBadge.textContent = isLikelyNuisanceRegressor(String(reg)) ? 'Nuisance' : 'Interest';
+        main.appendChild(handle);
+        main.appendChild(regBadge);
+
+        const actions = document.createElement('div');
+        actions.className = 'modelx-chip-actions';
+
+        const hrfBtn = document.createElement('button');
+        hrfBtn.type = 'button';
+        hrfBtn.className = isFriendlyRegressorHrfEnabled(reg)
+          ? 'btn btn-sm btn-success'
+          : 'btn btn-sm btn-outline-secondary';
+        hrfBtn.textContent = isFriendlyRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
+        if (isHrfApplicableRegressor(reg)) {
+          hrfBtn.addEventListener('click', (event)=>{
+            event.stopPropagation();
+            toggleFriendlyRegressorHrf(reg);
+          });
+        } else {
+          hrfBtn.disabled = true;
+          hrfBtn.textContent = 'HRF n/a';
+        }
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.className = 'btn btn-sm btn-outline-danger';
-        removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
-        removeBtn.addEventListener('click', ()=>{
+        removeBtn.className = 'modelx-chip-remove';
+        removeBtn.title = 'Remove regressor';
+        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeBtn.addEventListener('click', (event)=>{
+          event.stopPropagation();
           modelObj.X.splice(regIdx, 1);
           rerenderModelX('Regressor removed', 'info');
         });
 
-        regRow.appendChild(handle);
-        regRow.appendChild(regBadge);
-        regRow.appendChild(roleBadge);
-        regRow.appendChild(removeBtn);
-        xList.appendChild(regRow);
+        actions.appendChild(hrfBtn);
+        actions.appendChild(removeBtn);
+        regChip.appendChild(main);
+        regChip.appendChild(actions);
+        xList.appendChild(regChip);
       });
     }
     xCard.appendChild(xList);
@@ -2100,16 +2225,18 @@
     hrfHeader.className = 'd-flex justify-content-between align-items-center';
     const hrfTitle = document.createElement('div');
     hrfTitle.className = 'small fw-bold';
-    hrfTitle.textContent = 'HRF (optional)';
+    hrfTitle.textContent = 'HRF defaults (optional)';
     const hrfToggle = document.createElement('input');
     hrfToggle.type = 'checkbox';
     hrfToggle.className = 'form-check-input';
     hrfToggle.checked = Boolean(modelObj.HRF && typeof modelObj.HRF === 'object');
     hrfToggle.addEventListener('change', ()=>{
       if (hrfToggle.checked) {
+        const previous = modelObj.HRF && typeof modelObj.HRF === 'object' ? modelObj.HRF : {};
         modelObj.HRF = {
-          Model: 'spm',
-          Variables: normalizeStringArray(modelObj.X).slice(0, 1)
+          ...previous,
+          Model: String(previous.Model || 'spm').trim() || 'spm',
+          Variables: normalizeFriendlyHrfVariables()
         };
       } else {
         delete modelObj.HRF;
@@ -2121,6 +2248,11 @@
     hrfHeader.appendChild(hrfTitle);
     hrfHeader.appendChild(hrfToggle);
     hrfCard.appendChild(hrfHeader);
+
+    const hrfHint = document.createElement('div');
+    hrfHint.className = 'small text-muted';
+    hrfHint.textContent = 'Use the HRF on/off tag on each Design Matrix regressor to control HRF.Variables.';
+    hrfCard.appendChild(hrfHint);
 
     if (modelObj.HRF && typeof modelObj.HRF === 'object') {
       const hrfModelRow = document.createElement('div');
@@ -2140,25 +2272,6 @@
       hrfModelRow.appendChild(hrfModelLabel);
       hrfModelRow.appendChild(hrfModelInput);
       hrfCard.appendChild(hrfModelRow);
-
-      const hrfVarsRow = document.createElement('div');
-      hrfVarsRow.className = 'd-flex flex-column gap-1';
-      const hrfVarsLabel = document.createElement('label');
-      hrfVarsLabel.className = 'form-label small mb-0';
-      hrfVarsLabel.textContent = 'HRF.Variables (comma-separated)';
-      const hrfVarsInput = document.createElement('input');
-      hrfVarsInput.type = 'text';
-      hrfVarsInput.className = 'form-control form-control-sm';
-      hrfVarsInput.value = normalizeStringArray(modelObj.HRF.Variables).join(', ');
-      hrfVarsInput.addEventListener('change', ()=>{
-        const parsed = normalizeStringArray((hrfVarsInput.value || '').split(','));
-        modelObj.HRF.Variables = parsed;
-        renderModelStructure();
-        setStatus('Node Model.HRF.Variables updated', 'info');
-      });
-      hrfVarsRow.appendChild(hrfVarsLabel);
-      hrfVarsRow.appendChild(hrfVarsInput);
-      hrfCard.appendChild(hrfVarsRow);
     }
 
     wrapper.appendChild(hrfCard);
@@ -2803,6 +2916,10 @@
 (function(){
   const NUISANCE_REGRESSOR_RX = /^(framewise_displacement|trans_[xyz]|rot_[xyz]|a_comp_cor|dvars|std_dvars|non_steady_state_outlier|cosine\d*|white_matter|csf|global_signal)/;
   const REQUIRED_ROOT_KEYS = ['Name', 'BIDSModelVersion', 'Input', 'Nodes'];
+  const previewValidationState = window.__modelPreviewValidationState && typeof window.__modelPreviewValidationState === 'object'
+    ? window.__modelPreviewValidationState
+    : { timer: null, runId: 0 };
+  window.__modelPreviewValidationState = previewValidationState;
   const READONLY_MODEL_PATHS = [
     /^BIDSModelVersion$/,
     /^Input\.task$/,
@@ -2872,7 +2989,7 @@
     else if (typeof value === 'number') { input = document.createElement('input'); input.type='number'; input.step='any'; input.className='form-control form-control-sm font-monospace'; input.value = String(value); }
     else { input = document.createElement('input'); input.type='text'; input.className='form-control form-control-sm font-monospace'; input.value = value===null ? '' : String(value); }
     if (locked) { input.readOnly = true; input.disabled = true; input.classList.add('json-locked'); input.title = 'Locked mandatory field'; }
-    else { input.addEventListener('change', (e)=>{ const current = getByPath(modelEditorDraft, path); const newValue = parsePrimitiveInput(e.target.value, current); if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)){ const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`; e.target.value = current; return; } setByPath(modelEditorDraft, path, newValue); }); }
+    else { input.addEventListener('change', (e)=>{ const current = getByPath(modelEditorDraft, path); const newValue = parsePrimitiveInput(e.target.value, current); if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)){ const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`; e.target.value = current; return; } setByPath(modelEditorDraft, path, newValue); updateModelJsonPreview(); }); }
     inputWrap.appendChild(input); row.appendChild(inputWrap);
     if (locked) { const badge = document.createElement('span'); badge.className='badge text-bg-light border'; badge.textContent='Locked'; row.appendChild(badge); }
     else if (isModelXEntry && isNuisanceRegressor(value)) { const badge = document.createElement('span'); badge.className='badge text-bg-secondary'; badge.textContent='Nuisance'; row.appendChild(badge); }
@@ -3266,7 +3383,7 @@
       addBtn.className = 'btn btn-sm btn-outline-primary';
       addBtn.textContent = 'Initialize Transformations';
       addBtn.addEventListener('click', () => {
-        node.Transformations = { Transformer: 'bidspm', Instructions: [], GeneratedColumns: [] };
+        node.Transformations = { Transformer: 'pybids-transforms-v1', Instructions: [], GeneratedColumns: [] };
         renderModelAccordionEditor();
         setModelEditorStatus('Transformations initialized.', 'info');
       });
@@ -3279,7 +3396,7 @@
     const generatedCount = Array.isArray(node.Transformations.GeneratedColumns) ? node.Transformations.GeneratedColumns.length : 0;
     const summary = document.createElement('div');
     summary.className = 'd-flex flex-wrap gap-2';
-    appendModelMetaPill(summary, node.Transformations.Transformer || 'bidspm', 'success');
+    appendModelMetaPill(summary, node.Transformations.Transformer || 'pybids-transforms-v1', 'success');
     appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
     appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
     panel.body.appendChild(summary);
@@ -3905,46 +4022,89 @@
         const conditionRegressors = hasSingleSelectedTask
           ? normalizeList(eventSamples.condition).map(v => `condition.${v}`)
           : [];
-        const interestRegressors = Array.from(new Set([
-          ...trialTypeRegressors,
-          ...conditionRegressors,
-          ...(hasSingleSelectedTask ? normalizeList(window.modelEditorInterestRegressors) : []),
-          ...currentRegs
-        ]));
         const confoundColumns = normalizeList(window.modelEditorConfoundColumns);
         const transRotConfounds = normalizeList(window.modelEditorTransRotConfounds);
         const defaultTransRot = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
+        const modelPath = basePath.replace(/\.X$/, '');
 
-        const controls = document.createElement('div');
-        controls.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
-
-        const select = document.createElement('select');
-        select.className = 'form-select form-select-sm';
-        select.style.maxWidth = '360px';
-        if (!interestRegressors.length) {
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = 'No event regressors detected';
-          select.appendChild(opt);
-        } else {
-          interestRegressors.forEach(reg => {
-            const opt = document.createElement('option');
-            opt.value = reg;
-            opt.textContent = reg;
-            select.appendChild(opt);
-          });
+        function getModelObject(){
+          const modelObj = getByPath(modelEditorDraft, modelPath);
+          return modelObj && typeof modelObj === 'object' && !Array.isArray(modelObj) ? modelObj : null;
         }
 
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'btn btn-sm btn-outline-success';
-        addBtn.textContent = '+ Add selected';
-        addBtn.disabled = !interestRegressors.length;
-        addBtn.addEventListener('click', ()=> addRegressorToModelX(basePath, select.value));
+        function getHrfVariables(){
+          const modelObj = getModelObject();
+          if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) return [];
+          return normalizeList(modelObj.HRF.Variables);
+        }
 
-        controls.appendChild(select);
-        controls.appendChild(addBtn);
-        listWrap.appendChild(controls);
+        function syncHrfVariablesWithModelX(){
+          const modelObj = getModelObject();
+          if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) return;
+          const selected = new Set(normalizeList(getByPath(modelEditorDraft, basePath)));
+          const kept = getHrfVariables().filter(reg => selected.has(reg));
+          if (!kept.length) {
+            delete modelObj.HRF;
+            return;
+          }
+          modelObj.HRF = {
+            ...modelObj.HRF,
+            Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
+            Variables: kept
+          };
+        }
+
+        function isHrfApplicableRegressor(reg){
+          return String(reg || '').trim() !== '1';
+        }
+
+        function isRegressorHrfEnabled(reg){
+          return getHrfVariables().includes(String(reg || '').trim());
+        }
+
+        function toggleRegressorHrf(reg){
+          const normalized = String(reg || '').trim();
+          if (!normalized) return;
+          if (!isHrfApplicableRegressor(normalized)) {
+            setModelEditorStatus('Intercept is not HRF-convolved.', 'info');
+            return;
+          }
+
+          const modelObj = getModelObject();
+          if (!modelObj) return;
+          const enabled = isRegressorHrfEnabled(normalized);
+          if (enabled) {
+            if (modelObj.HRF && typeof modelObj.HRF === 'object' && !Array.isArray(modelObj.HRF)) {
+              const nextVars = getHrfVariables().filter(entry => entry !== normalized);
+              if (nextVars.length) {
+                modelObj.HRF.Variables = nextVars;
+              } else {
+                delete modelObj.HRF;
+              }
+            }
+            setModelEditorStatus(`HRF off for ${normalized}`, 'info');
+            renderModelAccordionEditor();
+            return;
+          }
+
+          if (!modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) {
+            modelObj.HRF = { Model: 'spm', Variables: [] };
+          }
+          modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+          modelObj.HRF.Variables = Array.from(new Set([...getHrfVariables(), normalized]));
+          setModelEditorStatus(`HRF on for ${normalized}`, 'info');
+          renderModelAccordionEditor();
+        }
+
+        function removeModelXRegressor(index){
+          const arr = getByPath(modelEditorDraft, basePath);
+          if (!Array.isArray(arr)) return;
+          if (index < 0 || index >= arr.length) return;
+          arr.splice(index, 1);
+          syncHrfVariablesWithModelX();
+          setModelEditorStatus('Regressor removed', 'info');
+          renderModelAccordionEditor();
+        }
 
         const trialPoolCard = document.createElement('div');
         trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
@@ -3956,7 +4116,7 @@
         const trialPoolHint = document.createElement('div');
         trialPoolHint.className = 'small text-muted mb-2';
         trialPoolHint.textContent = hasSingleSelectedTask
-          ? 'Click or drag badges into Model.X.'
+          ? 'Drag or click badges into the Design Matrix space below.'
           : 'Select exactly one task in Input.task to load task-specific trial types.';
         trialPoolCard.appendChild(trialPoolHint);
 
@@ -3987,6 +4147,7 @@
         }
         trialPoolCard.appendChild(trialPool);
         listWrap.appendChild(trialPoolCard);
+
 
         if (conditionRegressors.length) {
           const condPool = document.createElement('div');
@@ -4023,72 +4184,68 @@
         const nuisanceHint = document.createElement('div');
         nuisanceHint.className = 'small text-muted mb-2';
         nuisanceHint.textContent = confoundColumns.length
-          ? `Detected ${confoundColumns.length} confound columns.`
+          ? `Detected ${confoundColumns.length} confound columns. Drag or click badges into Design Matrix space.`
           : 'No confounds file detected yet. Set fMRIPrep folder to validate columns.';
         nuisanceCard.appendChild(nuisanceHint);
+
+        const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
+        if (nuisanceInModelX.length) {
+          const warning = document.createElement('div');
+          warning.className = 'alert alert-warning py-1 small mb-2';
+          warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+          nuisanceCard.appendChild(warning);
+
+          const removeNuisanceBtn = document.createElement('button');
+          removeNuisanceBtn.type = 'button';
+          removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+          removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+          removeNuisanceBtn.addEventListener('click', () => {
+            const arr = getByPath(modelEditorDraft, basePath);
+            if (!Array.isArray(arr)) return;
+            const filtered = arr.filter(reg => !isNuisanceRegressor(reg));
+            setByPath(modelEditorDraft, basePath, filtered);
+            syncHrfVariablesWithModelX();
+            setModelEditorStatus('Removed nuisance regressors from Model.X.', 'info');
+            renderModelAccordionEditor();
+          });
+          nuisanceCard.appendChild(removeNuisanceBtn);
+        }
 
         const nuisanceOptions = Array.from(new Set([
           ...defaultTransRot,
           'framewise_displacement',
-          ...transRotConfounds,
-          ...currentRegs.filter(isNuisanceRegressor)
+          ...transRotConfounds
         ]));
         const nuisanceGrid = document.createElement('div');
-        nuisanceGrid.className = 'modelx-nuisance-grid';
-        const nuisanceCheckboxes = [];
+        nuisanceGrid.className = 'modelx-pool';
 
         nuisanceOptions.forEach(reg => {
           const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
-          const alreadySelected = currentRegs.includes(reg);
-
-          const wrap = document.createElement('label');
-          wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.className = 'form-check-input mt-0';
-          checkbox.checked = alreadySelected || presentInConfounds;
-          checkbox.disabled = !presentInConfounds && !alreadySelected;
-
-          const label = document.createElement('span');
-          label.className = 'small';
-          label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
-
-          wrap.appendChild(checkbox);
-          wrap.appendChild(label);
-          nuisanceGrid.appendChild(wrap);
-          nuisanceCheckboxes.push({ checkbox, reg });
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = presentInConfounds
+            ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+            : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+          badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+          badge.draggable = true;
+          badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+          badge.addEventListener('dragstart', (event)=>{
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+            event.dataTransfer.setData('text/plain', reg);
+          });
+          nuisanceGrid.appendChild(badge);
         });
         nuisanceCard.appendChild(nuisanceGrid);
-
-        const nuisanceActions = document.createElement('div');
-        nuisanceActions.className = 'd-flex gap-2 mt-2';
-        const addCheckedNuisanceBtn = document.createElement('button');
-        addCheckedNuisanceBtn.type = 'button';
-        addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
-        addCheckedNuisanceBtn.textContent = 'Add checked nuisance';
-        addCheckedNuisanceBtn.addEventListener('click', ()=>{
-          const arr = getByPath(modelEditorDraft, basePath);
-          if (!Array.isArray(arr)) return;
-          let added = 0;
-          nuisanceCheckboxes.forEach(entry => {
-            if (!entry.checkbox.checked) return;
-            if (arr.includes(entry.reg)) return;
-            arr.push(entry.reg);
-            added += 1;
-          });
-          if (!added) {
-            setModelEditorStatus('No new nuisance regressors were added.', 'info');
-            return;
-          }
-          setModelEditorStatus(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
-          renderModelAccordionEditor();
-        });
-        nuisanceActions.appendChild(addCheckedNuisanceBtn);
-        nuisanceCard.appendChild(nuisanceActions);
         listWrap.appendChild(nuisanceCard);
 
+        const dropZoneTitle = document.createElement('div');
+        dropZoneTitle.className = 'small fw-bold mb-1';
+        dropZoneTitle.textContent = 'Design Matrix space';
+        listWrap.appendChild(dropZoneTitle);
+
         const dropZone = document.createElement('div');
-        dropZone.className = 'd-flex flex-column gap-2 modelx-drop-zone mb-2';
+        dropZone.className = 'modelx-drop-zone mb-2';
         const onDropAtIndex = (event, index) => {
           const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
           const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
@@ -4115,60 +4272,85 @@
 
         if (!currentRegs.length) {
           const empty = document.createElement('div');
-          empty.className = 'small text-muted';
-          empty.textContent = 'Drop trial-type badges here to build Model.X.';
+          empty.className = 'small text-muted w-100';
+          empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
           dropZone.appendChild(empty);
         } else {
           currentRegs.forEach((reg, idx) => {
-            const row = document.createElement('div');
-            row.className = 'modelx-reg-row d-flex align-items-center gap-2';
-            row.draggable = true;
+            const chip = document.createElement('div');
+            chip.className = 'modelx-chip';
+            chip.draggable = true;
+            chip.title = 'Drag to reorder';
 
-            row.addEventListener('dragstart', (event)=>{
+            chip.addEventListener('dragstart', (event)=>{
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('application/x-modelx-index', String(idx));
               event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
               event.dataTransfer.setData('text/plain', String(reg));
             });
-            row.addEventListener('dragover', (event)=>{
+            chip.addEventListener('dragover', (event)=>{
               event.preventDefault();
-              row.classList.add('is-drop-target');
+              chip.classList.add('is-drop-target');
             });
-            row.addEventListener('dragleave', ()=> row.classList.remove('is-drop-target'));
-            row.addEventListener('drop', (event)=>{
+            chip.addEventListener('dragleave', ()=> chip.classList.remove('is-drop-target'));
+            chip.addEventListener('drop', (event)=>{
               event.preventDefault();
               event.stopPropagation();
-              row.classList.remove('is-drop-target');
+              chip.classList.remove('is-drop-target');
               onDropAtIndex(event, idx);
             });
+            chip.addEventListener('dragend', ()=> chip.classList.remove('is-drop-target'));
+
+            const main = document.createElement('div');
+            main.className = 'modelx-chip-main';
 
             const handle = document.createElement('span');
-            handle.className = 'modelx-reg-handle';
+            handle.className = 'modelx-chip-handle';
             handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
 
             const label = document.createElement('span');
-            label.className = 'badge text-bg-light border flex-grow-1 text-start';
+            label.className = isNuisanceRegressor(reg)
+              ? 'badge text-bg-secondary modelx-chip-label'
+              : 'badge bg-primary modelx-chip-label';
             label.textContent = reg;
 
-            const role = document.createElement('span');
-            role.className = isNuisanceRegressor(reg) ? 'badge text-bg-secondary' : 'badge text-bg-success';
-            role.textContent = isNuisanceRegressor(reg) ? 'Nuisance' : 'Interest';
+            main.appendChild(handle);
+            main.appendChild(label);
+
+            const actions = document.createElement('div');
+            actions.className = 'modelx-chip-actions';
+
+            const hrfBtn = document.createElement('button');
+            hrfBtn.type = 'button';
+            hrfBtn.className = isRegressorHrfEnabled(reg)
+              ? 'btn btn-sm btn-success'
+              : 'btn btn-sm btn-outline-secondary';
+            hrfBtn.textContent = isRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
+            if (isHrfApplicableRegressor(reg)) {
+              hrfBtn.addEventListener('click', (event)=>{
+                event.stopPropagation();
+                toggleRegressorHrf(reg);
+              });
+            } else {
+              hrfBtn.disabled = true;
+              hrfBtn.textContent = 'HRF n/a';
+            }
 
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
-            delBtn.className = 'btn btn-sm btn-outline-danger';
+            delBtn.className = 'modelx-chip-remove';
             delBtn.title = 'Remove regressor';
             delBtn.innerHTML = '<i class="fas fa-times"></i>';
-            delBtn.addEventListener('click', ()=>{
-              removeArrayItem(`${basePath}[${idx}]`);
-              renderModelAccordionEditor();
+            delBtn.addEventListener('click', (event)=>{
+              event.stopPropagation();
+              removeModelXRegressor(idx);
             });
 
-            row.appendChild(handle);
-            row.appendChild(label);
-            row.appendChild(role);
-            row.appendChild(delBtn);
-            dropZone.appendChild(row);
+            actions.appendChild(hrfBtn);
+            actions.appendChild(delBtn);
+            chip.appendChild(main);
+            chip.appendChild(actions);
+            dropZone.appendChild(chip);
           });
         }
         listWrap.appendChild(dropZone);
@@ -4217,7 +4399,33 @@
 
       if (/\.GroupBy$/.test(basePath)) { const controls = document.createElement('div'); controls.className='d-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white'; const current = Array.isArray(node)?node:[]; const remaining = (modelEditorGroupByOptions||['subject']).filter(opt=>!current.includes(opt)); const select = document.createElement('select'); select.className='form-select form-select-sm'; select.style.maxWidth='260px'; const sourceOptions = remaining.length ? remaining : (modelEditorGroupByOptions || ['subject']); sourceOptions.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; select.appendChild(opt); }); controls.appendChild(select); const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-sm btn-outline-success'; addBtn.textContent='+ Add'; addBtn.disabled = remaining.length===0; addBtn.addEventListener('click', ()=>{ const value = select.value; const arr = getByPath(modelEditorDraft, basePath); if (!Array.isArray(arr)) return; if (arr.includes(value)) { const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`; return; } arr.push(value); renderModelAccordionEditor(); }); controls.appendChild(addBtn); listWrap.appendChild(controls); }
       node.forEach((item, idx) => { const itemPath = `${basePath}[${idx}]`; const locked = inheritedLocked || isReadonlyModelPath(itemPath); let displayLabel; if (item !== null && typeof item === 'object') displayLabel = item.Name || `#${idx+1}`; else displayLabel = item !== null && item !== '' ? String(item) : `#${idx+1}`; if (item !== null && typeof item === 'object') createBranchAccordion(listWrap, displayLabel, itemPath, item, locked, depth); else createPrimitiveRow(listWrap, `#${idx+1}`, item, itemPath, locked, depth); }); container.appendChild(listWrap); return; }
-    if (node !== null && typeof node === 'object') { const objWrap = document.createElement('div'); objWrap.className='accordion'; Object.entries(node).forEach(([key, value])=>{ if (/^Nodes\[\d+\]$/.test(basePath) && (key==='Level' || key==='Name')) return; const path = basePath ? `${basePath}.${key}` : key; const locked = inheritedLocked || isReadonlyModelPath(path); if (value !== null && typeof value === 'object') createBranchAccordion(objWrap, key, path, value, locked, depth); else createPrimitiveRow(objWrap, key, value, path, locked, depth); }); container.appendChild(objWrap); return; }
+    if (node !== null && typeof node === 'object') {
+      const objWrap = document.createElement('div');
+      objWrap.className='accordion';
+      let suppressedHrfVariables = false;
+
+      Object.entries(node).forEach(([key, value])=>{
+        if (/^Nodes\[\d+\]$/.test(basePath) && (key==='Level' || key==='Name')) return;
+        if (/\.Model\.HRF$/.test(basePath) && key === 'Variables') {
+          suppressedHrfVariables = true;
+          return;
+        }
+        const path = basePath ? `${basePath}.${key}` : key;
+        const locked = inheritedLocked || isReadonlyModelPath(path);
+        if (value !== null && typeof value === 'object') createBranchAccordion(objWrap, key, path, value, locked, depth);
+        else createPrimitiveRow(objWrap, key, value, path, locked, depth);
+      });
+
+      if (suppressedHrfVariables) {
+        const hint = document.createElement('div');
+        hint.className = 'small text-muted border rounded p-2 mb-2 bg-light-subtle';
+        hint.textContent = 'HRF.Variables are controlled by the HRF on/off tags in Design Matrix space.';
+        objWrap.appendChild(hint);
+      }
+
+      container.appendChild(objWrap);
+      return;
+    }
     createPrimitiveRow(container, basePath||'value', node, basePath||'value', inheritedLocked, depth);
   }
 
@@ -4231,10 +4439,73 @@
     if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
       preview.textContent = 'Load a model to see the live JSON preview.';
       preview.classList.add('model-editor-preview-empty');
+      setModelPreviewValidationState('idle', 'Load a model to run live schema validation.');
       return;
     }
     preview.textContent = JSON.stringify(modelEditorDraft, null, 2);
     preview.classList.remove('model-editor-preview-empty');
+    scheduleModelPreviewValidation();
+  }
+
+  function setModelPreviewValidationState(state, message) {
+    const badge = document.getElementById('model-preview-validation-badge');
+    const text = document.getElementById('model-preview-validation-text');
+    if (!badge || !text) return;
+
+    const badgeMap = {
+      idle: 'bg-secondary',
+      checking: 'bg-info text-dark',
+      valid: 'bg-success',
+      invalid: 'bg-danger',
+      error: 'bg-warning text-dark'
+    };
+
+    badge.className = `badge ${badgeMap[state] || 'bg-secondary'}`;
+    badge.textContent = state;
+    text.textContent = message;
+  }
+
+  function scheduleModelPreviewValidation() {
+    if (previewValidationState.timer) clearTimeout(previewValidationState.timer);
+    previewValidationState.timer = setTimeout(() => {
+      validateModelPreviewLive();
+    }, 250);
+  }
+
+  async function validateModelPreviewLive() {
+    const runId = ++previewValidationState.runId;
+    if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
+      setModelPreviewValidationState('idle', 'Load a model to run live schema validation.');
+      return;
+    }
+
+    const snapshot = structuredClone(modelEditorDraft);
+    setModelPreviewValidationState('checking', 'Validating live JSON preview...');
+
+    try {
+      const response = await fetch('/validate_model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: snapshot })
+      });
+
+      const result = await response.json();
+      if (runId !== previewValidationState.runId) return;
+
+      if (result.valid) {
+        if (result.warning) {
+          setModelPreviewValidationState('valid', `Valid model (${result.warning})`);
+        } else {
+          setModelPreviewValidationState('valid', 'Valid BIDS Stats Model.');
+        }
+      } else {
+        const msg = result.error ? String(result.error) : 'Schema validation failed.';
+        setModelPreviewValidationState('invalid', msg);
+      }
+    } catch (err) {
+      if (runId !== previewValidationState.runId) return;
+      setModelPreviewValidationState('error', `Validation request failed: ${err.message}`);
+    }
   }
 
   function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); modelEditorOpenPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); updateModelJsonPreview(); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);

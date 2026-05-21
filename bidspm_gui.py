@@ -73,6 +73,7 @@ BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
 PYTHON_EXE = os.path.abspath(".bidspm/bin/python")
 LOG_DIR = Path("logs")
 DEFAULT_PORT = 5100
+APP_ROOT = Path(__file__).resolve().parent
 
 # Store running executions (with periodic cleanup)
 executions: Dict[str, Dict[str, Any]] = {}

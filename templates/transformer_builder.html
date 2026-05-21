@@ -247,6 +247,19 @@
   .col-picker-item:hover { background: #e6f7ff; color: #1890ff; }
 
   #scan-status { display: none; }
+  #live-model-validation .validation-details {
+    margin: 6px 0 0 16px;
+    padding: 0;
+  }
+  #live-model-validation .validation-details li {
+    margin-bottom: 2px;
+  }
+  #live-model-validation .validation-path {
+    font-family: 'Courier New', monospace;
+    font-size: 0.69rem;
+    color: #6c757d;
+    word-break: break-all;
+  }
 
   /* ---- Events file preview ---- */
   #events-preview-card { display: block; }
@@ -356,6 +369,20 @@
 <div class="card shadow-sm mb-3">
   <div class="card-body py-2">
     <div class="row g-2 align-items-end">
+      <div class="col-md-10">
+        <label class="form-label form-label-sm fw-bold mb-1">Target model file (Apply to Model)</label>
+        <select id="select-target-model" class="form-select form-select-sm">
+          <option value="">— loading model candidates —</option>
+        </select>
+        <div class="small text-muted mt-1">Choose which model file receives this transformer pipeline.</div>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-outline-secondary btn-sm w-100" id="btn-refresh-models">
+          <i class="fas fa-sync-alt me-1"></i>Refresh Models
+        </button>
+      </div>
+    </div>
+    <div class="row g-2 align-items-end">
       <div class="col-md-5">
         <label class="form-label form-label-sm fw-bold mb-1">BIDS Folder</label>
         <div class="input-group input-group-sm">
@@ -399,6 +426,15 @@
       </div>
     </div>
     <div id="scan-status" class="alert py-1 small mt-2 mb-0"></div>
+    <div id="live-model-validation" class="alert alert-secondary py-2 small mt-2 mb-0" role="status">
+      <div class="d-flex align-items-center justify-content-between gap-2">
+        <strong>Live Model Preview</strong>
+        <span class="badge bg-secondary" id="live-validation-badge">idle</span>
+      </div>
+      <div id="live-validation-message" class="mt-1 text-muted">Select a target model to validate transformer output on the fly.</div>
+      <ul id="live-validation-details" class="validation-details"></ul>
+      <div id="live-validation-model-path" class="validation-path mt-1"></div>
+    </div>
   </div>
 </div>
 
@@ -528,7 +564,7 @@
       </div>
       <div class="preview-label">Generated JSON</div>
       <div class="json-output" id="json-output">{
-  "Transformer": "bidspm",
+  "Transformer": "pybids-transforms-v1",
   "Instructions": []
 }</div>
     </div>
@@ -543,6 +579,7 @@
   'use strict';
 
   const CURRENT_PROJECT_ID = '{{ current_project_id or "" }}';
+  const PROJECT_MODELS_FILE = {{ (current_project.config.models_file | replace('"', '') if current_project and current_project.config.models_file else '') | tojson }};
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
 
@@ -558,6 +595,9 @@
   let evBrowseModal = null;
   let evBrowsingPath = '/';
   let evSelectedFile = '';
+  const modelFileCache = new Map();
+  let liveValidationTimer = null;
+  let liveValidationRunId = 0;
   const launchContext = readTransformerLaunchContext();
 
   if (!document.getElementById('input-bids-dir').value.trim() && launchContext?.bidsDir) {
@@ -569,6 +609,14 @@
   document.getElementById('btn-browse-bids').addEventListener('click', openBidsBrowser);
   document.getElementById('btn-browse-events').addEventListener('click', openEventsBrowser);
   document.getElementById('btn-apply-model').addEventListener('click', applyToModel);
+  document.getElementById('btn-refresh-models').addEventListener('click', async () => {
+    modelFileCache.clear();
+    await refreshModelCandidates();
+    scheduleLiveModelValidation();
+  });
+  document.getElementById('select-target-model').addEventListener('change', () => {
+    scheduleLiveModelValidation();
+  });
   document.getElementById('btn-clear-events-file').addEventListener('click', () => {
     document.getElementById('input-events-file').value = '';
     evSelectedFile = '';
@@ -628,6 +676,7 @@
   // Auto-scan if project BIDS folder is pre-filled
   const presetBids = document.getElementById('input-bids-dir').value.trim();
   if (presetBids) scanEvents(false);
+  initializeModelSelection();
 
   function readTransformerLaunchContext() {
     try {
@@ -646,15 +695,15 @@
       if (op) instructions.push(op);
     });
     return {
-      Transformer: 'bidspm',
+      Transformer: 'pybids-transforms-v1',
       Instructions: instructions
     };
   }
 
   function applyToModel() {
-    const targetModelPath = String(launchContext?.modelPath || '').trim();
+    const targetModelPath = getSelectedModelPath();
     if (!targetModelPath) {
-      setStatus('No target model selected. Open Transformer Builder from Analysis after setting MODELS_FILE.', 'warning');
+      setStatus('No target model selected. Choose a model in Target model file first.', 'warning');
       return;
     }
 
@@ -685,6 +734,125 @@
     window.location.href = `${baseUrl}?path=${encodeURIComponent(targetModelPath)}`;
   }
 
+  async function initializeModelSelection() {
+    await refreshModelCandidates();
+    scheduleLiveModelValidation();
+  }
+
+  async function refreshModelCandidates() {
+    const refreshBtn = document.getElementById('btn-refresh-models');
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading';
+
+    try {
+      const currentSelected = getSelectedModelPath();
+      const contextModel = normalizeFsPath(launchContext?.modelPath || '');
+      const projectModel = normalizeFsPath(PROJECT_MODELS_FILE || '');
+      const seededPaths = [currentSelected, contextModel, projectModel].filter(Boolean);
+
+      const dirs = new Set();
+      seededPaths.forEach(path => {
+        const parent = getParentPath(path);
+        if (parent) dirs.add(parent);
+      });
+
+      const foundPaths = new Set(seededPaths);
+      for (const dir of dirs) {
+        const files = await browseJsonFiles(dir);
+        files.forEach(path => foundPaths.add(path));
+      }
+
+      const preferredPath = currentSelected || contextModel || projectModel || '';
+      setTargetModelOptions(Array.from(foundPaths), preferredPath);
+    } catch (err) {
+      setStatus('Could not refresh model candidates: ' + err.message, 'warning');
+      setTargetModelOptions([], getSelectedModelPath());
+    } finally {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refresh Models';
+    }
+  }
+
+  async function browseJsonFiles(path) {
+    const normalizedPath = normalizeFsPath(path);
+    if (!normalizedPath) return [];
+
+    const res = await fetch(`/browse?path=${encodeURIComponent(normalizedPath)}&extensions=.json`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Browse failed for ${normalizedPath}`);
+    if (data.error) throw new Error(data.error);
+
+    return (data.items || [])
+      .filter(item => item.type === 'file' && String(item.name || '').toLowerCase().endsWith('.json'))
+      .map(item => normalizeFsPath(item.path))
+      .filter(Boolean);
+  }
+
+  function setTargetModelOptions(paths, preferredPath = '') {
+    const select = document.getElementById('select-target-model');
+    const normalizedPreferred = normalizeFsPath(preferredPath);
+    const deduped = Array.from(new Set((paths || []).map(normalizeFsPath).filter(Boolean)));
+    if (normalizedPreferred && !deduped.includes(normalizedPreferred)) {
+      deduped.unshift(normalizedPreferred);
+    }
+
+    deduped.sort((a, b) => {
+      const byName = getFileName(a).localeCompare(getFileName(b));
+      return byName !== 0 ? byName : a.localeCompare(b);
+    });
+
+    if (!deduped.length) {
+      select.innerHTML = '<option value="">— no model file found —</option>';
+      return;
+    }
+
+    select.innerHTML = deduped.map(path => {
+      const fileName = escHtml(getFileName(path));
+      const fullPath = escHtml(path);
+      return `<option value="${escAttr(path)}">${fileName} — ${fullPath}</option>`;
+    }).join('');
+
+    const selectedPath = normalizeFsPath(select.value);
+    const nextSelected = selectedPath && deduped.includes(selectedPath)
+      ? selectedPath
+      : deduped[0];
+    select.value = nextSelected;
+  }
+
+  function getSelectedModelPath() {
+    const select = document.getElementById('select-target-model');
+    return normalizeFsPath(select?.value || '');
+  }
+
+  function normalizeFsPath(path) {
+    return String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
+  }
+
+  function getParentPath(path) {
+    const normalized = normalizeFsPath(path);
+    if (!normalized) return '';
+    const idx = normalized.lastIndexOf('/');
+    if (idx <= 0) return '/';
+    return normalized.slice(0, idx);
+  }
+
+  function getFileName(path) {
+    const normalized = normalizeFsPath(path);
+    if (!normalized) return '';
+    const idx = normalized.lastIndexOf('/');
+    return idx >= 0 ? normalized.slice(idx + 1) : normalized;
+  }
+
+  function normalizeStringArray(value) {
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      return value.split(',').map(item => item.trim()).filter(Boolean);
+    }
+    return [];
+  }
+
   // ================================================================
   // STATUS
   // ================================================================
@@ -694,6 +862,133 @@
     el.className = `alert alert-${type} py-1 small mt-2 mb-0`;
     el.style.display = 'block';
     if (type === 'success') setTimeout(() => { el.style.display = 'none'; }, 4000);
+  }
+
+  function setLiveValidationState(kind, message, details = [], modelPath = '') {
+    const badge = document.getElementById('live-validation-badge');
+    const messageEl = document.getElementById('live-validation-message');
+    const detailsEl = document.getElementById('live-validation-details');
+    const pathEl = document.getElementById('live-validation-model-path');
+
+    const badgeMap = {
+      idle: 'bg-secondary',
+      checking: 'bg-info',
+      success: 'bg-success',
+      warning: 'bg-warning text-dark',
+      danger: 'bg-danger'
+    };
+
+    badge.className = `badge ${badgeMap[kind] || 'bg-secondary'}`;
+    badge.textContent = kind;
+    messageEl.textContent = message;
+    detailsEl.innerHTML = (details || []).map(item => `<li>${escHtml(item)}</li>`).join('');
+    pathEl.textContent = modelPath ? `model: ${modelPath}` : '';
+  }
+
+  function scheduleLiveModelValidation() {
+    if (liveValidationTimer) {
+      clearTimeout(liveValidationTimer);
+    }
+    liveValidationTimer = setTimeout(() => {
+      runLiveModelValidation();
+    }, 250);
+  }
+
+  async function loadModelForValidation(modelPath) {
+    const normalizedPath = normalizeFsPath(modelPath);
+    if (!normalizedPath) throw new Error('No model path selected');
+
+    if (!modelFileCache.has(normalizedPath)) {
+      const res = await fetch(`/file_content?path=${encodeURIComponent(normalizedPath)}`);
+      if (!res.ok) throw new Error('Selected model file could not be loaded');
+      const text = await res.text();
+      modelFileCache.set(normalizedPath, JSON.parse(text));
+    }
+
+    return structuredClone(modelFileCache.get(normalizedPath));
+  }
+
+  function buildLiveModelPreview(baseModel) {
+    const model = structuredClone(baseModel || {});
+    const transformations = getTransformerPayload();
+    const generatedColumns = normalizeStringArray(getGeneratedColumns().map(col => col.name));
+    const runNodes = Array.isArray(model.Nodes)
+      ? model.Nodes.filter(node => node && typeof node === 'object' && String(node.Level || '').trim() === 'Run')
+      : [];
+
+    if (!runNodes.length) {
+      return {
+        model,
+        runNodeCount: 0,
+        generatedColumns,
+        warning: 'Model has no Run-level nodes. Transformer output has nowhere to attach.'
+      };
+    }
+
+    const instructions = Array.isArray(transformations.Instructions)
+      ? structuredClone(transformations.Instructions)
+      : [];
+
+    runNodes.forEach(node => {
+      const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+        ? node.Transformations
+        : {};
+      const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
+      node.Transformations = {
+        ...existingTransformations,
+        Transformer: transformations.Transformer || 'pybids-transforms-v1',
+        Instructions: instructions,
+        GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
+      };
+    });
+
+    return {
+      model,
+      runNodeCount: runNodes.length,
+      generatedColumns,
+      warning: ''
+    };
+  }
+
+  async function runLiveModelValidation() {
+    const runId = ++liveValidationRunId;
+    const modelPath = getSelectedModelPath();
+    if (!modelPath) {
+      setLiveValidationState('idle', 'Select a target model to validate transformer output on the fly.');
+      return;
+    }
+
+    setLiveValidationState('checking', 'Validating transformed model preview…', [], modelPath);
+
+    try {
+      const baseModel = await loadModelForValidation(modelPath);
+      if (runId !== liveValidationRunId) return;
+
+      const preview = buildLiveModelPreview(baseModel);
+      const response = await fetch('/validate_model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: preview.model })
+      });
+      const result = await response.json();
+      if (runId !== liveValidationRunId) return;
+
+      const details = [];
+      details.push(`Run-level nodes affected: ${preview.runNodeCount}`);
+      details.push(`Generated columns: ${preview.generatedColumns.length}`);
+      if (preview.warning) details.push(preview.warning);
+
+      if (result.valid) {
+        if (result.warning) details.push(result.warning);
+        setLiveValidationState('success', 'Schema validation passed for the live transformed model preview.', details, modelPath);
+      } else {
+        if (result.error) details.push(result.error);
+        setLiveValidationState('danger', 'Schema validation failed for the live transformed model preview.', details, modelPath);
+      }
+    } catch (err) {
+      if (runId !== liveValidationRunId) return;
+      setLiveValidationState('danger', `Could not validate preview: ${err.message}`, [], modelPath);
+    }
   }
 
   // ================================================================
@@ -1583,6 +1878,7 @@
     updateRegressorPreview(instructions);
     refreshAllValuePills();
     renderColumnsPool();
+    scheduleLiveModelValidation();
   }
 
   // ================================================================
