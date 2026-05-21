@@ -752,6 +752,9 @@
   window.modelEditorTransRotConfounds = Array.isArray(window.modelEditorTransRotConfounds)
     ? window.modelEditorTransRotConfounds
     : [];
+  window.modelEditorParticipantsInfo = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+    ? window.modelEditorParticipantsInfo
+    : { columns: [], categorical_columns: [], numeric_columns: [], sample_values: {}, numeric_stats: {}, sample_status: 'missing-dir' };
   window.modelEditorGroupByOptions = (Array.isArray(window.modelEditorGroupByOptions) && window.modelEditorGroupByOptions.length)
     ? window.modelEditorGroupByOptions
     : ['subject'];
@@ -1112,6 +1115,7 @@
         subject: []
       };
       modelEditorBidsTasks = [];
+      window.modelEditorGroupByOptions = ['subject'];
       window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       window.modelEditorBidsTasks = modelEditorBidsTasks;
       return;
@@ -1138,6 +1142,9 @@
         subject: normalizedValues.subject
       };
       modelEditorBidsTasks = [...normalizedValues.task];
+      window.modelEditorGroupByOptions = (Array.isArray(payload?.groupby_options) && payload.groupby_options.length)
+        ? payload.groupby_options
+        : ['subject'];
       window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       window.modelEditorBidsTasks = modelEditorBidsTasks;
     } catch (e) {
@@ -1149,6 +1156,7 @@
         subject: []
       };
       modelEditorBidsTasks = [];
+      window.modelEditorGroupByOptions = ['subject'];
       window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       window.modelEditorBidsTasks = modelEditorBidsTasks;
     }
@@ -1240,6 +1248,17 @@
     return MODEL_NUISANCE_RX.test(value.trim());
   }
 
+  function emptyParticipantsInfo(){
+    return {
+      columns: [],
+      categorical_columns: [],
+      numeric_columns: [],
+      sample_values: {},
+      numeric_stats: {},
+      sample_status: 'missing-dir'
+    };
+  }
+
   function confoundColumnExists(columnName, confoundColumns){
     const normalized = String(columnName || '').trim();
     if (!normalized) return false;
@@ -1256,6 +1275,7 @@
     if (!bidsDir) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
         window.modelEditorTransRotConfounds = [];
@@ -1278,6 +1298,7 @@
       if (data.error) {
         window.modelEditorInterestRegressors = [];
         window.modelEditorEventSamples = { trial_type: [], condition: [] };
+        window.modelEditorParticipantsInfo = emptyParticipantsInfo();
         if (!prepDir) {
           window.modelEditorConfoundColumns = [];
           window.modelEditorTransRotConfounds = [];
@@ -1300,9 +1321,13 @@
       const confounds = data?.dataset?.confounds || {};
       window.modelEditorConfoundColumns = normalizeStringArray(confounds.columns);
       window.modelEditorTransRotConfounds = normalizeStringArray(confounds.trans_rot_present);
+      window.modelEditorParticipantsInfo = (data?.dataset?.participants && typeof data.dataset.participants === 'object')
+        ? data.dataset.participants
+        : emptyParticipantsInfo();
     } catch (e) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
         window.modelEditorTransRotConfounds = [];
@@ -1889,8 +1914,465 @@
     return node.Model;
   }
 
+  function renderDatasetNodeModelFieldEditor(node, idx, modelObj){
+    const wrapper = document.createElement('div');
+    wrapper.className = 'd-flex flex-column gap-3';
+
+    const participantsInfo = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+      ? window.modelEditorParticipantsInfo
+      : emptyParticipantsInfo();
+    const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+    const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+    const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+      ? participantsInfo.sample_values
+      : {};
+    modelObj.X = normalizeStringArray(modelObj.X);
+    if (!modelObj.X.length) modelObj.X = ['1'];
+
+    function rerender(message, tone = 'info'){
+      renderModelStructure();
+      renderNodeModelFieldEditor(node, idx);
+      setStatus(message, tone);
+    }
+
+    function slugifyToken(value){
+      return String(value || '')
+        .trim()
+        .replace(/\s+/g, '_')
+        .replace(/[^A-Za-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase();
+    }
+
+    function createFieldRow(labelText){
+      const row = document.createElement('div');
+      row.className = 'd-flex flex-column gap-1';
+      const label = document.createElement('label');
+      label.className = 'form-label small mb-0';
+      label.textContent = labelText;
+      row.appendChild(label);
+      return { row, label };
+    }
+
+    function setModelX(values){
+      const normalized = normalizeStringArray(values);
+      modelObj.X = normalized.length ? normalized : ['1'];
+    }
+
+    const help = document.createElement('div');
+    help.className = 'small text-muted';
+    help.innerHTML = 'Dataset-level nodes use <strong>participants.tsv</strong> variables for grouping and covariates. Apply a preset, then refine <strong>Contrasts</strong> and <strong>Edges.Filter.contrast</strong> if you need a more specific second-level model.';
+    wrapper.appendChild(help);
+
+    const typeRow = createFieldRow('Model Type');
+    const typeInput = document.createElement('input');
+    typeInput.type = 'text';
+    typeInput.className = 'form-control form-control-sm';
+    typeInput.value = modelObj.Type || 'glm';
+    typeInput.addEventListener('change', ()=>{
+      modelObj.Type = (typeInput.value || '').trim() || 'glm';
+      renderModelStructure();
+      setStatus('Node Model.Type updated', 'info');
+    });
+    typeRow.row.appendChild(typeInput);
+    wrapper.appendChild(typeRow.row);
+
+    const presetCard = document.createElement('div');
+    presetCard.className = 'border rounded p-3 bg-white d-flex flex-column gap-2';
+    const presetTitle = document.createElement('div');
+    presetTitle.className = 'small fw-bold';
+    presetTitle.textContent = 'Second-Level Presets';
+    presetCard.appendChild(presetTitle);
+
+    const presetHint = document.createElement('div');
+    presetHint.className = 'small text-muted';
+    presetHint.textContent = 'Presets update Node.Model, Node.GroupBy, and dataset-level contrasts together.';
+    presetCard.appendChild(presetHint);
+
+    const presetRow = createFieldRow('Preset');
+    const presetSelect = document.createElement('select');
+    presetSelect.className = 'form-select form-select-sm';
+    [
+      ['one_sample_all', 'one sample t-test: all subjects'],
+      ['one_sample_by_group', 'one sample t-test: one model per group'],
+      ['two_sample_groups', '2 samples t-test: compare 2 groups'],
+      ['one_way_anova', 'one way ANOVA: compare several groups'],
+      ['linear_regression', 'linear regression: numeric covariate']
+    ].forEach(([value, label])=>{
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      presetSelect.appendChild(opt);
+    });
+    presetRow.row.appendChild(presetSelect);
+    presetCard.appendChild(presetRow.row);
+
+    const defaultGroupVar = node.GroupBy.find(value => categoricalColumns.includes(String(value)))
+      || modelObj.X.find(value => categoricalColumns.includes(String(value)))
+      || categoricalColumns[0]
+      || '';
+    const defaultCovariate = modelObj.X.find(value => numericColumns.includes(String(value)))
+      || numericColumns[0]
+      || '';
+
+    const groupVarRow = createFieldRow('Grouping Variable');
+    const groupVarSelect = document.createElement('select');
+    groupVarSelect.className = 'form-select form-select-sm';
+    const emptyGroupVar = document.createElement('option');
+    emptyGroupVar.value = '';
+    emptyGroupVar.textContent = categoricalColumns.length ? 'Select participant column' : 'No categorical participant columns found';
+    groupVarSelect.appendChild(emptyGroupVar);
+    categoricalColumns.forEach(column => {
+      const opt = document.createElement('option');
+      opt.value = column;
+      opt.textContent = column;
+      groupVarSelect.appendChild(opt);
+    });
+    groupVarSelect.value = defaultGroupVar;
+    groupVarRow.row.appendChild(groupVarSelect);
+    presetCard.appendChild(groupVarRow.row);
+
+    const covariateRow = createFieldRow('Numeric Covariate');
+    const covariateSelect = document.createElement('select');
+    covariateSelect.className = 'form-select form-select-sm';
+    const emptyCovariate = document.createElement('option');
+    emptyCovariate.value = '';
+    emptyCovariate.textContent = numericColumns.length ? 'Select numeric participant column' : 'No numeric participant columns found';
+    covariateSelect.appendChild(emptyCovariate);
+    numericColumns.forEach(column => {
+      const opt = document.createElement('option');
+      opt.value = column;
+      opt.textContent = column;
+      covariateSelect.appendChild(opt);
+    });
+    covariateSelect.value = defaultCovariate;
+    covariateRow.row.appendChild(covariateSelect);
+    presetCard.appendChild(covariateRow.row);
+
+    const groupALevelRow = createFieldRow('Group A');
+    const groupALevelSelect = document.createElement('select');
+    groupALevelSelect.className = 'form-select form-select-sm';
+    groupALevelRow.row.appendChild(groupALevelSelect);
+    presetCard.appendChild(groupALevelRow.row);
+
+    const groupBLevelRow = createFieldRow('Group B');
+    const groupBLevelSelect = document.createElement('select');
+    groupBLevelSelect.className = 'form-select form-select-sm';
+    groupBLevelRow.row.appendChild(groupBLevelSelect);
+    presetCard.appendChild(groupBLevelRow.row);
+
+    const valuesHint = document.createElement('div');
+    valuesHint.className = 'small text-muted';
+    presetCard.appendChild(valuesHint);
+
+    function updateGroupLevelOptions(){
+      const groupVariable = groupVarSelect.value;
+      const levels = normalizeStringArray(sampleValues[groupVariable]);
+      groupALevelSelect.innerHTML = '';
+      groupBLevelSelect.innerHTML = '';
+
+      if (!levels.length) {
+        const emptyA = document.createElement('option');
+        emptyA.value = '';
+        emptyA.textContent = 'No sample values found';
+        const emptyB = emptyA.cloneNode(true);
+        groupALevelSelect.appendChild(emptyA);
+        groupBLevelSelect.appendChild(emptyB);
+        valuesHint.textContent = groupVariable
+          ? `No sample values were found for ${groupVariable}.`
+          : 'Pick a grouping variable to inspect its observed values.';
+        return;
+      }
+
+      levels.forEach(level => {
+        const optionA = document.createElement('option');
+        optionA.value = level;
+        optionA.textContent = level;
+        groupALevelSelect.appendChild(optionA);
+
+        const optionB = document.createElement('option');
+        optionB.value = level;
+        optionB.textContent = level;
+        groupBLevelSelect.appendChild(optionB);
+      });
+
+      groupALevelSelect.value = levels[0] || '';
+      groupBLevelSelect.value = levels[1] || levels[0] || '';
+      valuesHint.textContent = `${groupVariable} values: ${levels.join(', ')}`;
+    }
+
+    function updatePresetVisibility(){
+      const preset = presetSelect.value;
+      const needsGrouping = ['one_sample_by_group', 'two_sample_groups', 'one_way_anova'].includes(preset);
+      const needsTwoGroups = preset === 'two_sample_groups';
+      const needsCovariate = preset === 'linear_regression';
+      groupVarRow.row.style.display = needsGrouping ? 'flex' : 'none';
+      groupALevelRow.row.style.display = needsTwoGroups ? 'flex' : 'none';
+      groupBLevelRow.row.style.display = needsTwoGroups ? 'flex' : 'none';
+      covariateRow.row.style.display = needsCovariate ? 'flex' : 'none';
+      valuesHint.style.display = needsGrouping ? 'block' : 'none';
+      if (needsGrouping) updateGroupLevelOptions();
+    }
+
+    groupVarSelect.addEventListener('change', updateGroupLevelOptions);
+    presetSelect.addEventListener('change', updatePresetVisibility);
+    updatePresetVisibility();
+
+    const applyPresetBtn = document.createElement('button');
+    applyPresetBtn.type = 'button';
+    applyPresetBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
+    applyPresetBtn.textContent = 'Apply Preset';
+    applyPresetBtn.addEventListener('click', ()=>{
+      const preset = presetSelect.value;
+      const groupVariable = groupVarSelect.value.trim();
+      const covariate = covariateSelect.value.trim();
+      const groupA = groupALevelSelect.value.trim();
+      const groupB = groupBLevelSelect.value.trim();
+      const allLevels = normalizeStringArray(sampleValues[groupVariable]);
+
+      if (preset === 'one_sample_all') {
+        node.GroupBy = ['contrast'];
+        setModelX(['1']);
+        node.Description = 'one sample t-test: averaging across all subjects';
+        node.DummyContrasts = { Test: 't' };
+        node.Contrasts = [];
+        rerender('Applied all-subject one-sample dataset preset.', 'success');
+        return;
+      }
+
+      if (preset === 'one_sample_by_group') {
+        if (!groupVariable) {
+          setStatus('Select a categorical participants.tsv column first.', 'warning');
+          return;
+        }
+        node.GroupBy = ['contrast', groupVariable];
+        setModelX(['1']);
+        node.Description = `one sample t-test for each ${groupVariable} group`;
+        node.DummyContrasts = { Test: 't' };
+        node.Contrasts = [];
+        rerender(`Applied one-sample-by-group preset using ${groupVariable}.`, 'success');
+        return;
+      }
+
+      if (preset === 'two_sample_groups') {
+        if (!groupVariable) {
+          setStatus('Select a categorical participants.tsv column first.', 'warning');
+          return;
+        }
+        if (!groupA || !groupB || groupA === groupB) {
+          setStatus('Choose two distinct groups for the comparison.', 'warning');
+          return;
+        }
+        node.GroupBy = ['contrast'];
+        setModelX(['1', groupVariable]);
+        node.Description = `2 sample t-test between ${groupVariable} groups`;
+        delete node.DummyContrasts;
+        node.Contrasts = [{
+          Name: `${slugifyToken(groupA)}_gt_${slugifyToken(groupB)}`,
+          ConditionList: [`${groupVariable}.${groupA}`, `${groupVariable}.${groupB}`],
+          Weights: [1, -1],
+          Test: 't'
+        }];
+        rerender(`Applied two-sample group comparison using ${groupVariable}.`, 'success');
+        return;
+      }
+
+      if (preset === 'one_way_anova') {
+        if (!groupVariable) {
+          setStatus('Select a categorical participants.tsv column first.', 'warning');
+          return;
+        }
+        if (allLevels.length < 2) {
+          setStatus(`Need at least two observed values in ${groupVariable} for a group comparison.`, 'warning');
+          return;
+        }
+        node.GroupBy = ['contrast'];
+        setModelX(['1', groupVariable]);
+        node.Description = `one way ANOVA across ${groupVariable}`;
+        delete node.DummyContrasts;
+        node.Contrasts = [{
+          Name: `average_across_${slugifyToken(groupVariable) || 'groups'}`,
+          ConditionList: allLevels.map(level => `${groupVariable}.${level}`),
+          Weights: allLevels.map(() => 1),
+          Test: 't'
+        }];
+        rerender(`Applied one-way ANOVA scaffold using ${groupVariable}.`, 'success');
+        return;
+      }
+
+      if (preset === 'linear_regression') {
+        if (!covariate) {
+          setStatus('Select a numeric participants.tsv column first.', 'warning');
+          return;
+        }
+        node.GroupBy = ['contrast'];
+        setModelX(['1', covariate]);
+        node.Description = `linear regression with ${covariate}`;
+        delete node.DummyContrasts;
+        node.Contrasts = [
+          {
+            Name: `${slugifyToken(covariate)}_positive`,
+            ConditionList: [covariate],
+            Weights: [1],
+            Test: 't'
+          },
+          {
+            Name: `${slugifyToken(covariate)}_negative`,
+            ConditionList: [covariate],
+            Weights: [-1],
+            Test: 't'
+          }
+        ];
+        rerender(`Applied linear regression preset using ${covariate}.`, 'success');
+      }
+    });
+    presetCard.appendChild(applyPresetBtn);
+    wrapper.appendChild(presetCard);
+
+    const participantsCard = document.createElement('div');
+    participantsCard.className = 'border rounded p-3 bg-light-subtle d-flex flex-column gap-2';
+    const participantsTitle = document.createElement('div');
+    participantsTitle.className = 'small fw-bold';
+    participantsTitle.textContent = 'participants.tsv Variables';
+    participantsCard.appendChild(participantsTitle);
+
+    const participantsHint = document.createElement('div');
+    participantsHint.className = 'small text-muted';
+    participantsHint.textContent = participantsInfo.sample_status === 'present'
+      ? 'Categorical variables are useful for GroupBy. Numeric variables can be used as regressors in Model.X for covariate analyses.'
+      : 'No participants.tsv metadata is available yet. Group comparisons and covariate models depend on participants.tsv columns.';
+    participantsCard.appendChild(participantsHint);
+
+    const categoricalText = document.createElement('div');
+    categoricalText.className = 'small';
+    categoricalText.innerHTML = `<strong>Categorical:</strong> ${categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected'}`;
+    participantsCard.appendChild(categoricalText);
+
+    const numericText = document.createElement('div');
+    numericText.className = 'small';
+    numericText.innerHTML = `<strong>Numeric:</strong> ${numericColumns.length ? numericColumns.join(', ') : 'none detected'}`;
+    participantsCard.appendChild(numericText);
+    wrapper.appendChild(participantsCard);
+
+    const xCard = document.createElement('div');
+    xCard.className = 'border rounded p-3 bg-white d-flex flex-column gap-2';
+    const xTitle = document.createElement('div');
+    xTitle.className = 'small fw-bold';
+    xTitle.textContent = 'Design Matrix Regressors (Model.X)';
+    xCard.appendChild(xTitle);
+
+    const xHint = document.createElement('div');
+    xHint.className = 'small text-muted';
+    xHint.textContent = 'Use comma-separated values. Keep 1 as the intercept and add participant columns like group or age for second-level designs.';
+    xCard.appendChild(xHint);
+
+    const xInput = document.createElement('input');
+    xInput.type = 'text';
+    xInput.className = 'form-control form-control-sm';
+    xInput.value = modelObj.X.join(', ');
+    xCard.appendChild(xInput);
+
+    const xActions = document.createElement('div');
+    xActions.className = 'd-flex flex-wrap gap-2';
+
+    const applyXBtn = document.createElement('button');
+    applyXBtn.type = 'button';
+    applyXBtn.className = 'btn btn-sm btn-outline-secondary';
+    applyXBtn.textContent = 'Apply Model.X';
+    applyXBtn.addEventListener('click', ()=>{
+      setModelX(xInput.value.split(',').map(token => token.trim()).filter(Boolean));
+      rerender('Dataset Model.X updated.', 'info');
+    });
+    xActions.appendChild(applyXBtn);
+
+    const addInterceptBtn = document.createElement('button');
+    addInterceptBtn.type = 'button';
+    addInterceptBtn.className = 'btn btn-sm btn-outline-secondary';
+    addInterceptBtn.textContent = 'Add Intercept (1)';
+    addInterceptBtn.addEventListener('click', ()=>{
+      if (!modelObj.X.includes('1')) modelObj.X.unshift('1');
+      rerender('Intercept added to dataset Model.X.', 'info');
+    });
+    xActions.appendChild(addInterceptBtn);
+
+    const addGroupVariableBtn = document.createElement('button');
+    addGroupVariableBtn.type = 'button';
+    addGroupVariableBtn.className = 'btn btn-sm btn-outline-secondary';
+    addGroupVariableBtn.textContent = 'Add Group Variable';
+    addGroupVariableBtn.addEventListener('click', ()=>{
+      const groupVariable = groupVarSelect.value.trim();
+      if (!groupVariable) {
+        setStatus('Select a grouping variable first.', 'warning');
+        return;
+      }
+      if (!modelObj.X.includes(groupVariable)) modelObj.X.push(groupVariable);
+      rerender(`Added ${groupVariable} to dataset Model.X.`, 'info');
+    });
+    xActions.appendChild(addGroupVariableBtn);
+
+    const addCovariateBtn = document.createElement('button');
+    addCovariateBtn.type = 'button';
+    addCovariateBtn.className = 'btn btn-sm btn-outline-secondary';
+    addCovariateBtn.textContent = 'Add Numeric Covariate';
+    addCovariateBtn.addEventListener('click', ()=>{
+      const covariate = covariateSelect.value.trim();
+      if (!covariate) {
+        setStatus('Select a numeric covariate first.', 'warning');
+        return;
+      }
+      if (!modelObj.X.includes(covariate)) modelObj.X.push(covariate);
+      rerender(`Added ${covariate} to dataset Model.X.`, 'info');
+    });
+    xActions.appendChild(addCovariateBtn);
+    xCard.appendChild(xActions);
+    wrapper.appendChild(xCard);
+
+    const advanced = document.createElement('details');
+    advanced.className = 'border rounded p-2';
+    const advJsonSummary = document.createElement('summary');
+    advJsonSummary.className = 'small fw-bold';
+    advJsonSummary.textContent = 'Advanced JSON (Model only)';
+    advanced.appendChild(advJsonSummary);
+
+    const advHelp = document.createElement('div');
+    advHelp.className = 'small text-muted mt-2';
+    advHelp.textContent = 'Use this for uncommon dataset-level designs or to refine what the preset created.';
+    advanced.appendChild(advHelp);
+
+    const advTa = document.createElement('textarea');
+    advTa.className = 'form-control font-monospace mt-2';
+    advTa.style.minHeight = '180px';
+    advTa.value = JSON.stringify(modelObj, null, 2);
+    advanced.appendChild(advTa);
+
+    const advApply = document.createElement('button');
+    advApply.type = 'button';
+    advApply.className = 'btn btn-sm btn-outline-secondary mt-2';
+    advApply.textContent = 'Apply Advanced JSON';
+    advApply.addEventListener('click', ()=>{
+      try {
+        const parsed = JSON.parse(advTa.value);
+        node.Model = parsed;
+        ensureNodeModelObject(node, idx);
+        renderModelStructure();
+        renderNodeModelFieldEditor(node, idx);
+        setStatus('Node Model updated from advanced JSON', 'info');
+      } catch (e) {
+        setStatus('Invalid JSON for Node.Model: ' + e.message, 'danger');
+      }
+    });
+    advanced.appendChild(advApply);
+    wrapper.appendChild(advanced);
+
+    return wrapper;
+  }
+
   function renderNodeModelFieldEditor(node, idx){
     const modelObj = ensureNodeModelObject(node, idx);
+    if (String(node?.Level || '').trim() === 'Dataset') {
+      friendlyEditor.appendChild(renderDatasetNodeModelFieldEditor(node, idx, modelObj));
+      return;
+    }
     const wrapper = document.createElement('div');
     wrapper.className = 'd-flex flex-column gap-3';
 
@@ -2556,7 +3038,11 @@
       help.textContent = 'Reserved options: run, session, subject, contrast. Additional metadata fields are also allowed.';
       wrapper.appendChild(help);
 
-      const allOptions = Array.from(new Set([...GROUPBY_RESERVED_OPTIONS, ...node.GroupBy]));
+      const allOptions = Array.from(new Set([
+        ...GROUPBY_RESERVED_OPTIONS,
+        ...normalizeStringArray(window.modelEditorGroupByOptions),
+        ...node.GroupBy
+      ]));
       const select = document.createElement('select');
       select.className = 'form-select';
       select.multiple = true;

@@ -119,6 +119,9 @@ def parse_arguments():
                        help='Path to container configuration file')
     parser.add_argument('-m', '--model', '--model-file',
                        help='Path to BIDS-StatsModel JSON file')
+    parser.add_argument('--node-name', '--node_name',
+                       dest='node_name',
+                       help='Name of the BIDS model node to run')
     
     # Actions
     parser.add_argument('--action', nargs='+', 
@@ -324,6 +327,7 @@ def main():
         config_file=config_file,
         container_config_file=args.container,
         model_file=args.model,
+        node_name=args.node_name,
         pilot=args.pilot,
         skip_validation=args.skip_modelvalidation,
         local=args.local,

@@ -609,6 +609,117 @@ def _discover_confound_info(
     }
 
 
+def _discover_participants_info(bids_dir: Path, max_values_per_column: int = 20) -> Dict[str, Any]:
+    """Collect participants.tsv metadata for dataset-level grouping and covariates."""
+    default_payload = {
+        "columns": [],
+        "categorical_columns": [],
+        "numeric_columns": [],
+        "sample_values": {},
+        "numeric_stats": {},
+        "sample_status": "missing-dir"
+    }
+
+    if not bids_dir.exists() or not bids_dir.is_dir():
+        return default_payload
+
+    participants_file = bids_dir / 'participants.tsv'
+    if not participants_file.is_file():
+        return {
+            **default_payload,
+            "sample_status": "missing-file"
+        }
+
+    def _normalize_token(value: Any) -> str:
+        text = str(value or '').strip()
+        if not text or text.lower() in {'n/a', 'na', 'nan', 'null'}:
+            return ''
+        return text
+
+    def _parse_number(value: str) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _sort_key(token: str):
+        if token.isdigit():
+            return (0, int(token), token)
+        parsed = _parse_number(token)
+        if parsed is not None:
+            return (1, parsed, token)
+        return (2, token.lower(), token)
+
+    try:
+        with open(participants_file, 'r', encoding='utf-8') as stream:
+            reader = csv.DictReader(stream, delimiter='\t')
+            if not reader.fieldnames:
+                return {
+                    **default_payload,
+                    "sample_status": "invalid-header"
+                }
+
+            columns = [
+                name.strip() for name in reader.fieldnames
+                if name and name.strip() and name.strip() != 'participant_id'
+            ]
+            if not columns:
+                return {
+                    **default_payload,
+                    "sample_status": "empty"
+                }
+
+            value_sets = {column: set() for column in columns}
+            numeric_flags = {column: True for column in columns}
+
+            for row in reader:
+                for column in columns:
+                    normalized = _normalize_token(row.get(column, ''))
+                    if not normalized:
+                        continue
+                    value_sets[column].add(normalized)
+                    if _parse_number(normalized) is None:
+                        numeric_flags[column] = False
+
+        categorical_columns = []
+        numeric_columns = []
+        sample_values = {}
+        numeric_stats = {}
+
+        for column in columns:
+            sorted_values = sorted(value_sets[column], key=_sort_key)
+            sample_values[column] = sorted_values[:max_values_per_column]
+
+            if sorted_values and numeric_flags[column]:
+                numeric_columns.append(column)
+                numeric_values = [
+                    number for number in (_parse_number(value) for value in sorted_values)
+                    if number is not None
+                ]
+                if numeric_values:
+                    numeric_stats[column] = {
+                        "min": min(numeric_values),
+                        "max": max(numeric_values),
+                        "count": len(numeric_values)
+                    }
+            else:
+                categorical_columns.append(column)
+
+        return {
+            "columns": columns,
+            "categorical_columns": categorical_columns,
+            "numeric_columns": numeric_columns,
+            "sample_values": sample_values,
+            "numeric_stats": numeric_stats,
+            "sample_status": "present"
+        }
+    except Exception:
+        return {
+            **default_payload,
+            "sample_status": "error"
+        }
+
+
 def _build_model_warnings(model_hints: Dict[str, Any], bids_tasks: List[str], event_info: Dict[str, Any]) -> List[str]:
     """Generate typo-oriented warnings from model and dataset context."""
     warnings = []
@@ -1177,6 +1288,8 @@ def run_bidspm():
         command.extend(['--container', data.get('container')])
     if data.get('model'):
         command.extend(['--model', data.get('model')])
+    if data.get('node_name'):
+        command.extend(['--node-name', data.get('node_name')])
     if data.get('pilot'):
         command.append('--pilot')
     if data.get('skip_validation'):
@@ -1353,7 +1466,8 @@ def api_bids_entities():
         return jsonify({
             "entities": [],
             "groupby_options": ["subject"],
-            "values": {"task": [], "run": [], "session": [], "subject": []}
+            "values": {"task": [], "run": [], "session": [], "subject": []},
+            "participants": _discover_participants_info(Path(''))
         })
 
     bids_path = Path(path)
@@ -1475,15 +1589,21 @@ def api_bids_entities():
 
     value_lists = {k: _sort_tokens(v) for k, v in values.items()}
 
+    participants_info = _discover_participants_info(bids_path)
+
     groupby_options = ['subject']
     for candidate in ['run', 'session', 'task']:
         if candidate in entities:
+            groupby_options.append(candidate)
+    for candidate in participants_info.get('categorical_columns', []):
+        if candidate not in groupby_options:
             groupby_options.append(candidate)
 
     return jsonify({
         "entities": sorted(list(entities)),
         "groupby_options": groupby_options,
         "values": value_lists,
+        "participants": participants_info,
         "scanned_files": scanned
     })
 
@@ -1816,9 +1936,18 @@ def api_model_hints():
         "trans_rot_present": [],
         "sample_status": "missing-dir"
     }
+    participants_info = {
+        "columns": [],
+        "categorical_columns": [],
+        "numeric_columns": [],
+        "sample_values": {},
+        "numeric_stats": {},
+        "sample_status": "missing-dir"
+    }
     if bids_dir and os.path.isdir(bids_dir):
         bids_tasks = discover_tasks(Path(bids_dir))
         event_info = _discover_event_info(Path(bids_dir), model_hints.get('model_tasks', []))
+        participants_info = _discover_participants_info(Path(bids_dir))
         if event_info.get('files_scanned', 0) == 0:
             return jsonify({
                 "error": "No BIDS *_events.tsv files found in BIDS folder. Event files are required."
@@ -1834,7 +1963,8 @@ def api_model_hints():
         "dataset": {
             "bids_tasks": bids_tasks,
             "events": event_info,
-            "confounds": confound_info
+            "confounds": confound_info,
+            "participants": participants_info
         },
         "warnings": warnings,
         "ok": len(warnings) == 0

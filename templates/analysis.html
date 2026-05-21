@@ -247,6 +247,12 @@
                                 <label class="form-label small fw-bold text-muted text-uppercase mb-1">Selected Subjects (comma separated, empty for all)</label>
                                 <input type="text" class="form-control form-control-sm dynamic-input" data-key="SUBJECTS" id="input-SUBJECTS" placeholder="e.g. 01, 02, 03" value="{{ project.config.subjects | join(', ') if project and project.config.subjects else '' }}">
                             </div>
+                            <div class="mt-3">
+                                <label class="form-label small fw-bold text-muted text-uppercase mb-1">Execution Node Override</label>
+                                <input type="text" class="form-control form-control-sm dynamic-input" data-key="NODE_NAME" id="input-NODE_NAME" list="model-node-options" placeholder="optional, e.g. run_level or dataset_level" value="{{ project.config.node_name if project and project.config.node_name else '' }}">
+                                <datalist id="model-node-options"></datalist>
+                                <div class="small text-muted mt-1" id="model-node-help">Optional: pass bidspm <code>node_name</code> to run only one node from the current model.</div>
+                            </div>
                         </div>
                     </div>
 
@@ -3026,6 +3032,7 @@
         return {
             actions: actions,
             model: document.getElementById('model').value,
+            node_name: document.getElementById('input-NODE_NAME')?.value?.trim() || '',
             pilot: document.getElementById('pilot').checked,
             skip_validation: document.getElementById('skip_validation').checked,
             local: containerType === 'local',
@@ -3051,6 +3058,9 @@
             const el = document.getElementById(f);
             if (el && data[f]) el.value = data[f];
         });
+
+        const nodeInput = document.getElementById('input-NODE_NAME');
+        if (nodeInput && data.node_name !== undefined) nodeInput.value = data.node_name || '';
         
         const switches = ['pilot', 'skip_validation'];
         switches.forEach(s => {
@@ -3105,6 +3115,7 @@
                 DERIVATIVES_DIR: config.DERIVATIVES_DIR || '',
                 FMRIPREP_DIR: config.FMRIPREP_DIR || '',
                 MODELS_FILE: config.MODELS_FILE || '',
+                NODE_NAME: config.NODE_NAME || '',
                 SPACE: config.SPACE || 'MNI152NLin2009cAsym',
                 FWHM: config.FWHM || 6,
                 TASKS: config.TASKS || [],
@@ -3133,6 +3144,7 @@
             fmriprep_folder: unifiedStudyConfig.FMRIPREP_DIR || '',
             output_folder: unifiedStudyConfig.WD || '',
             models_file: unifiedStudyConfig.MODELS_FILE || '',
+            node_name: unifiedStudyConfig.NODE_NAME || '',
             space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
             fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
             tasks: unifiedStudyConfig.TASKS || [],
@@ -3238,6 +3250,7 @@
         const modelInput = document.getElementById('input-MODELS_FILE');
         if (modelInput) modelInput.addEventListener('change', async () => {
             await openModelEditor({ scrollIntoView: false, showStatus: false });
+            await refreshExecutionNodeOptions();
             refreshModelTasks();
         });
 
@@ -3357,6 +3370,40 @@
             const modelVal = document.getElementById('input-MODELS_FILE')?.value;
             if (modelVal) refreshModelTasks();
         } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
+    }
+
+    async function refreshExecutionNodeOptions(modelContent = null) {
+        const modelPath = document.getElementById('input-MODELS_FILE')?.value?.trim() || '';
+        const nodeList = document.getElementById('model-node-options');
+        const nodeHelp = document.getElementById('model-node-help');
+        if (!nodeList || !nodeHelp) return;
+
+        nodeList.innerHTML = '';
+        if (!modelPath) {
+            nodeHelp.innerHTML = 'Optional: pass bidspm <code>node_name</code> to run only one node from the current model.';
+            return;
+        }
+
+        try {
+            const content = modelContent || await getModelContentFromPath(modelPath);
+            const nodeNames = Array.isArray(content?.Nodes)
+                ? content.Nodes
+                    .map(node => (node && typeof node === 'object' ? String(node.Name || '').trim() : ''))
+                    .filter(Boolean)
+                : [];
+
+            Array.from(new Set(nodeNames)).forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                nodeList.appendChild(option);
+            });
+
+            nodeHelp.innerHTML = nodeNames.length
+                ? `Optional: run only one model node. Available nodes: ${nodeNames.join(', ')}.`
+                : 'Optional: this model has no named nodes yet.';
+        } catch (e) {
+            nodeHelp.innerHTML = 'Optional: load a valid model file to get node suggestions.';
+        }
     }
 
     async function getModelContentFromPath(modelPath) {
@@ -3713,6 +3760,7 @@
             if (pathLabel) pathLabel.textContent = modelPath;
             modelEditorOpenPaths = new Set();
             renderModelAccordionEditor();
+            refreshExecutionNodeOptions(modelContent);
 
             // Run heavier hint scans in the background to keep first paint fast.
             Promise.allSettled([
@@ -3815,6 +3863,7 @@
             }
 
             status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model saved.</div>';
+            refreshExecutionNodeOptions(modelEditorDraft);
 
             // Refresh task and hint state in the background (no await)
             refreshModelTasks();
