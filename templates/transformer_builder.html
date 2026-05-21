@@ -581,6 +581,11 @@
     currentPreviewFile = null;
     scanEvents(false);
   });
+  document.getElementById('select-task').addEventListener('change', () => {
+    // Changing task filter should force a fresh random file within that task.
+    currentPreviewFile = null;
+    scanEvents(false);
+  });
   document.getElementById('btn-copy-json').addEventListener('click', copyJSON);
   document.getElementById('preview-row-limit').addEventListener('change', () => scanEvents(false));
   document.getElementById('preview-hide-na-cols').addEventListener('change', () => {
@@ -697,6 +702,8 @@
   async function scanEvents(forceNewPreview = false) {
     const bidsDir = document.getElementById('input-bids-dir').value.trim();
     const eventsFile = document.getElementById('input-events-file').value.trim();
+    const taskSel = document.getElementById('select-task');
+    const selectedTask = taskSel.value.trim();
     if (!bidsDir && !eventsFile) { setStatus('Enter a BIDS directory or select a single events.tsv file.', 'warning'); return; }
     setStatus('Scanning events files…', 'info');
     try {
@@ -704,6 +711,7 @@
         preview_max_rows: getPreviewMaxRows()
       };
       if (bidsDir) payload.bids_dir = bidsDir;
+      if (selectedTask) payload.task_filter = selectedTask;
       if (eventsFile) {
         payload.events_file = eventsFile;
         // A selected single file must dominate preview selection.
@@ -728,15 +736,21 @@
       renderColumnsPool();
       renderEventsPreview(data);
 
-      const taskSel = document.getElementById('select-task');
       taskSel.innerHTML = '<option value="">All tasks</option>';
       (data.tasks || []).forEach(t => {
         const o = document.createElement('option');
         o.value = t; o.textContent = t;
         taskSel.appendChild(o);
       });
+      const effectiveTask = String(data.selected_task || selectedTask || '').trim();
+      if (effectiveTask && (data.tasks || []).includes(effectiveTask)) {
+        taskSel.value = effectiveTask;
+      }
 
-      setStatus(`Found ${availableColumns.length} columns across ${(data.tasks || []).length} task(s) — ${data.events_files} events file(s).`, 'success');
+      const scopeText = effectiveTask
+        ? `for task "${effectiveTask}"`
+        : `across ${(data.tasks || []).length} task(s)`;
+      setStatus(`Found ${availableColumns.length} columns ${scopeText} — ${data.events_files} events file(s).`, 'success');
     } catch (err) {
       setStatus('Error: ' + err.message, 'danger');
     }

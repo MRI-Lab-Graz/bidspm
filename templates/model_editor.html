@@ -199,12 +199,287 @@
     color: #98b3d8;
     font-size: 0.82rem;
   }
+  #model-editor-shell {
+    background: linear-gradient(165deg, #f5fbff 0%, #f9fcff 100%);
+    border: 1px solid #d6e9fb;
+    border-radius: 1rem;
+    padding: 0.9rem;
+  }
+  #model-editor-help { color: #3d617f; }
+  .model-editor-summary {
+    background: linear-gradient(180deg, #ecf7ff 0%, #f5fbff 100%);
+    border: 1px solid #cbe3f9;
+    border-radius: 0.95rem;
+    padding: 0.95rem;
+  }
+  .model-editor-readiness-row { flex-wrap: wrap; }
+  .model-editor-progress {
+    height: 10px;
+    background: #d9e8f6;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .model-editor-progress-bar {
+    background: linear-gradient(90deg, #40a9ff 0%, #1890ff 100%);
+    transition: width 0.2s ease;
+  }
+  .model-editor-score-ring {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: conic-gradient(#1890ff calc(var(--model-progress, 0) * 1%), #e7f3ff 0);
+    display: grid;
+    place-items: center;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .model-editor-score-ring::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: #ffffff;
+  }
+  .model-editor-score-ring-label {
+    position: relative;
+    z-index: 1;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #195488;
+  }
+  .completeness-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .completeness-dot.full { background: #389e0d; }
+  .completeness-dot.partial { background: #fa8c16; }
+  .completeness-dot.empty { background: #a8bfd6; }
+  .model-section-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.3rem 0;
+  }
+  .model-section-summary-row .section-label {
+    min-width: 150px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: #385978;
+  }
+  .model-meta-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+  .model-meta-pill {
+    border-radius: 999px;
+    font-size: 0.73rem;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 0.2rem 0.55rem;
+    white-space: nowrap;
+  }
+  .model-meta-pill-success { background: #f6ffed; color: #237804; }
+  .model-meta-pill-warning { background: #fff7e6; color: #ad6800; }
+  .model-meta-pill-neutral { background: #edf5ff; color: #1d4d8f; }
+  .model-section-card {
+    background: #ffffff;
+    border: 1px solid #d7e7f7;
+    border-radius: 1rem;
+    box-shadow: 0 10px 24px rgba(17, 77, 143, 0.08);
+    margin-bottom: 0.9rem;
+    overflow: hidden;
+  }
+  .model-section-card .accordion-header { margin: 0; }
+  .model-section-toggle {
+    align-items: flex-start;
+    background: linear-gradient(90deg, #eef7ff 0%, #f8fbff 100%);
+    border: 0;
+    box-shadow: none;
+    color: #1f4e7a;
+    display: flex;
+    gap: 0.7rem;
+    padding: 0.9rem 1rem;
+  }
+  .model-section-toggle:not(.collapsed) {
+    background: linear-gradient(90deg, #e5f2ff 0%, #f1f8ff 100%);
+    color: #163f66;
+  }
+  .model-section-title {
+    align-items: flex-start;
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.7rem;
+    min-width: 0;
+  }
+  .model-section-icon {
+    align-items: center;
+    background: #e6f7ff;
+    border: 1px solid #bae7ff;
+    border-radius: 0.7rem;
+    color: #096dd9;
+    display: inline-flex;
+    flex-shrink: 0;
+    height: 2rem;
+    justify-content: center;
+    width: 2rem;
+  }
+  .model-section-heading {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.14rem;
+    min-width: 0;
+  }
+  .model-section-label {
+    color: #18456f;
+    display: block;
+    font-size: 0.98rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .model-section-subtitle {
+    color: #4f6f8d;
+    display: block;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    max-width: 38ch;
+  }
+  .model-section-meta {
+    align-items: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-end;
+    margin-left: auto;
+    margin-right: 0.75rem;
+    min-width: 0;
+  }
+  .model-section-body {
+    background: #f7fbff;
+    border-top: 1px solid #e3eff9;
+    padding: 1rem;
+  }
+  .model-inline-note {
+    background: #ffffff;
+    border: 1px dashed #bdd6ec;
+    border-radius: 0.85rem;
+    color: #4d6b88;
+    font-size: 0.82rem;
+    margin-top: 0.2rem;
+    padding: 0.75rem 0.85rem;
+  }
+  .model-task-picker {
+    background: #ffffff;
+    border: 1px solid #d7e7f7;
+    border-radius: 0.9rem;
+    margin-bottom: 0.85rem;
+    padding: 0.85rem;
+  }
+  .model-task-picker-title {
+    color: #195488;
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+  }
+  .model-task-pill {
+    border: 1px solid #bcd8f4;
+    background: #edf5ff;
+    color: #1d4d8f;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+  }
+  .model-task-pill.active {
+    background: #e6f7ff;
+    border-color: #91d5ff;
+    color: #096dd9;
+  }
+  .model-task-pill input { margin-right: 0.3rem; }
+  .json-row {
+    align-items: flex-start;
+    background: #ffffff;
+    border: 1px solid #dce8f4;
+    border-radius: 0.85rem;
+    margin-bottom: 0.55rem;
+    padding: 0.7rem 0.8rem;
+  }
+  .json-row:last-child { margin-bottom: 0; }
+  .json-key { min-width: 170px; font-size: 0.82rem; color: #2d4660; }
+  .json-path { font-size: 0.7rem; color: #6c757d; }
+  .json-locked { background: #f1f3f5 !important; }
+  .json-inline-value { flex: 1; min-width: 240px; }
+  .json-add-btn { white-space: nowrap; }
+  .json-row-actions { min-width: 84px; display: flex; justify-content: flex-end; gap: 0.3rem; }
+  #model-editor-accordion .accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+  #model-editor-accordion .accordion-item {
+    background: #ffffff;
+    border: 1px solid #dce8f4;
+    border-radius: 0.9rem;
+    box-shadow: none;
+    overflow: hidden;
+  }
+  #model-editor-accordion .accordion-button {
+    background: #ffffff;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    color: #2d4660;
+    gap: 0.75rem;
+    padding: 0.8rem 0.95rem;
+  }
+  #model-editor-accordion .accordion-button:not(.collapsed) {
+    background: #f2f8ff;
+    color: #194b7a;
+    box-shadow: none;
+  }
+  #model-editor-accordion .accordion-body {
+    background: #fbfdff;
+    border-top: 1px solid #e8f1fa;
+    padding: 0.9rem;
+  }
+  .json-row-depth-0 { border-left: 4px solid #d8e6f5; }
+  .json-row-depth-1 { border-left: 4px solid #dcecd7; }
+  .json-row-depth-2 { border-left: 4px solid #f0dfc9; }
+  .json-row-depth-3 { border-left: 4px solid #e3daf4; }
+  .json-row-depth-4 { border-left: 4px solid #d5ece9; }
   @media (max-width: 1199.98px) {
     .model-editor-workspace {
       grid-template-columns: 1fr;
     }
     .model-editor-preview-card {
       position: static;
+    }
+  }
+  @media (max-width: 768px) {
+    .model-section-toggle {
+      flex-wrap: wrap;
+    }
+    .model-section-meta {
+      justify-content: flex-start;
+      margin-left: 0;
+      margin-right: 1.6rem;
+    }
+    .model-section-summary-row,
+    .json-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .model-section-summary-row .section-label,
+    .json-key {
+      min-width: 0;
+    }
+    .json-row-actions {
+      justify-content: flex-start;
+      min-width: 0;
     }
   }
 </style>
@@ -2845,10 +3120,10 @@
   }
 
   function getOverviewSectionValue(model) { const primitiveKeys = Object.entries(model || {}).filter(([key,value]) => key!=='Input' && key!=='Nodes' && (value===null || typeof value !== 'object')).map(([key])=>key); const keys = Array.from(new Set(['Name','BIDSModelVersion','Description', ...primitiveKeys])); return Object.fromEntries(keys.map(key => [key, model?.[key] ?? ''])); }
-  function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and global metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
-  function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and model-level input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Node stack with transformations, design matrices and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Connect nodes with source → destination edges', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
+  function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
+  function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Nodes, transforms, design and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Source to destination node links', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
 
   function normalizeEditorStringArray(value) {
     return Array.isArray(value)

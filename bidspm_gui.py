@@ -2084,6 +2084,7 @@ def api_scan_events_columns():
         bids_dir = data.get('bids_dir', '').strip().strip('"\'')
         events_file = data.get('events_file', '').strip().strip('"\'')
         preview_file = data.get('preview_file', '').strip()
+        task_filter = data.get('task_filter', '').strip()
         preview_max_rows = data.get('preview_max_rows', 200)
 
         # preview_max_rows: 0 means "all rows"
@@ -2112,58 +2113,51 @@ def api_scan_events_columns():
             if not events_file.lower().endswith('.tsv'):
                 return jsonify({"error": "Selected file must be a .tsv file"}), 400
 
-        events_files = []
+        def _extract_task_name(path):
+            file_name = os.path.basename(path)
+            for part in file_name.split('_'):
+                if part.startswith('task-') and len(part) > 5:
+                    return part[5:]
+            return ''
+
+        all_event_files = []
         tasks = set()
-        all_columns = set()
-        columns_by_type = {}
 
         if events_file:
-            events_files = [events_file]
-            file_name = os.path.basename(events_file)
-            parts = file_name.split('_')
-            for part in parts:
-                if part.startswith('task-'):
-                    tasks.add(part[5:])
+            all_event_files = [events_file]
+            detected_task = _extract_task_name(events_file)
+            if detected_task:
+                tasks.add(detected_task)
         else:
             for root, _dirs, files in os.walk(bids_dir):
                 for file_name in files:
                     if file_name.endswith('_events.tsv'):
-                        events_files.append(os.path.join(root, file_name))
-                        parts = file_name.split('_')
-                        for part in parts:
-                            if part.startswith('task-'):
-                                tasks.add(part[5:])
+                        full_path = os.path.join(root, file_name)
+                        all_event_files.append(full_path)
+                        detected_task = _extract_task_name(file_name)
+                        if detected_task:
+                            tasks.add(detected_task)
 
-        # Read columns from a subset to keep scanning responsive.
-        for path in events_files[:5]:
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f, delimiter='\t')
-                    if reader.fieldnames:
-                        for col in reader.fieldnames:
-                            all_columns.add(col)
-                            if col in ['trial_type', 'condition', 'response', 'accuracy']:
-                                columns_by_type.setdefault(col, [])
-
-                            f.seek(0)
-                            reader = csv.DictReader(f, delimiter='\t')
-                            values = set()
-                            for row in reader:
-                                val = row.get(col, '').strip()
-                                if val and val != 'n/a':
-                                    values.add(val)
-                            if values and col not in ['onset', 'duration', 'framewise_displacement']:
-                                if col not in columns_by_type:
-                                    columns_by_type[col] = []
-                                columns_by_type[col] = sorted(list(values))[:10]
-            except Exception:
-                continue
+        selected_task = ''
+        events_files = all_event_files[:]
+        if task_filter and not events_file:
+            requested_task = task_filter
+            events_files = [path for path in all_event_files if _extract_task_name(path) == requested_task]
+            if not events_files:
+                return jsonify({
+                    "error": f"No events files found for task '{requested_task}'.",
+                    "tasks": sorted(list(tasks))
+                }), 404
+            selected_task = requested_task
 
         sample_file = None
+        sample_abs_path = None
         sample_headers = []
         sample_rows = []
         sample_total_rows = 0
         sample_truncated = False
+        all_columns = set()
+        columns_by_type = {}
         if events_files:
             candidate_files = events_files[:]
             random.shuffle(candidate_files)
@@ -2184,22 +2178,30 @@ def api_scan_events_columns():
                         if not headers:
                             continue
 
+                        value_sets = {header: set() for header in headers}
                         rows = []
                         total_rows = 0
                         for row in reader:
                             total_rows += 1
                             if preview_max_rows == 0 or len(rows) < preview_max_rows:
                                 rows.append([row.get(h, '') for h in headers])
+                            for header in headers:
+                                value = str(row.get(header, '')).strip()
+                                if not value:
+                                    continue
+                                if value.lower() in {'n/a', 'nan'}:
+                                    continue
+                                value_sets[header].add(value)
 
-                        try:
-                            bids_root = os.path.abspath(bids_dir)
-                            chosen_abs = os.path.abspath(chosen)
-                            if os.path.commonpath([bids_root, chosen_abs]) == bids_root:
-                                sample_file = os.path.relpath(chosen_abs, bids_root)
-                            else:
-                                sample_file = chosen_abs
-                        except Exception:
-                            sample_file = os.path.abspath(chosen)
+                        sample_abs_path = os.path.abspath(chosen)
+                        all_columns.update(headers)
+
+                        for col in headers:
+                            if col in ['onset', 'duration', 'framewise_displacement']:
+                                continue
+                            values = sorted(list(value_sets.get(col, set())))
+                            if values:
+                                columns_by_type[col] = values[:10]
 
                         sample_headers = headers
                         sample_rows = rows
@@ -2209,12 +2211,26 @@ def api_scan_events_columns():
                 except Exception:
                     continue
 
+        if sample_abs_path:
+            try:
+                bids_root = os.path.abspath(bids_dir)
+                if os.path.commonpath([bids_root, sample_abs_path]) == bids_root:
+                    sample_file = os.path.relpath(sample_abs_path, bids_root)
+                else:
+                    sample_file = sample_abs_path
+            except Exception:
+                sample_file = sample_abs_path
+
+        if not selected_task and sample_abs_path:
+            selected_task = _extract_task_name(sample_abs_path)
+
         return jsonify({
             "bids_dir": bids_dir,
             "events_files": len(events_files),
             "columns": sorted(list(all_columns)),
             "columns_by_type": {k: v for k, v in columns_by_type.items()},
             "tasks": sorted(list(tasks)),
+            "selected_task": selected_task,
             "sample_file": sample_file,
             "sample_headers": sample_headers,
             "sample_rows": sample_rows,
