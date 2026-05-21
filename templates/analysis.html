@@ -150,53 +150,6 @@
                             </div>
                         </div>
 
-                        <!-- Section: Container Options -->
-                        <div class="accordion-item shadow-none mb-2 analysis-config-item">
-                            <h2 class="accordion-header" id="headingContainer">
-                                <button class="accordion-button rounded shadow-none py-2 collapsed text-uppercase fw-bold x-small analysis-config-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#collapseContainer" aria-expanded="false">
-                                    <i class="fas fa-box me-2"></i> Container Options
-                                </button>
-                            </h2>
-                            <div id="collapseContainer" class="accordion-collapse collapse" data-bs-parent="#formAccordion">
-                                <div class="accordion-body px-0 pt-3 analysis-config-body">
-                                    <div id="container-form-static" class="row g-3">
-                                        <div class="col-12">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
-                                            <div class="d-flex gap-4 mb-3">
-                                                <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if project and project.config.container_type == 'docker' %}checked{% endif %}>
-                                                    <label class="form-check-label" for="type-docker">Docker</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if not project or project.config.container_type == 'apptainer' %}checked{% endif %}>
-                                                    <label class="form-check-label" for="type-apptainer">Apptainer</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" {% if project and project.config.container_type == 'local' %}checked{% endif %}>
-                                                    <label class="form-check-label" for="type-local">Local (No Container)</label>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Docker Option -->
-                                        <div class="col-12 {% if not project or project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
-                                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'bidspm/bidspm:latest' }}">
-                                        </div>
-
-                                        <!-- Apptainer Option -->
-                                        <div class="col-12 {% if project and project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/data/local/container/bidspm/bidspm_4.0.0.sif' }}">
-                                                <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                     </div> <!-- End Accordion -->
 
                     <div class="mt-4 pt-3 border-top" id="analysis-model-workspace-section">
@@ -300,6 +253,61 @@
                     <div id="validation-result" class="mt-3"></div>
                     <div id="path-alerts" class="mt-2"></div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Container Options + Preflight -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="p-3 analysis-config-shell">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <span class="fw-bold text-uppercase x-small text-primary"><i class="fas fa-box me-2"></i>Container Options</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-preflight-check">
+                        <i class="fas fa-stethoscope me-1"></i>Run Preflight Check
+                    </button>
+                </div>
+                <div class="row g-3 align-items-start">
+                    <div class="col-md-6">
+                        <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
+                        <div class="d-flex flex-wrap gap-3">
+                            <div class="form-check d-flex align-items-center gap-2">
+                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if project and project.config.container_type == 'docker' %}checked{% endif %}>
+                                <label class="form-check-label" for="type-docker">Docker</label>
+                                <span class="badge bg-secondary preflight-badge" id="badge-docker">?</span>
+                            </div>
+                            <div class="form-check d-flex align-items-center gap-2">
+                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if not project or project.config.container_type == 'apptainer' %}checked{% endif %}>
+                                <label class="form-check-label" for="type-apptainer">Apptainer</label>
+                                <span class="badge bg-secondary preflight-badge" id="badge-apptainer">?</span>
+                            </div>
+                            <div class="form-check d-flex align-items-center gap-2">
+                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" {% if project and project.config.container_type == 'local' %}checked{% endif %}>
+                                <label class="form-check-label" for="type-local">Local (No Container)</label>
+                                <span class="badge bg-success preflight-badge" id="badge-local">✓</span>
+                            </div>
+                        </div>
+                        <div id="preflight-results" class="mt-3 d-none">
+                            <div class="small fw-bold text-muted text-uppercase mb-1">Preflight Results</div>
+                            <div id="preflight-details" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <!-- Docker Option -->
+                        <div class="{% if not project or project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
+                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
+                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'bidspm/bidspm:latest' }}">
+                        </div>
+                        <!-- Apptainer Option -->
+                        <div class="{% if project and project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
+                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/data/local/container/bidspm/bidspm_4.0.0.sif' }}">
+                                <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1797,6 +1805,77 @@
         return note;
     }
 
+    function createNodeMaskPicker(node) {
+        const panel = document.createElement('div');
+        panel.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
+
+        const label = document.createElement('span');
+        label.className = 'small fw-bold text-muted me-1';
+        label.innerHTML = '<i class="fas fa-mask me-1"></i>Brain Mask:';
+        panel.appendChild(label);
+
+        const currentDatatype = node.Mask?.datatype ?? null;
+
+        const opts = [
+            { label: 'Functional (BOLD)', dt: 'func', icon: 'fa-brain' },
+            { label: 'Anatomical (T1)', dt: 'anat', icon: 'fa-skull' },
+        ];
+
+        opts.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            const active = currentDatatype === opt.dt;
+            btn.className = `btn btn-sm ${active ? 'btn-primary' : 'btn-outline-secondary'}`;
+            btn.innerHTML = `<i class="fas ${opt.icon} me-1"></i>${opt.label}`;
+            btn.addEventListener('click', () => {
+                node.Mask = { desc: 'brain', suffix: 'mask', datatype: opt.dt };
+                renderModelAccordionEditor();
+            });
+            panel.appendChild(btn);
+        });
+
+        if (node.Mask) {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'btn btn-sm btn-outline-danger ms-1';
+            removeBtn.innerHTML = '<i class="fas fa-times me-1"></i>Remove Mask';
+            removeBtn.addEventListener('click', () => {
+                delete node.Mask;
+                renderModelAccordionEditor();
+            });
+            panel.appendChild(removeBtn);
+        }
+
+        // Scan button — discovers available masks from the preproc folder
+        const wdInput = document.getElementById('input-WD');
+        if (wdInput?.value) {
+            const scanBtn = document.createElement('button');
+            scanBtn.type = 'button';
+            scanBtn.className = 'btn btn-sm btn-outline-info ms-auto';
+            scanBtn.innerHTML = '<i class="fas fa-search me-1"></i>Scan';
+            scanBtn.title = 'Detect available mask types from preprocessing folder';
+            scanBtn.addEventListener('click', async () => {
+                scanBtn.disabled = true;
+                scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>';
+                try {
+                    const resp = await fetch(`/api/scan_masks?path=${encodeURIComponent(wdInput.value)}`);
+                    const masks = await resp.json();
+                    if (Array.isArray(masks) && masks.length) {
+                        const tip = masks.map(m => `${m.datatype}: ${m.example} (${m.count} files)`).join('\n');
+                        alert(`Available mask types:\n\n${tip}\n\nUse the buttons above to select one.`);
+                    } else {
+                        alert('No brain masks found in: ' + wdInput.value);
+                    }
+                } catch(e) { alert('Scan failed: ' + e.message); }
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '<i class="fas fa-search me-1"></i>Scan';
+            });
+            panel.appendChild(scanBtn);
+        }
+
+        return panel;
+    }
+
     function renderModelSectionContent(body, section) {
         if (section.kind === 'input') {
             body.appendChild(createModelTaskPicker());
@@ -2716,6 +2795,11 @@
                 container.appendChild(createInlineNote('HRF variables are controlled in Design Matrix rows. Use each regressor\'s HRF on/off toggle.'));
             }
 
+            // Mask quick-set panel for Node objects
+            if (/^Nodes\[\d+\]$/.test(basePath)) {
+                container.appendChild(createNodeMaskPicker(node));
+            }
+
             const objWrap = document.createElement('div');
             objWrap.className = 'accordion';
             Object.entries(node).forEach(([key, value]) => {
@@ -3103,7 +3187,44 @@
                 updateInternalState();
             };
         });
-        
+
+        // Preflight checks
+        async function runPreflightChecks() {
+            const btn = document.getElementById('btn-preflight-check');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Checking…'; }
+            try {
+                const resp = await fetch('/api/preflight/tools');
+                const data = await resp.json();
+                const badgeMap = { docker: 'badge-docker', apptainer: 'badge-apptainer', singularity: 'badge-apptainer' };
+                // docker badge
+                const dockerOk = data.docker && data.docker.available;
+                const dockerBadge = document.getElementById('badge-docker');
+                if (dockerBadge) { dockerBadge.className = dockerOk ? 'badge bg-success preflight-badge' : 'badge bg-danger preflight-badge'; dockerBadge.textContent = dockerOk ? '✓' : '✗'; dockerBadge.title = dockerOk ? data.docker.path : 'not found'; }
+                // apptainer/singularity badge — either counts
+                const apptainerOk = (data.apptainer && data.apptainer.available) || (data.singularity && data.singularity.available);
+                const apptainerBadge = document.getElementById('badge-apptainer');
+                if (apptainerBadge) { apptainerBadge.className = apptainerOk ? 'badge bg-success preflight-badge' : 'badge bg-danger preflight-badge'; apptainerBadge.textContent = apptainerOk ? '✓' : '✗'; apptainerBadge.title = apptainerOk ? (data.apptainer.path || data.singularity.path) : 'not found'; }
+                // detailed panel
+                const details = document.getElementById('preflight-details');
+                const resultsDiv = document.getElementById('preflight-results');
+                if (details && resultsDiv) {
+                    const tools = [
+                        { label: 'Docker', key: 'docker', avail: dockerOk },
+                        { label: 'Apptainer', key: 'apptainer', avail: data.apptainer && data.apptainer.available },
+                        { label: 'Singularity', key: 'singularity', avail: data.singularity && data.singularity.available },
+                        { label: 'Octave', key: 'octave', avail: data.octave && data.octave.available },
+                    ];
+                    details.innerHTML = tools.map(t => `<span class="small"><span class="badge ${t.avail ? 'bg-success' : 'bg-danger'} me-1">${t.avail ? '✓' : '✗'}</span>${t.label}${t.avail && data[t.key] && data[t.key].path ? ' <span class=\'text-muted font-monospace x-small\'>' + data[t.key].path + '</span>' : ''}</span>`).join('');
+                    resultsDiv.classList.remove('d-none');
+                }
+            } catch(e) { console.warn('Preflight check failed', e); }
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-stethoscope me-1"></i>Run Preflight Check'; }
+        }
+
+        document.getElementById('btn-preflight-check')?.addEventListener('click', runPreflightChecks);
+        // Auto-run on page load
+        runPreflightChecks();
+
         // BIDS directory change triggers task detection
         const bidsInput = document.getElementById('input-BIDS_DIR');
         if (bidsInput) bidsInput.addEventListener('change', async () => {

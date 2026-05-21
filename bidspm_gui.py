@@ -894,6 +894,51 @@ def api_duplicate_project(project_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/scan_masks', methods=['GET'])
+def api_scan_masks():
+    """Scan a preprocessing derivatives folder and return distinct mask types."""
+    import shutil as _shutil
+    preproc_path = request.args.get('path', '').strip()
+    if not preproc_path:
+        return jsonify({"error": "path parameter required"}), 400
+    p = Path(preproc_path)
+    if not p.exists():
+        return jsonify({"error": f"Path not found: {preproc_path}"}), 404
+
+    # Collect all desc-brain mask nii files and group by datatype inferred from path
+    masks: dict = {}
+    for nii in p.glob('**/*desc-brain_mask.nii*'):
+        # Determine datatype from parent folder name
+        datatype = nii.parent.name  # 'func' or 'anat'
+        if datatype not in ('func', 'anat'):
+            datatype = 'unknown'
+        # Extract distinguishing BIDS entities (task, acq, space)
+        name = nii.name
+        entities = {}
+        for entity in ('task', 'acq', 'space'):
+            import re
+            m = re.search(rf'{entity}-([^_]+)', name)
+            if m:
+                entities[entity] = m.group(1)
+        key = datatype
+        if key not in masks:
+            masks[key] = {'datatype': datatype, 'entities': entities, 'example': nii.name, 'count': 0}
+        masks[key]['count'] += 1
+
+    return jsonify(list(masks.values()))
+
+
+@app.route('/api/preflight/tools', methods=['GET'])
+def api_preflight_tools():
+    """Check availability of container runtimes and local tools."""
+    import shutil as _shutil
+    results = {}
+    for tool in ('docker', 'apptainer', 'singularity', 'octave'):
+        path = _shutil.which(tool)
+        results[tool] = {'available': path is not None, 'path': path or ''}
+    return jsonify(results)
+
+
 @app.route('/api/projects/<project_id>/preflight', methods=['GET'])
 def api_preflight_check(project_id: str):
     """Run preflight checks for a project."""
