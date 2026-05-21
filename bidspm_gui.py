@@ -1613,7 +1613,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
                     "HighPassFilterCutoffHz": 0.0078,
                     "Mask": {"desc": ["brain"], "suffix": ["mask"]}
                 },
-                "Software": {"SPM": {"Version": 25}}
+                "Software": {"SPM": {"Model": "spm", "Version": 25}}
             },
             "Contrasts": contrasts
         })

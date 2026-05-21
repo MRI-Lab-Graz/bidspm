@@ -9,11 +9,11 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid">
+<div class="container-fluid analysis-page-shell">
     <!-- Top Action Bar -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="d-flex flex-wrap gap-2 p-3 bg-white border rounded shadow-sm align-items-center">
+            <div class="d-flex flex-wrap gap-2 p-3 align-items-center analysis-action-bar">
                 <button type="button" class="btn btn-outline-secondary" id="btn-load-config">
                     <i class="fas fa-folder-open me-2"></i>Load
                 </button>
@@ -57,20 +57,20 @@
     <div class="row">
         <!-- Top Section: Form -->
         <div class="col-12">
-            <div class="p-4 bg-white border rounded shadow-sm">
+            <div class="p-4 analysis-config-shell">
                 <form id="bidspm-form">
                     <!-- Accordion for Detailed Sections -->
-                    <div class="accordion accordion-flush pt-3 border-top" id="formAccordion">
+                    <div class="accordion accordion-flush pt-3 border-top analysis-config-accordion" id="formAccordion">
                         
                         <!-- Section: Settings Details -->
-                        <div class="accordion-item shadow-none border-0 mb-2">
+                        <div class="accordion-item shadow-none mb-2 analysis-config-item">
                             <h2 class="accordion-header" id="headingSettings">
-                                <button class="accordion-button bg-light rounded shadow-none py-2 text-secondary text-uppercase fw-bold x-small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings" aria-expanded="true">
+                                <button class="accordion-button rounded shadow-none py-2 text-uppercase fw-bold x-small analysis-config-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings" aria-expanded="true">
                                     <i class="fas fa-sliders-h me-2"></i> Settings Details
                                 </button>
                             </h2>
                             <div id="collapseSettings" class="accordion-collapse collapse show" data-bs-parent="#formAccordion">
-                                <div class="accordion-body px-0 pt-3">
+                                <div class="accordion-body px-0 pt-3 analysis-config-body">
                                     <div id="settings-form-static" class="row g-3">
                                         <!-- WD -->
                                         <div class="col-md-6">
@@ -135,7 +135,7 @@
                                         <!-- TASKS -->
                                         <div class="col-12">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Tasks</label>
-                                            <div id="tasks-container" class="border rounded p-2 bg-light d-flex flex-wrap gap-2" style="min-height: 38px;">
+                                            <div id="tasks-container" class="border rounded p-2 bg-light d-flex flex-wrap gap-2 analysis-tasks-container" style="min-height: 38px;">
                                                 <span class="text-muted x-small italic">Select BIDS folder to detect tasks...</span>
                                             </div>
                                         </div>
@@ -151,14 +151,14 @@
                         </div>
 
                         <!-- Section: Container Options -->
-                        <div class="accordion-item shadow-none border-0 mb-2">
+                        <div class="accordion-item shadow-none mb-2 analysis-config-item">
                             <h2 class="accordion-header" id="headingContainer">
-                                <button class="accordion-button bg-light rounded shadow-none py-2 collapsed text-secondary text-uppercase fw-bold x-small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseContainer" aria-expanded="false">
+                                <button class="accordion-button rounded shadow-none py-2 collapsed text-uppercase fw-bold x-small analysis-config-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#collapseContainer" aria-expanded="false">
                                     <i class="fas fa-box me-2"></i> Container Options
                                 </button>
                             </h2>
                             <div id="collapseContainer" class="accordion-collapse collapse" data-bs-parent="#formAccordion">
-                                <div class="accordion-body px-0 pt-3">
+                                <div class="accordion-body px-0 pt-3 analysis-config-body">
                                     <div id="container-form-static" class="row g-3">
                                         <div class="col-12">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
@@ -258,8 +258,8 @@
                         <div id="model-editor-status" class="mt-2"></div>
                     </div>
 
-                    <div class="row mt-4 pt-3 border-top">
-                        <div class="col-md-6 border-end">
+                    <div class="row mt-4 pt-3 border-top analysis-execution-section">
+                        <div class="col-md-6 border-end analysis-execution-col">
                             <label class="form-label small fw-bold text-muted text-uppercase mb-2">Actions</label>
                             <div class="d-flex flex-column gap-1">
                                 <div class="form-check">
@@ -276,7 +276,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6 ps-md-4">
+                        <div class="col-md-6 ps-md-4 analysis-execution-col">
                             <label class="form-label small fw-bold text-muted text-uppercase mb-2">Execution Options</label>
                             <div class="form-check form-switch mb-1">
                                 <input class="form-check-input" type="checkbox" id="pilot" name="pilot" {% if project and project.config.pilot %}checked{% endif %}>
@@ -303,7 +303,27 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Bottom Action Bar -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="d-flex flex-wrap gap-2 p-3 align-items-center analysis-action-bar">
+                <button type="button" class="btn btn-success" onclick="document.getElementById('btn-save-start').click()">
+                    <i class="fas fa-play me-2"></i>Save &amp; Run
+                </button>
+                <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('btn-save-only').click()">
+                    <i class="fas fa-save me-2"></i>Save
+                </button>
+                <button type="button" class="btn btn-warning text-dark" onclick="document.getElementById('btn-run-cached').click()">
+                    <i class="fas fa-redo me-2"></i>Run
+                </button>
+                <button type="button" class="btn btn-danger" onclick="document.getElementById('btn-stop').click()">
+                    <i class="fas fa-stop me-2"></i>Stop
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Bottom Section: Terminal -->
     <div class="row mt-4 mb-5">
         <div class="col-12">
@@ -477,18 +497,156 @@
     .x-small { font-size: 0.75rem; }
     .form-control-sm, .input-group-sm > .form-control { font-size: 0.85rem; }
     .btn { font-weight: 500; }
+    .analysis-page-shell {
+        --analysis-surface-top: #f5fbff;
+        --analysis-surface-mid: #f9fcff;
+        --analysis-border: #d6e9fb;
+        --analysis-border-strong: #c4def5;
+        --analysis-text-primary: #1f4e7a;
+        --analysis-text-muted: #55728d;
+    }
+    .analysis-action-bar {
+        background: linear-gradient(120deg, #f4faff 0%, #eef7ff 100%);
+        border: 1px solid var(--analysis-border);
+        border-radius: 1rem;
+        box-shadow: 0 10px 24px rgba(17, 77, 143, 0.07);
+    }
+    .analysis-action-bar .vr {
+        color: #94b7d8;
+        opacity: 0.55;
+    }
+    .analysis-action-bar .form-label.text-muted {
+        color: var(--analysis-text-muted) !important;
+    }
+    .analysis-action-bar .form-control {
+        border-color: #c3ddf4;
+    }
+    .analysis-action-bar .btn-outline-secondary {
+        border-color: #99bfe4;
+        color: #255b88;
+    }
+    .analysis-action-bar .btn-outline-secondary:hover {
+        background: #e9f4ff;
+        border-color: #6fa8df;
+        color: #184975;
+    }
+    .analysis-config-shell {
+        background: linear-gradient(165deg, var(--analysis-surface-top) 0%, #fdfefe 100%);
+        border: 1px solid var(--analysis-border);
+        border-radius: 1rem;
+        box-shadow: 0 12px 28px rgba(17, 77, 143, 0.08);
+    }
+    .analysis-config-accordion {
+        border-top-color: var(--analysis-border) !important;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+        padding-top: 0.95rem !important;
+    }
+    .analysis-config-item {
+        background: #ffffff;
+        border: 1px solid #cbdff3;
+        border-radius: 0.95rem;
+        box-shadow: 0 8px 16px rgba(16, 73, 134, 0.06);
+        overflow: hidden;
+        padding: 0.2rem;
+    }
+    .analysis-config-toggle {
+        background: linear-gradient(90deg, #eff7ff 0%, #f7fbff 100%);
+        border: 0;
+        color: var(--analysis-text-primary);
+        letter-spacing: 0.03em;
+        border-radius: 0.7rem !important;
+    }
+    .analysis-config-toggle.collapsed {
+        background: linear-gradient(90deg, #f5faff 0%, #fbfdff 100%);
+        color: #2f628f;
+    }
+    .analysis-config-accordion .accordion-button:not(.collapsed) {
+        background: linear-gradient(90deg, #e6f3ff 0%, #f1f8ff 100%);
+        color: #163f66;
+        box-shadow: none;
+    }
+    .analysis-config-accordion .accordion-button:focus {
+        box-shadow: 0 0 0 0.2rem rgba(24, 144, 255, 0.18);
+    }
+    .analysis-config-body {
+        background: #ffffff;
+        border-top: 1px solid #e3edf7;
+        border-radius: 0 0 0.68rem 0.68rem;
+        margin-top: 0.2rem;
+        padding-left: 0.2rem;
+        padding-right: 0.2rem;
+    }
+    .analysis-config-shell .form-label.text-muted {
+        color: var(--analysis-text-muted) !important;
+    }
+    .analysis-config-shell .form-control,
+    .analysis-config-shell .form-select {
+        border-color: #c8def3;
+    }
+    .analysis-config-shell .form-control:focus,
+    .analysis-config-shell .form-select:focus {
+        border-color: #7fb6ea;
+        box-shadow: 0 0 0 0.2rem rgba(24, 144, 255, 0.15);
+    }
+    .analysis-config-shell .btn-outline-secondary,
+    .analysis-config-shell .btn-outline-primary,
+    .analysis-config-shell .btn-outline-info {
+        border-color: #9bc1e6;
+        color: #245986;
+    }
+    .analysis-config-shell .btn-outline-secondary:hover,
+    .analysis-config-shell .btn-outline-primary:hover,
+    .analysis-config-shell .btn-outline-info:hover {
+        background: #e8f4ff;
+        border-color: #6fa8df;
+        color: #17446e;
+    }
+    .analysis-tasks-container {
+        background: linear-gradient(90deg, #f4faff 0%, #f9fcff 100%) !important;
+        border-color: #cfe4f8 !important;
+    }
+    .analysis-execution-section {
+        background: linear-gradient(180deg, #f9fcff 0%, #fdfefe 100%);
+        border: 1px solid var(--analysis-border);
+        border-radius: 0.95rem;
+        margin-top: 1.2rem !important;
+        padding: 0.95rem 0.55rem 0.75rem;
+    }
+    .analysis-execution-section.border-top {
+        border-top: 1px solid var(--analysis-border) !important;
+    }
+    .analysis-execution-section .border-end {
+        border-right-color: #d6e8f8 !important;
+    }
+    .analysis-execution-section .form-label.text-muted {
+        color: var(--analysis-text-muted) !important;
+    }
     .accordion-button:not(.collapsed) { background-color: #f8f9fa; color: #6c757d; }
     .accordion-button::after { background-size: 0.8rem; }
     .json-row {
         align-items: flex-start;
-        background: #fff;
-        border: 1px solid #dce8f4;
-        border-radius: 0.85rem;
-        margin-bottom: 0.55rem;
-        padding: 0.7rem 0.8rem;
+        background: #edf4fb;
+        border: 2px solid #a9c8e4;
+        border-radius: 1.02rem;
+        margin-bottom: 0.72rem;
+        padding: 0.66rem 0.78rem;
     }
     .json-row:last-child { margin-bottom: 0; }
-    .json-key { min-width: 170px; font-size: 0.82rem; color: #2d4660; }
+    .json-key { min-width: 170px; font-size: 0.82rem; color: #284767; font-weight: 700; }
+    .json-row .form-control,
+    .json-row .form-select {
+        background: #ffffff;
+        border: 1.5px solid #a8c6e3;
+        border-radius: 0.65rem;
+        color: #223a55;
+    }
+    .json-row .form-control:focus,
+    .json-row .form-select:focus {
+        border-color: #6ea8db;
+        box-shadow: 0 0 0 0.15rem rgba(42, 111, 173, 0.16);
+    }
     .json-row-compact {
         border-radius: 0.72rem;
         margin-bottom: 0.4rem;
@@ -516,16 +674,63 @@
     .json-inline-value { flex: 1; min-width: 240px; }
     .json-add-btn { white-space: nowrap; }
     .json-row-actions { min-width: 84px; display: flex; justify-content: flex-end; gap: 0.3rem; }
+    .json-row-actions-modelx { min-width: 160px; }
+    .json-row-modelx {
+        align-items: center;
+        background: #e8f1fa;
+        border-color: #9fc1e0;
+        box-shadow: 0 1px 0 rgba(25, 84, 136, 0.06);
+    }
+    .json-row-modelx.is-drop-target {
+        background: #eef7ff;
+        border-color: #5f9fd8;
+        box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
+    }
+    .json-row-modelx.is-dragging {
+        opacity: 0.72;
+    }
+    .modelx-drag-handle {
+        align-items: center;
+        color: #6f89a4;
+        cursor: grab;
+        display: inline-flex;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+        justify-content: center;
+        width: 1.15rem;
+    }
+    .modelx-drag-dots {
+        width: 0.62rem;
+        height: 1rem;
+        background-image: radial-gradient(currentColor 1.35px, transparent 1.35px);
+        background-size: 0.32rem 0.32rem;
+        background-position: 0 0;
+        opacity: 0.92;
+    }
+    .modelx-drag-handle:active {
+        cursor: grabbing;
+    }
+    .json-row-modelx .json-key {
+        min-width: 42px;
+    }
+    .json-row-modelx .json-inline-value {
+        min-width: 185px;
+    }
+    .json-row-modelx .badge {
+        border-radius: 999px;
+        font-weight: 600;
+    }
     #analysis-model-workspace-section {
         background: linear-gradient(145deg, #f8fcff 0%, #fdfefe 100%);
         border: 1px solid #d6e9fb;
         border-radius: 1rem;
         padding: 1rem;
+        box-shadow: 0 10px 24px rgba(17, 77, 143, 0.07);
     }
     #model-editor-help { color: #3d617f; }
     .model-editor-shell {
-        background: linear-gradient(165deg, #f5fbff 0%, #f9fcff 100%);
-        border: 1px solid #d6e9fb;
+        background: #ffffff;
+        border: 1px solid #cadef2;
         border-radius: 1rem;
         max-height: 62vh;
         overflow-y: auto;
@@ -749,7 +954,7 @@
         min-width: 0;
     }
     .model-section-body {
-        background: #f7fbff;
+        background: #ffffff;
         border-top: 1px solid #e3eff9;
         padding: 1rem;
     }
@@ -841,12 +1046,21 @@
         color: #096dd9;
     }
     .model-task-pill input { margin-right: 0.3rem; }
-    .json-row-depth-0 { border-left: 4px solid #d8e6f5; }
-    .json-row-depth-1 { border-left: 4px solid #dcecd7; }
-    .json-row-depth-2 { border-left: 4px solid #f0dfc9; }
-    .json-row-depth-3 { border-left: 4px solid #e3daf4; }
-    .json-row-depth-4 { border-left: 4px solid #d5ece9; }
+    .json-row-depth-0 { border-left: 4px solid #9fc3e2; }
+    .json-row-depth-1 { border-left: 4px solid #a5c9e7; }
+    .json-row-depth-2 { border-left: 4px solid #accfea; }
+    .json-row-depth-3 { border-left: 4px solid #b6d5ee; }
+    .json-row-depth-4 { border-left: 4px solid #bfdcf2; }
     @media (max-width: 768px) {
+        .analysis-execution-section {
+            padding: 0.85rem 0.6rem;
+        }
+        .analysis-execution-section .border-end {
+            border-right: 0 !important;
+            border-bottom: 1px solid #d6e8f8;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+        }
         .model-editor-workspace-grid {
             grid-template-columns: 1fr;
         }
@@ -870,6 +1084,9 @@
         .json-row-actions {
             justify-content: flex-start;
             min-width: 0;
+        }
+        .json-row-actions-modelx {
+            flex-wrap: wrap;
         }
         .json-row-compact .json-key {
             min-width: 0;
@@ -1165,6 +1382,7 @@
     let modelEditorGroupByOptions = ['subject'];
     let showModelTechnicalPaths = false;
     let modelEditorOpenPaths = new Set(); // tracks which accordion panels are open across re-renders
+    let modelXDragState = null;
     const previewValidationState = { timer: null, runId: 0 };
 
     const NUISANCE_REGRESSOR_RX = /^(framewise_displacement|trans_[xyz]|rot_[xyz]|a_comp_cor|dvars|std_dvars|non_steady_state_outlier|cosine\d*|white_matter|csf|global_signal)/;
@@ -1484,6 +1702,14 @@
             ];
         }
 
+        if (/\.Model\.HRF$/.test(path) && value && typeof value === 'object') {
+            const kernel = typeof value.Model === 'string' && value.Model.trim() ? value.Model.trim() : '';
+            return [
+                { text: kernel ? `Kernel ${kernel}` : 'Kernel unset', tone: kernel ? 'success' : 'neutral' },
+                { text: 'Variables from Design Matrix', tone: 'neutral' }
+            ];
+        }
+
         if (/\.Contrasts$/.test(path) && Array.isArray(value)) {
             return [{ text: `${value.length} contrast${value.length === 1 ? '' : 's'}`, tone: value.length > 0 ? 'success' : 'neutral' }];
         }
@@ -1751,7 +1977,8 @@
                 Model: {
                     X: ['trial_type'],
                     HRF: { Variables: ['trial_type'], Model: 'spm' },
-                    Type: 'glm'
+                    Type: 'glm',
+                    Software: { SPM: { Model: 'spm' } }
                 },
                 Contrasts: []
             };
@@ -1785,23 +2012,30 @@
         arr.push(defaultArrayItemForPath(path));
     }
 
-    function moveArrayItem(path, direction) {
-        const match = path.match(/^(.*)\[(\d+)\]$/);
-        if (!match) return;
-
-        const arrayPath = match[1];
-        const index = Number(match[2]);
+    function reorderArrayItem(arrayPath, fromIndex, toIndex) {
         const arr = getByPath(modelEditorDraft, arrayPath);
-        if (!Array.isArray(arr)) return;
+        if (!Array.isArray(arr)) return false;
+        if (fromIndex === toIndex) return false;
+        if (fromIndex < 0 || fromIndex >= arr.length) return false;
+        if (toIndex < 0 || toIndex > arr.length) return false;
 
-        const targetIndex = direction === 'up' ? index - 1 : index + 1;
-        if (targetIndex < 0 || targetIndex >= arr.length) return;
-
-        [arr[index], arr[targetIndex]] = [arr[targetIndex], arr[index]];
+        const [moved] = arr.splice(fromIndex, 1);
+        let targetIndex = toIndex;
+        if (fromIndex < toIndex) targetIndex -= 1;
+        arr.splice(targetIndex, 0, moved);
+        return true;
     }
 
     function isModelXPath(path) {
         return /\.Model\.X\[\d+\]$/.test(path);
+    }
+
+    function isManagedModelHrfPath(path) {
+        return /^Nodes\[\d+\]\.Model\.HRF$/.test(String(path || ''));
+    }
+
+    function isManagedModelHrfVariablesPath(path) {
+        return /^Nodes\[\d+\]\.Model\.HRF\.Variables(?:\[\d+\])?$/.test(String(path || ''));
     }
 
     function isDuplicateModelXRegressor(path, candidate) {
@@ -1815,6 +2049,120 @@
 
         const normalized = String(candidate || '').trim();
         return arr.some((val, i) => i !== index && String(val || '').trim() === normalized);
+    }
+
+    function getModelObjectPathFromModelXPath(path) {
+        const match = String(path || '').match(/^(.*)\.X(?:\[\d+\])?$/);
+        return match ? match[1] : null;
+    }
+
+    function getModelObjectFromModelXPath(path) {
+        const modelPath = getModelObjectPathFromModelXPath(path);
+        if (!modelPath) return null;
+        const modelObj = getByPath(modelEditorDraft, modelPath);
+        if (!modelObj || typeof modelObj !== 'object' || Array.isArray(modelObj)) return null;
+        if (!Array.isArray(modelObj.X)) modelObj.X = [];
+        return modelObj;
+    }
+
+    function normalizeModelHrfVariables(modelObj) {
+        if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) {
+            return [];
+        }
+        const raw = Array.isArray(modelObj.HRF.Variables) ? modelObj.HRF.Variables : [];
+        return Array.from(new Set(raw.map(v => String(v || '').trim()).filter(Boolean)));
+    }
+
+    function isHrfApplicableRegressor(regressor) {
+        return String(regressor || '').trim() !== '1';
+    }
+
+    function syncModelXHrfVariables(path) {
+        const modelObj = getModelObjectFromModelXPath(path);
+        if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) {
+            return;
+        }
+
+        const selected = new Set((Array.isArray(modelObj.X) ? modelObj.X : [])
+            .map(v => String(v || '').trim())
+            .filter(Boolean));
+        const kept = normalizeModelHrfVariables(modelObj)
+            .filter(reg => selected.has(reg) && isHrfApplicableRegressor(reg));
+
+        if (!kept.length) {
+            delete modelObj.HRF;
+            return;
+        }
+
+        modelObj.HRF = {
+            ...modelObj.HRF,
+            Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
+            Variables: kept
+        };
+    }
+
+    function syncAllModelXHrfVariables() {
+        if (!modelEditorDraft || typeof modelEditorDraft !== 'object') return;
+        if (!Array.isArray(modelEditorDraft.Nodes)) return;
+
+        modelEditorDraft.Nodes.forEach((node, idx) => {
+            if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+            const modelObj = node.Model;
+            if (!modelObj || typeof modelObj !== 'object' || Array.isArray(modelObj)) return;
+
+            if (!Array.isArray(modelObj.X)) {
+                modelObj.X = [];
+            }
+            modelObj.X = Array.from(new Set(modelObj.X.map(v => String(v || '').trim()).filter(Boolean)));
+            syncModelXHrfVariables(`Nodes[${idx}].Model.X`);
+        });
+    }
+
+    function isModelXRegressorHrfEnabled(path) {
+        const modelObj = getModelObjectFromModelXPath(path);
+        if (!modelObj) return false;
+        const regressor = String(getByPath(modelEditorDraft, path) || '').trim();
+        if (!regressor) return false;
+        return normalizeModelHrfVariables(modelObj).includes(regressor);
+    }
+
+    function toggleModelXRegressorHrf(path) {
+        const status = document.getElementById('model-editor-status');
+        const modelObj = getModelObjectFromModelXPath(path);
+        if (!modelObj) return;
+
+        const regressor = String(getByPath(modelEditorDraft, path) || '').trim();
+        if (!regressor) return;
+
+        if (!isHrfApplicableRegressor(regressor)) {
+            status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Intercept is not HRF-convolved.</div>';
+            return;
+        }
+
+        const current = normalizeModelHrfVariables(modelObj);
+        if (current.includes(regressor)) {
+            const next = current.filter(item => item !== regressor);
+            if (next.length) {
+                modelObj.HRF = {
+                    ...modelObj.HRF,
+                    Model: String(modelObj.HRF?.Model || 'spm').trim() || 'spm',
+                    Variables: next
+                };
+            } else {
+                delete modelObj.HRF;
+            }
+            status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF off for ${regressor}</div>`;
+            renderModelAccordionEditor();
+            return;
+        }
+
+        if (!modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) {
+            modelObj.HRF = { Model: 'spm', Variables: [] };
+        }
+        modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+        modelObj.HRF.Variables = Array.from(new Set([...current, regressor]));
+        status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF on for ${regressor}</div>`;
+        renderModelAccordionEditor();
     }
 
     function addRegressorToModelX(arrayPath, regressor) {
@@ -1831,6 +2179,7 @@
         }
 
         arr.push(normalized);
+        syncModelXHrfVariables(arrayPath);
         status.innerHTML = '';
         renderModelAccordionEditor();
     }
@@ -1846,6 +2195,9 @@
         if (index < 0 || index >= arr.length) return;
 
         arr.splice(index, 1);
+        if (/\.Model\.X$/.test(arrayPath)) {
+            syncModelXHrfVariables(arrayPath);
+        }
     }
 
     function createPrimitiveRow(container, label, value, path, locked = false, depth = 0) {
@@ -1934,6 +2286,11 @@
                 }
 
                 setByPath(modelEditorDraft, path, newValue);
+                if (isModelXEntry) {
+                    syncModelXHrfVariables(path);
+                    renderModelAccordionEditor();
+                    return;
+                }
                 updateModelJsonPreview();
             });
         }
@@ -1963,32 +2320,83 @@
             if (match) {
                 const arrayPath = match[1];
                 const index = Number(match[2]);
-                const arr = getByPath(modelEditorDraft, arrayPath) || [];
+                const regressor = String(value || '').trim();
+                const hrfEnabled = isModelXRegressorHrfEnabled(path);
+
+                row.classList.add('json-row-modelx');
+
+                const dragHandle = document.createElement('span');
+                dragHandle.className = 'modelx-drag-handle';
+                dragHandle.title = 'Drag to reorder';
+                dragHandle.innerHTML = '<span class="modelx-drag-dots" aria-hidden="true"></span>';
+                dragHandle.draggable = true;
+                dragHandle.addEventListener('dragstart', (event) => {
+                    modelXDragState = { arrayPath, index };
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', String(index));
+                    event.dataTransfer.setData('application/x-modelx-arraypath', arrayPath);
+                    event.dataTransfer.setData('application/x-modelx-index', String(index));
+                    row.classList.add('is-dragging');
+                });
+                dragHandle.addEventListener('dragend', () => {
+                    modelXDragState = null;
+                    row.classList.remove('is-dragging');
+                    row.classList.remove('is-drop-target');
+                });
+                row.insertBefore(dragHandle, keyEl);
+
+                row.addEventListener('dragover', (event) => {
+                    if (!modelXDragState || modelXDragState.arrayPath !== arrayPath) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    const rect = row.getBoundingClientRect();
+                    const dropAfter = event.clientY > (rect.top + rect.height / 2);
+                    row.dataset.dropAfter = dropAfter ? '1' : '0';
+                    row.classList.add('is-drop-target');
+                });
+                row.addEventListener('dragleave', () => {
+                    delete row.dataset.dropAfter;
+                    row.classList.remove('is-drop-target');
+                });
+                row.addEventListener('drop', (event) => {
+                    event.preventDefault();
+                    const sourcePath = modelXDragState?.arrayPath || event.dataTransfer.getData('application/x-modelx-arraypath');
+                    const sourceIndexRaw = modelXDragState ? String(modelXDragState.index) : event.dataTransfer.getData('application/x-modelx-index');
+                    const dropAfter = row.dataset.dropAfter === '1';
+                    const targetIndex = dropAfter ? index + 1 : index;
+                    delete row.dataset.dropAfter;
+                    row.classList.remove('is-drop-target');
+                    if (sourcePath !== arrayPath || sourceIndexRaw === '') return;
+
+                    const sourceIndex = Number(sourceIndexRaw);
+                    if (Number.isNaN(sourceIndex)) return;
+
+                    const moved = reorderArrayItem(arrayPath, sourceIndex, targetIndex);
+                    if (!moved) return;
+
+                    const status = document.getElementById('model-editor-status');
+                    status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Regressor order updated</div>';
+                    modelXDragState = null;
+                    renderModelAccordionEditor();
+                });
 
                 const actions = document.createElement('div');
-                actions.className = 'json-row-actions';
+                actions.className = 'json-row-actions json-row-actions-modelx';
 
-                const upBtn = document.createElement('button');
-                upBtn.type = 'button';
-                upBtn.className = 'btn btn-sm btn-outline-secondary';
-                upBtn.title = 'Move up';
-                upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
-                upBtn.disabled = index === 0;
-                upBtn.addEventListener('click', () => {
-                    moveArrayItem(path, 'up');
-                    renderModelAccordionEditor();
-                });
-
-                const downBtn = document.createElement('button');
-                downBtn.type = 'button';
-                downBtn.className = 'btn btn-sm btn-outline-secondary';
-                downBtn.title = 'Move down';
-                downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
-                downBtn.disabled = index === arr.length - 1;
-                downBtn.addEventListener('click', () => {
-                    moveArrayItem(path, 'down');
-                    renderModelAccordionEditor();
-                });
+                const hrfBtn = document.createElement('button');
+                hrfBtn.type = 'button';
+                hrfBtn.className = hrfEnabled
+                    ? 'btn btn-sm btn-success'
+                    : 'btn btn-sm btn-outline-secondary';
+                if (isHrfApplicableRegressor(regressor)) {
+                    hrfBtn.title = 'Toggle HRF for this regressor';
+                    hrfBtn.textContent = hrfEnabled ? 'HRF on' : 'HRF off';
+                    hrfBtn.addEventListener('click', () => toggleModelXRegressorHrf(path));
+                } else {
+                    hrfBtn.title = 'Intercept is not HRF-convolved';
+                    hrfBtn.textContent = 'HRF n/a';
+                    hrfBtn.disabled = true;
+                }
 
                 const delBtn = document.createElement('button');
                 delBtn.type = 'button';
@@ -2000,8 +2408,7 @@
                     renderModelAccordionEditor();
                 });
 
-                actions.appendChild(upBtn);
-                actions.appendChild(downBtn);
+                actions.appendChild(hrfBtn);
                 actions.appendChild(delBtn);
                 row.appendChild(actions);
             }
@@ -2158,8 +2565,40 @@
 
     function renderJsonEditor(container, node, basePath = '', inheritedLocked = false, depth = 0) {
         if (Array.isArray(node)) {
+            if (isManagedModelHrfVariablesPath(basePath)) {
+                container.appendChild(createInlineNote('HRF variables are managed from Design Matrix rows (HRF on/off).'));
+                return;
+            }
+
             const listWrap = document.createElement('div');
             listWrap.className = 'accordion';
+
+            const contrastPathMatch = String(basePath).match(/^Nodes\[(\d+)\]\.Contrasts$/);
+            if (contrastPathMatch) {
+                const nodeIdx = Number(contrastPathMatch[1]);
+                const controls = document.createElement('div');
+                controls.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
+
+                const hint = document.createElement('span');
+                hint.className = 'small text-muted me-auto';
+                hint.textContent = 'Use Contrast Builder for user-friendly contrast editing.';
+
+                const openBtn = document.createElement('button');
+                openBtn.type = 'button';
+                openBtn.className = 'btn btn-sm btn-outline-primary';
+                openBtn.innerHTML = '<i class="fas fa-puzzle-piece me-1"></i>Open Contrast Builder';
+                openBtn.addEventListener('click', () => {
+                    if (typeof window.openContrastBuilder === 'function') {
+                        window.openContrastBuilder(nodeIdx);
+                    } else {
+                        alert('Contrast Builder not ready — please wait for the page to finish loading.');
+                    }
+                });
+
+                controls.appendChild(hint);
+                controls.appendChild(openBtn);
+                listWrap.appendChild(controls);
+            }
 
             if (/\.Model\.X$/.test(basePath)) {
                 const controls = document.createElement('div');
@@ -2272,10 +2711,18 @@
         }
 
         if (node !== null && typeof node === 'object') {
+            const isManagedHrfObject = isManagedModelHrfPath(basePath);
+            if (isManagedHrfObject) {
+                container.appendChild(createInlineNote('HRF variables are controlled in Design Matrix rows. Use each regressor\'s HRF on/off toggle.'));
+            }
+
             const objWrap = document.createElement('div');
             objWrap.className = 'accordion';
             Object.entries(node).forEach(([key, value]) => {
                 if (/^Nodes\[\d+\]$/.test(basePath) && (key === 'Level' || key === 'Name')) {
+                    return;
+                }
+                if (isManagedHrfObject && key === 'Variables') {
                     return;
                 }
                 const path = basePath ? `${basePath}.${key}` : key;
@@ -2324,6 +2771,8 @@
             }
             modelEditorDraft.Input.task = [];
         }
+
+        syncAllModelXHrfVariables();
 
         const summary = computeModelEditorSummary(modelEditorDraft);
         renderModelEditorSummary(summary);
@@ -3212,6 +3661,8 @@
             status.innerHTML = '<div class="alert alert-danger py-1 x-small mb-0">No editable model loaded.</div>';
             return;
         }
+
+        syncAllModelXHrfVariables();
 
         const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
         if (missing.length) {
@@ -4196,7 +4647,7 @@
             if (type === 'success') setTimeout(() => { cbStatus.innerHTML = ''; }, 2500);
         }
 
-        async function openContrastBuilder() {
+        async function openContrastBuilder(targetNodeIdx = 0) {
             if (!modelEditorDraft) {
                 // Try to load first
                 const modelPath = document.getElementById('input-MODELS_FILE')?.value;
@@ -4224,7 +4675,16 @@
                 }
             }
 
-            cbNodeIdx = 0;
+            const nodes = getNodes();
+            if (!nodes.length) {
+                alert('No nodes found in this model. Add a node first.');
+                return;
+            }
+
+            const requestedIdx = Number(targetNodeIdx);
+            cbNodeIdx = Number.isInteger(requestedIdx)
+                ? Math.max(0, Math.min(requestedIdx, nodes.length - 1))
+                : 0;
             reloadForNode();
             bootstrap.Modal.getOrCreateInstance(modal).show();
         }
@@ -4247,7 +4707,7 @@
 
         // ── Event bindings ─────────────────────────────────────
         document.getElementById('btn-open-contrast-builder')
-            .addEventListener('click', openContrastBuilder);
+            .addEventListener('click', () => openContrastBuilder());
 
         addContrastBtn.addEventListener('click', () => {
             cbDraft.push({
@@ -4277,6 +4737,9 @@
         document.querySelectorAll('.cb-preset-btn').forEach(btn => {
             btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
         });
+
+        // Expose for outer-scope callers (e.g. dynamically-built buttons in renderJsonEditor)
+        window.openContrastBuilder = openContrastBuilder;
 
     })();  // end IIFE
 
