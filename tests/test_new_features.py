@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from bidspm_gui import app as flask_app
+from bidspm_gui import collect_startup_preflight_checks, open_browser_when_ready
 from lib.core import Pipeline, PipelineOptions
 from lib.project_manager import ProjectManager
 
@@ -147,6 +148,57 @@ class TestNewFeatures(unittest.TestCase):
 
             self.assertEqual(exported["MODELS_FILE"], "studies/model.json")
             self.assertEqual(exported["NODE_NAME"], "dataset_level")
+
+    def test_startup_preflight_checks_report_expected_surfaces(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "templates").mkdir()
+            (root / "static").mkdir()
+            (root / "config").mkdir()
+            (root / "config" / "config_schema.json").write_text("{}\n", encoding="utf-8")
+
+            checks = collect_startup_preflight_checks(app_root=root)
+
+        labels = [check["label"] for check in checks]
+        by_label = {check["label"]: check["ready"] for check in checks}
+
+        self.assertEqual(
+            labels,
+            [
+                "Core pipeline",
+                "Project manager",
+                "Templates",
+                "Static assets",
+                "Config schema",
+                "Waitress server",
+                "REST API",
+                "Workflow routes",
+            ],
+        )
+        self.assertTrue(all(by_label.values()))
+
+    def test_startup_preflight_checks_flag_missing_assets(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            checks = collect_startup_preflight_checks(app_root=Path(tmp_dir))
+
+        by_label = {check["label"]: check["ready"] for check in checks}
+
+        self.assertFalse(by_label["Templates"])
+        self.assertFalse(by_label["Static assets"])
+        self.assertFalse(by_label["Config schema"])
+        self.assertTrue(by_label["REST API"])
+        self.assertTrue(by_label["Workflow routes"])
+
+    def test_open_browser_when_ready_uses_browser_handler(self):
+        url = "http://localhost:5100"
+
+        with patch("bidspm_gui.wait_for_http_ready", return_value=True), \
+             patch("webbrowser.open", return_value=True) as mock_open:
+            opened, message = open_browser_when_ready(url)
+
+        self.assertTrue(opened)
+        self.assertEqual(message, "Browser opened automatically")
+        mock_open.assert_called_once_with(url)
 
     def test_pipeline_dry_run_includes_node_name(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

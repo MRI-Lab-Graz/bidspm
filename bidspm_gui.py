@@ -121,27 +121,78 @@ def wait_for_http_ready(url: str, timeout: float = 8.0, interval: float = 0.2) -
     return False
 
 
-def should_skip_browser_auto_open() -> tuple[bool, str]:
-    """Return whether browser auto-open should be skipped and why."""
-    browser_cmd = os.environ.get('BROWSER', '')
-    term_program = os.environ.get('TERM_PROGRAM', '')
+def collect_startup_preflight_checks(app_root: Path = APP_ROOT) -> List[Dict[str, Any]]:
+    """Collect basic readiness checks for the local web interface startup."""
+    registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
+    required_api_routes = {'/check_environment', '/api/model/create', '/api/preflight/tools'}
+    required_page_routes = {'/', '/projects', '/analysis', '/model_editor'}
 
-    vscode_markers = [
-        'browser.sh' in browser_cmd,
-        term_program == 'vscode',
-        bool(os.environ.get('VSCODE_IPC_HOOK_CLI')),
-        bool(os.environ.get('VSCODE_GIT_ASKPASS_NODE')),
-        bool(os.environ.get('VSCODE_GIT_IPC_HANDLE')),
+    return [
+        {
+            'label': 'Core pipeline',
+            'ready': all(item is not None for item in (Pipeline, PipelineOptions, PipelineResult)),
+        },
+        {
+            'label': 'Project manager',
+            'ready': hasattr(project_manager, 'list_projects') and hasattr(project_manager, 'load_project'),
+        },
+        {
+            'label': 'Templates',
+            'ready': (app_root / 'templates').is_dir(),
+        },
+        {
+            'label': 'Static assets',
+            'ready': (app_root / 'static').is_dir(),
+        },
+        {
+            'label': 'Config schema',
+            'ready': (app_root / 'config' / 'config_schema.json').is_file(),
+        },
+        {
+            'label': 'Waitress server',
+            'ready': callable(serve),
+        },
+        {
+            'label': 'REST API',
+            'ready': required_api_routes.issubset(registered_routes),
+        },
+        {
+            'label': 'Workflow routes',
+            'ready': required_page_routes.issubset(registered_routes),
+        },
     ]
-    if any(vscode_markers):
-        return True, 'VS Code environment detected'
 
-    ssh_session = bool(os.environ.get('SSH_CONNECTION') or os.environ.get('SSH_TTY'))
-    headless = not bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
-    if ssh_session and headless:
-        return True, 'headless SSH session detected'
 
-    return False, ''
+def print_startup_preflight_report(app_root: Path = APP_ROOT) -> bool:
+    """Print startup checks and return True when every check is ready."""
+    checks = collect_startup_preflight_checks(app_root=app_root)
+    label_width = max(len(check['label']) for check in checks) + 2
+
+    print('Pre-flight check')
+    for check in checks:
+        symbol = '✓' if check['ready'] else '✗'
+        status = 'ready' if check['ready'] else 'missing'
+        print(f"  {symbol} {check['label']:<{label_width}} {status}")
+
+    return all(check['ready'] for check in checks)
+
+
+def open_browser_when_ready(url: str) -> tuple[bool, str]:
+    """Wait for the server URL to respond, then try to open it in a browser."""
+    import webbrowser
+
+    if not wait_for_http_ready(url):
+        return False, f"Server did not become ready within the browser-open timeout. Open manually: {url}"
+
+    try:
+        opened = webbrowser.open(url)
+    except Exception as exc:
+        return False, f"Unable to open browser automatically ({exc}). Open manually: {url}"
+
+    if opened:
+        return True, 'Browser opened automatically'
+
+    return False, f"Browser launch was requested but no browser handler confirmed the open. Open manually: {url}"
 
 
 def _pids_listening_on_port(port: int) -> List[int]:
@@ -2434,7 +2485,6 @@ def shutdown():
 
 if __name__ == '__main__':
     import argparse
-    import webbrowser
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
     parser.add_argument('-p', '--port', type=int, default=None,
                        help='Port to use (default: 5100; any existing instance on that port is stopped first)')
@@ -2455,31 +2505,27 @@ if __name__ == '__main__':
         sys.exit(1)
 
     url = f"http://localhost:{port}"
-    print(f"🌐 Starting BIDSPM Web Interface v{__version__}")
-    print(f"🔗 URL: {url}")
-    print("💡 Press Ctrl+C to stop the server")
-    print()
-    print(f"🚀 Running with Waitress server on 0.0.0.0:{port}")
+    preflight_ready = print_startup_preflight_report()
 
-    # In VS Code Remote or headless SSH sessions, browser auto-open often fires
-    # before local port forwarding is ready, which can surface as an empty page
-    # or connection-refused tab in the user's browser.
-    skip_browser_open, skip_reason = should_skip_browser_auto_open()
+    print()
+    print(f"Open in browser: {url}")
+    if args.no_browser:
+        status = 'ready' if preflight_ready else 'startup checks completed with warnings'
+        print(f"Status: {status}. Browser auto-launch disabled (--no-browser).")
+    elif preflight_ready:
+        print('Status: ready. Launching the interface now.')
+    else:
+        print('Status: startup checks completed with warnings. Launching the interface now.')
+    print('Press Ctrl+C to stop the server')
+    print()
+    print(f"Running with Waitress server on 0.0.0.0:{port}")
 
     if not args.no_browser:
-        if skip_browser_open:
-            print()
-            print(f"📌 Browser auto-open skipped: {skip_reason}.")
-            print("   → Open the forwarded port from VS Code once the tunnel is ready,")
-            print(f"     or open manually: {url}")
-        else:
-            def open_browser():
-                if wait_for_http_ready(url):
-                    webbrowser.open(url)
-                    print("✅ Browser opened automatically")
-                else:
-                    print(f"⚠️  Server did not become ready within the browser-open timeout. Open manually: {url}")
+        def launch_browser() -> None:
+            opened, message = open_browser_when_ready(url)
+            prefix = '✅' if opened else '⚠️'
+            print(f"{prefix} {message}")
 
-            threading.Timer(1, open_browser).start()
+        threading.Timer(1, launch_browser).start()
 
     serve(app, host='0.0.0.0', port=port, threads=10)
