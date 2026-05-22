@@ -1897,6 +1897,219 @@
     return null;
   }
 
+  function getModelEditorParticipantsInfo(){
+    return (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+      ? window.modelEditorParticipantsInfo
+      : emptyParticipantsInfo();
+  }
+
+  function slugifyNodeToken(value){
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase();
+  }
+
+  function getUniqueNodeName(baseName){
+    const normalizedBase = String(baseName || '').trim() || 'node';
+    const existing = new Set(
+      (Array.isArray(model?.Nodes) ? model.Nodes : [])
+        .map(node => String(node?.Name || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (!existing.has(normalizedBase.toLowerCase())) return normalizedBase;
+    for (let idx = 2; idx < 1000; idx += 1) {
+      const candidate = `${normalizedBase}_${idx}`;
+      if (!existing.has(candidate.toLowerCase())) return candidate;
+    }
+    return `${normalizedBase}_${Date.now().toString().slice(-4)}`;
+  }
+
+  function applyDatasetNodePreset(node, preset, options = {}){
+    const participantsInfo = getModelEditorParticipantsInfo();
+    const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+    const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+    const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+      ? participantsInfo.sample_values
+      : {};
+
+    const groupVariable = String(options.groupVariable || categoricalColumns[0] || '').trim();
+    const covariate = String(options.covariate || numericColumns[0] || '').trim();
+    const allLevels = normalizeStringArray(sampleValues[groupVariable]);
+    const groupA = String(options.groupA || allLevels[0] || '').trim();
+    const groupB = String(options.groupB || allLevels.find(level => level !== groupA) || allLevels[0] || '').trim();
+
+    node.Level = 'Dataset';
+    if (!node.Model || typeof node.Model !== 'object' || Array.isArray(node.Model)) node.Model = {};
+    node.Model = {
+      ...node.Model,
+      Type: String(node.Model.Type || 'glm').trim() || 'glm',
+      X: ['1']
+    };
+    delete node.Model.HRF;
+    delete node.Transformations;
+
+    let message = 'Applied dataset preset.';
+    let tone = 'success';
+
+    if (preset === 'one_sample_all') {
+      node.GroupBy = ['contrast'];
+      node.Description = 'one sample t-test: averaging across all subjects';
+      node.DummyContrasts = { Test: 't' };
+      node.Contrasts = [];
+      return { message: 'Applied all-subject one-sample dataset preset.', tone, suggestedName: 'dataset_level' };
+    }
+
+    if (preset === 'one_sample_by_group') {
+      node.GroupBy = groupVariable ? ['contrast', groupVariable] : ['contrast'];
+      node.Description = groupVariable
+        ? `one sample t-test for each ${groupVariable} group`
+        : 'one sample t-test for each group';
+      node.DummyContrasts = { Test: 't' };
+      node.Contrasts = [];
+      message = groupVariable
+        ? `Applied one-sample-by-group preset using ${groupVariable}.`
+        : 'Added one-sample-by-group scaffold. Select a participants.tsv grouping variable to finish setup.';
+      tone = groupVariable ? 'success' : 'warning';
+      return { message, tone, suggestedName: groupVariable ? `within_${slugifyNodeToken(groupVariable)}_group` : 'within_group' };
+    }
+
+    if (preset === 'two_sample_groups') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = groupVariable ? ['1', groupVariable] : ['1'];
+      node.Description = groupVariable
+        ? `2 sample t-test between ${groupVariable} groups`
+        : '2 sample t-test between groups';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (groupVariable && groupA && groupB && groupA !== groupB) {
+        node.Contrasts = [{
+          Name: `${slugifyNodeToken(groupA)}_gt_${slugifyNodeToken(groupB)}`,
+          ConditionList: [`${groupVariable}.${groupA}`, `${groupVariable}.${groupB}`],
+          Weights: [1, -1],
+          Test: 't'
+        }];
+        message = `Applied two-sample group comparison using ${groupVariable}.`;
+        tone = 'success';
+      } else {
+        message = groupVariable
+          ? `Added two-sample scaffold using ${groupVariable}. Pick the two group values in Node.Model to finish the contrast.`
+          : 'Added two-sample scaffold. Select a categorical participants.tsv variable to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: groupVariable ? `between_${slugifyNodeToken(groupVariable)}_groups` : 'between_groups' };
+    }
+
+    if (preset === 'one_way_anova') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = groupVariable ? ['1', groupVariable] : ['1'];
+      node.Description = groupVariable
+        ? `one way ANOVA across ${groupVariable}`
+        : 'one way ANOVA across groups';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (groupVariable && allLevels.length >= 2) {
+        node.Contrasts = [{
+          Name: `average_across_${slugifyNodeToken(groupVariable) || 'groups'}`,
+          ConditionList: allLevels.map(level => `${groupVariable}.${level}`),
+          Weights: allLevels.map(() => 1),
+          Test: 't'
+        }];
+        message = `Applied one-way ANOVA scaffold using ${groupVariable}.`;
+        tone = 'success';
+      } else {
+        message = groupVariable
+          ? `Added one-way ANOVA scaffold using ${groupVariable}. More observed group values are needed to build the contrast automatically.`
+          : 'Added one-way ANOVA scaffold. Select a categorical participants.tsv variable to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: groupVariable ? `${slugifyNodeToken(groupVariable)}_anova` : 'one_way_anova' };
+    }
+
+    if (preset === 'linear_regression') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = covariate ? ['1', covariate] : ['1'];
+      node.Description = covariate
+        ? `linear regression with ${covariate}`
+        : 'linear regression with numeric covariate';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (covariate) {
+        node.Contrasts = [
+          {
+            Name: `${slugifyNodeToken(covariate)}_positive`,
+            ConditionList: [covariate],
+            Weights: [1],
+            Test: 't'
+          },
+          {
+            Name: `${slugifyNodeToken(covariate)}_negative`,
+            ConditionList: [covariate],
+            Weights: [-1],
+            Test: 't'
+          }
+        ];
+        message = `Applied linear regression preset using ${covariate}.`;
+        tone = 'success';
+      } else {
+        message = 'Added linear regression scaffold. Select a numeric participants.tsv covariate to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: covariate ? `${slugifyNodeToken(covariate)}_regression` : 'dataset_regression' };
+    }
+
+    return { message, tone, suggestedName: 'dataset_level' };
+  }
+
+  function buildNodeFromPreset(preset){
+    if (preset === 'subject_fixed') {
+      return {
+        node: {
+          Level: 'Subject',
+          Name: getUniqueNodeName('subject_level'),
+          GroupBy: ['contrast', 'subject'],
+          Model: { Type: 'glm', X: ['1'] },
+          DummyContrasts: { Test: 't' },
+          Contrasts: []
+        },
+        message: 'Added subject-level fixed-effects node.',
+        tone: 'success',
+        selectField: 'Model'
+      };
+    }
+
+    if (['one_sample_all', 'one_sample_by_group', 'two_sample_groups', 'one_way_anova', 'linear_regression'].includes(preset)) {
+      const node = {
+        Level: 'Dataset',
+        Name: '',
+        GroupBy: ['contrast'],
+        Model: { Type: 'glm', X: ['1'] },
+        DummyContrasts: { Test: 't' },
+        Contrasts: []
+      };
+      const result = applyDatasetNodePreset(node, preset);
+      node.Name = getUniqueNodeName(result.suggestedName || 'dataset_level');
+      return {
+        node,
+        message: result.message,
+        tone: result.tone,
+        selectField: 'Model',
+        forceFriendly: true
+      };
+    }
+
+    const node = cloneJson(defaultArrayItemForPath('Nodes'));
+    node.Name = getUniqueNodeName('run_level');
+    return {
+      node,
+      message: 'Added run-level node.',
+      tone: 'success',
+      selectField: 'Model'
+    };
+  }
+
   function normalizeStringArray(value){
     if (!Array.isArray(value)) return [];
     return value.map(v => String(v).trim()).filter(Boolean);
@@ -1918,9 +2131,7 @@
     const wrapper = document.createElement('div');
     wrapper.className = 'd-flex flex-column gap-3';
 
-    const participantsInfo = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
-      ? window.modelEditorParticipantsInfo
-      : emptyParticipantsInfo();
+    const participantsInfo = getModelEditorParticipantsInfo();
     const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
     const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
     const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
@@ -1933,15 +2144,6 @@
       renderModelStructure();
       renderNodeModelFieldEditor(node, idx);
       setStatus(message, tone);
-    }
-
-    function slugifyToken(value){
-      return String(value || '')
-        .trim()
-        .replace(/\s+/g, '_')
-        .replace(/[^A-Za-z0-9_]+/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .toLowerCase();
     }
 
     function createFieldRow(labelText){
@@ -2123,108 +2325,15 @@
     applyPresetBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
     applyPresetBtn.textContent = 'Apply Preset';
     applyPresetBtn.addEventListener('click', ()=>{
-      const preset = presetSelect.value;
-      const groupVariable = groupVarSelect.value.trim();
-      const covariate = covariateSelect.value.trim();
-      const groupA = groupALevelSelect.value.trim();
-      const groupB = groupBLevelSelect.value.trim();
-      const allLevels = normalizeStringArray(sampleValues[groupVariable]);
-
-      if (preset === 'one_sample_all') {
-        node.GroupBy = ['contrast'];
-        setModelX(['1']);
-        node.Description = 'one sample t-test: averaging across all subjects';
-        node.DummyContrasts = { Test: 't' };
-        node.Contrasts = [];
-        rerender('Applied all-subject one-sample dataset preset.', 'success');
-        return;
-      }
-
-      if (preset === 'one_sample_by_group') {
-        if (!groupVariable) {
-          setStatus('Select a categorical participants.tsv column first.', 'warning');
-          return;
-        }
-        node.GroupBy = ['contrast', groupVariable];
-        setModelX(['1']);
-        node.Description = `one sample t-test for each ${groupVariable} group`;
-        node.DummyContrasts = { Test: 't' };
-        node.Contrasts = [];
-        rerender(`Applied one-sample-by-group preset using ${groupVariable}.`, 'success');
-        return;
-      }
-
-      if (preset === 'two_sample_groups') {
-        if (!groupVariable) {
-          setStatus('Select a categorical participants.tsv column first.', 'warning');
-          return;
-        }
-        if (!groupA || !groupB || groupA === groupB) {
-          setStatus('Choose two distinct groups for the comparison.', 'warning');
-          return;
-        }
-        node.GroupBy = ['contrast'];
-        setModelX(['1', groupVariable]);
-        node.Description = `2 sample t-test between ${groupVariable} groups`;
-        delete node.DummyContrasts;
-        node.Contrasts = [{
-          Name: `${slugifyToken(groupA)}_gt_${slugifyToken(groupB)}`,
-          ConditionList: [`${groupVariable}.${groupA}`, `${groupVariable}.${groupB}`],
-          Weights: [1, -1],
-          Test: 't'
-        }];
-        rerender(`Applied two-sample group comparison using ${groupVariable}.`, 'success');
-        return;
-      }
-
-      if (preset === 'one_way_anova') {
-        if (!groupVariable) {
-          setStatus('Select a categorical participants.tsv column first.', 'warning');
-          return;
-        }
-        if (allLevels.length < 2) {
-          setStatus(`Need at least two observed values in ${groupVariable} for a group comparison.`, 'warning');
-          return;
-        }
-        node.GroupBy = ['contrast'];
-        setModelX(['1', groupVariable]);
-        node.Description = `one way ANOVA across ${groupVariable}`;
-        delete node.DummyContrasts;
-        node.Contrasts = [{
-          Name: `average_across_${slugifyToken(groupVariable) || 'groups'}`,
-          ConditionList: allLevels.map(level => `${groupVariable}.${level}`),
-          Weights: allLevels.map(() => 1),
-          Test: 't'
-        }];
-        rerender(`Applied one-way ANOVA scaffold using ${groupVariable}.`, 'success');
-        return;
-      }
-
-      if (preset === 'linear_regression') {
-        if (!covariate) {
-          setStatus('Select a numeric participants.tsv column first.', 'warning');
-          return;
-        }
-        node.GroupBy = ['contrast'];
-        setModelX(['1', covariate]);
-        node.Description = `linear regression with ${covariate}`;
-        delete node.DummyContrasts;
-        node.Contrasts = [
-          {
-            Name: `${slugifyToken(covariate)}_positive`,
-            ConditionList: [covariate],
-            Weights: [1],
-            Test: 't'
-          },
-          {
-            Name: `${slugifyToken(covariate)}_negative`,
-            ConditionList: [covariate],
-            Weights: [-1],
-            Test: 't'
-          }
-        ];
-        rerender(`Applied linear regression preset using ${covariate}.`, 'success');
-      }
+      const result = applyDatasetNodePreset(node, presetSelect.value, {
+        groupVariable: groupVarSelect.value.trim(),
+        covariate: covariateSelect.value.trim(),
+        groupA: groupALevelSelect.value.trim(),
+        groupB: groupBLevelSelect.value.trim()
+      });
+      modelObj = ensureNodeModelObject(node, idx);
+      setModelX(modelObj.X);
+      rerender(result.message, result.tone || 'success');
     });
     presetCard.appendChild(applyPresetBtn);
     wrapper.appendChild(presetCard);
@@ -5123,21 +5232,82 @@
     headerWrap.appendChild(button);
 
     if (section.kind === 'nodes' || section.kind === 'array' || section.kind === 'edges') {
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'btn btn-sm btn-outline-success json-add-btn';
-      addBtn.textContent = section.kind === 'nodes' ? '+ Add Node' : (section.kind === 'edges' ? '+ Add Edge' : '+ Add');
-      addBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const current = getByPath(modelEditorDraft, section.path);
-        if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
-        if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
-        if (section.kind === 'edges') modelEditorDraft[section.path].push(getEdgeDefaultValue());
-        else addArrayItem(section.path);
-        renderModelAccordionEditor();
-      });
-      headerWrap.appendChild(addBtn);
+      if (section.kind === 'nodes') {
+        const addGroup = document.createElement('div');
+        addGroup.className = 'btn-group btn-group-sm json-add-btn';
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-outline-success dropdown-toggle';
+        addBtn.textContent = '+ Add Node';
+        addBtn.setAttribute('data-bs-toggle', 'dropdown');
+        addBtn.setAttribute('aria-expanded', 'false');
+        addBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        addGroup.appendChild(addBtn);
+
+        const menu = document.createElement('div');
+        menu.className = 'dropdown-menu dropdown-menu-end';
+        [
+          ['run_basic', 'Run node'],
+          ['subject_fixed', 'Subject node: fixed effects'],
+          ['one_sample_all', 'Dataset: one sample t-test'],
+          ['one_sample_by_group', 'Dataset: one sample t-test by group'],
+          ['two_sample_groups', 'Dataset: 2 samples t-test'],
+          ['one_way_anova', 'Dataset: one way ANOVA'],
+          ['linear_regression', 'Dataset: linear regression']
+        ].forEach(([value, label]) => {
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'dropdown-item';
+          item.textContent = label;
+          item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const current = getByPath(modelEditorDraft, section.path);
+            if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
+            if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
+            const addResult = buildNodeFromPreset(value);
+            modelEditorDraft[section.path].push(addResult.node);
+            renderModelStructure();
+            renderNodeList();
+            const newIndex = modelEditorDraft[section.path].length - 1;
+            if (addResult.forceFriendly) {
+              setRawMode(false);
+              ensureSelectionDrivenRightPane();
+              selectNodeField(newIndex, addResult.selectField || 'Model');
+            } else if (editorMode === 'full') {
+              renderModelAccordionEditor();
+            } else {
+              selectNodeField(newIndex, addResult.selectField || 'Model');
+            }
+            setStatus(addResult.message, addResult.tone || 'success');
+          });
+          menu.appendChild(item);
+        });
+        addGroup.appendChild(menu);
+        headerWrap.appendChild(addGroup);
+      } else {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-outline-success json-add-btn';
+        addBtn.textContent = section.kind === 'edges' ? '+ Add Edge' : '+ Add';
+        addBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const current = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
+          if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
+          if (section.kind === 'edges') modelEditorDraft[section.path].push(getEdgeDefaultValue());
+          else addArrayItem(section.path);
+          renderModelStructure();
+          renderNodeList();
+          renderModelAccordionEditor();
+        });
+        headerWrap.appendChild(addBtn);
+      }
     }
 
     header.appendChild(headerWrap);

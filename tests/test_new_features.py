@@ -27,6 +27,19 @@ class TestNewFeatures(unittest.TestCase):
         text = response.get_data(as_text=True)
         self.assertIn("Model Editor", text)
         self.assertIn("studies/model.json", text)
+        self.assertIn("Dataset: one sample t-test", text)
+        self.assertIn("Dataset: 2 samples t-test", text)
+
+    def test_analysis_page_renders_second_level_add_node_menu(self):
+        response = self.client.get("/analysis")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn("Dataset: one sample t-test", text)
+        self.assertIn("Dataset: one sample t-test by group", text)
+        self.assertIn("Dataset: 2 samples t-test", text)
+        self.assertIn("Dataset: one way ANOVA", text)
+        self.assertIn("Dataset: linear regression", text)
 
     def test_api_bids_entities_missing_path_returns_defaults(self):
         response = self.client.get("/api/bids_entities", query_string={"path": "/path/that/does/not/exist"})
