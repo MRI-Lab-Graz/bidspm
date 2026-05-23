@@ -749,6 +749,15 @@
   window.modelEditorEventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
     ? window.modelEditorEventSamples
     : { trial_type: [], condition: [] };
+  window.modelEditorEventColumns = Array.isArray(window.modelEditorEventColumns)
+    ? window.modelEditorEventColumns
+    : [];
+  window.modelEditorEventNumericColumns = Array.isArray(window.modelEditorEventNumericColumns)
+    ? window.modelEditorEventNumericColumns
+    : [];
+  window.modelEditorEventNumericSamples = (window.modelEditorEventNumericSamples && typeof window.modelEditorEventNumericSamples === 'object')
+    ? window.modelEditorEventNumericSamples
+    : {};
   window.modelEditorConfoundColumns = Array.isArray(window.modelEditorConfoundColumns)
     ? window.modelEditorConfoundColumns
     : [];
@@ -1281,6 +1290,9 @@
     if (!bidsDir) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorEventColumns = [];
+      window.modelEditorEventNumericColumns = [];
+      window.modelEditorEventNumericSamples = {};
       window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
@@ -1304,6 +1316,9 @@
       if (data.error) {
         window.modelEditorInterestRegressors = [];
         window.modelEditorEventSamples = { trial_type: [], condition: [] };
+        window.modelEditorEventColumns = [];
+        window.modelEditorEventNumericColumns = [];
+        window.modelEditorEventNumericSamples = {};
         window.modelEditorParticipantsInfo = emptyParticipantsInfo();
         if (!prepDir) {
           window.modelEditorConfoundColumns = [];
@@ -1312,13 +1327,24 @@
         return;
       }
 
-      const sample = data?.dataset?.events?.sample_values || {};
+      const events = data?.dataset?.events || {};
+      const sample = events.sample_values || {};
       const trialValues = normalizeStringArray(sample.trial_type);
       const conditionValues = normalizeStringArray(sample.condition);
       window.modelEditorEventSamples = {
         trial_type: trialValues,
         condition: conditionValues
       };
+      window.modelEditorEventColumns = normalizeStringArray(events.event_columns);
+      window.modelEditorEventNumericColumns = normalizeStringArray(events.numeric_columns);
+      const numericSamplesRaw = (events.numeric_sample_values && typeof events.numeric_sample_values === 'object')
+        ? events.numeric_sample_values
+        : {};
+      const numericSamples = {};
+      Object.entries(numericSamplesRaw).forEach(([columnName, values]) => {
+        numericSamples[String(columnName || '').trim()] = normalizeStringArray(values);
+      });
+      window.modelEditorEventNumericSamples = numericSamples;
 
       const trialRegs = trialValues.map(v => `trial_type.${v}`);
       const conditionRegs = conditionValues.map(v => `condition.${v}`);
@@ -1333,6 +1359,9 @@
     } catch (e) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorEventColumns = [];
+      window.modelEditorEventNumericColumns = [];
+      window.modelEditorEventNumericSamples = {};
       window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
@@ -2429,6 +2458,12 @@
       rerender('Regressor order updated.', 'info');
     }
 
+    function moveDatasetRegressorByStep(fromIndex, step) {
+      if (!Array.isArray(modelObj.X)) return;
+      const targetIndex = step < 0 ? fromIndex - 1 : fromIndex + 2;
+      reorderDatasetRegressor(fromIndex, targetIndex);
+    }
+
     function applyDroppedDatasetRegressor(event, targetIndex) {
       const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
       const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
@@ -2583,6 +2618,28 @@
         const actions = document.createElement('div');
         actions.className = 'modelx-chip-actions';
 
+        const upBtn = document.createElement('button');
+        upBtn.type = 'button';
+        upBtn.className = 'btn btn-sm btn-outline-secondary';
+        upBtn.title = 'Move up';
+        upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+        upBtn.disabled = regIdx === 0;
+        upBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          moveDatasetRegressorByStep(regIdx, -1);
+        });
+
+        const downBtn = document.createElement('button');
+        downBtn.type = 'button';
+        downBtn.className = 'btn btn-sm btn-outline-secondary';
+        downBtn.title = 'Move down';
+        downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+        downBtn.disabled = regIdx >= modelObj.X.length - 1;
+        downBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          moveDatasetRegressorByStep(regIdx, 1);
+        });
+
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'modelx-chip-remove';
@@ -2592,6 +2649,8 @@
           modelObj.X.splice(regIdx, 1);
           rerender('Regressor removed from dataset Model.X.', 'info');
         });
+        actions.appendChild(upBtn);
+        actions.appendChild(downBtn);
         actions.appendChild(delBtn);
 
         chip.appendChild(main);
@@ -2697,6 +2756,69 @@
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
     const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
 
+    function getRunConditionRegressorsForModulation(){
+      return normalizeStringArray(modelObj.X)
+        .filter(reg => reg.startsWith('trial_type.') || reg.startsWith('condition.'));
+    }
+
+    function getNumericEventColumnsForModulation(){
+      return normalizeStringArray(window.modelEditorEventNumericColumns);
+    }
+
+    function getNumericEventSampleValues(columnName){
+      const samples = (window.modelEditorEventNumericSamples && typeof window.modelEditorEventNumericSamples === 'object')
+        ? window.modelEditorEventNumericSamples
+        : {};
+      return normalizeStringArray(samples[String(columnName || '').trim()]);
+    }
+
+    function normalizeParametricModulationEntry(entry, fallbackCondition = '', fallbackValue = '', index = 0){
+      const conditions = normalizeStringArray(entry?.Conditions);
+      const values = normalizeStringArray(entry?.Values);
+      const rawPoly = Number(entry?.PolynomialExpansion);
+      return {
+        Name: String(entry?.Name || `parametric_mod_${index + 1}`).trim() || `parametric_mod_${index + 1}`,
+        Conditions: conditions.length ? [conditions[0]] : (fallbackCondition ? [fallbackCondition] : []),
+        Values: values.length ? [values[0]] : (fallbackValue ? [fallbackValue] : []),
+        PolynomialExpansion: Number.isFinite(rawPoly) && rawPoly > 0 ? Math.round(rawPoly) : 1
+      };
+    }
+
+    function getFriendlyParametricModulations(){
+      const existing = modelObj?.Software?.SPM?.ParametricModulations;
+      if (!Array.isArray(existing)) return [];
+      const conditionFallback = getRunConditionRegressorsForModulation()[0] || '';
+      const valueFallback = getNumericEventColumnsForModulation()[0] || '';
+      return existing.map((entry, index) =>
+        normalizeParametricModulationEntry(entry, conditionFallback, valueFallback, index)
+      );
+    }
+
+    function setFriendlyParametricModulations(nextEntries){
+      const normalizedEntries = Array.isArray(nextEntries)
+        ? nextEntries.map((entry, index) => normalizeParametricModulationEntry(entry, '', '', index))
+        : [];
+
+      if (!normalizedEntries.length) {
+        if (modelObj.Software && typeof modelObj.Software === 'object' && !Array.isArray(modelObj.Software)) {
+          if (modelObj.Software.SPM && typeof modelObj.Software.SPM === 'object' && !Array.isArray(modelObj.Software.SPM)) {
+            delete modelObj.Software.SPM.ParametricModulations;
+            if (!Object.keys(modelObj.Software.SPM).length) delete modelObj.Software.SPM;
+          }
+          if (!Object.keys(modelObj.Software).length) delete modelObj.Software;
+        }
+        return;
+      }
+
+      if (!modelObj.Software || typeof modelObj.Software !== 'object' || Array.isArray(modelObj.Software)) {
+        modelObj.Software = {};
+      }
+      if (!modelObj.Software.SPM || typeof modelObj.Software.SPM !== 'object' || Array.isArray(modelObj.Software.SPM)) {
+        modelObj.Software.SPM = {};
+      }
+      modelObj.Software.SPM.ParametricModulations = normalizedEntries;
+    }
+
     function normalizeFriendlyHrfVariables(){
       if (!modelObj.HRF || typeof modelObj.HRF !== 'object') return [];
       return normalizeStringArray(modelObj.HRF.Variables);
@@ -2794,6 +2916,12 @@
       rerenderModelX('Regressor order updated', 'info');
     }
 
+    function moveModelXRegressorByStep(fromIndex, step){
+      if (!Array.isArray(modelObj.X)) return;
+      const targetIndex = step < 0 ? fromIndex - 1 : fromIndex + 2;
+      reorderModelXRegressor(fromIndex, targetIndex);
+    }
+
     function applyDroppedRegressor(event, targetIndex){
       const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
       const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
@@ -2819,7 +2947,7 @@
     const trialPoolHint = document.createElement('div');
     trialPoolHint.className = 'small text-muted mb-2';
     trialPoolHint.textContent = hasSingleSelectedTask
-      ? 'Drag or click badges into the Design Matrix space below.'
+      ? 'Drag or click badges into the Design Matrix space below. Use arrow buttons to reorder quickly.'
       : 'Select exactly one task in Input.task to load task-specific trial types.';
     trialPoolCard.appendChild(trialPoolHint);
 
@@ -2940,6 +3068,11 @@
     xListTitle.textContent = 'Design Matrix space';
     xCard.appendChild(xListTitle);
 
+    const xListHint = document.createElement('div');
+    xListHint.className = 'small text-muted mb-1';
+    xListHint.textContent = 'Tip: use the arrow buttons on each row for precise ordering.';
+    xCard.appendChild(xListHint);
+
     const xList = document.createElement('div');
     xList.className = 'modelx-drop-zone';
     xList.addEventListener('dragover', (event)=>{
@@ -3009,6 +3142,28 @@
         const actions = document.createElement('div');
         actions.className = 'modelx-chip-actions';
 
+        const upBtn = document.createElement('button');
+        upBtn.type = 'button';
+        upBtn.className = 'btn btn-sm btn-outline-secondary';
+        upBtn.title = 'Move up';
+        upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+        upBtn.disabled = regIdx === 0;
+        upBtn.addEventListener('click', (event)=>{
+          event.stopPropagation();
+          moveModelXRegressorByStep(regIdx, -1);
+        });
+
+        const downBtn = document.createElement('button');
+        downBtn.type = 'button';
+        downBtn.className = 'btn btn-sm btn-outline-secondary';
+        downBtn.title = 'Move down';
+        downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+        downBtn.disabled = regIdx >= modelObj.X.length - 1;
+        downBtn.addEventListener('click', (event)=>{
+          event.stopPropagation();
+          moveModelXRegressorByStep(regIdx, 1);
+        });
+
         const hrfBtn = document.createElement('button');
         hrfBtn.type = 'button';
         hrfBtn.className = isFriendlyRegressorHrfEnabled(reg)
@@ -3036,6 +3191,8 @@
           rerenderModelX('Regressor removed', 'info');
         });
 
+        actions.appendChild(upBtn);
+        actions.appendChild(downBtn);
         actions.appendChild(hrfBtn);
         actions.appendChild(removeBtn);
         regChip.appendChild(main);
@@ -3092,6 +3249,192 @@
     xCard.appendChild(addInterceptBtn);
 
     wrapper.appendChild(xCard);
+
+    if (String(node?.Level || '').trim() === 'Run') {
+      const modCard = document.createElement('div');
+      modCard.className = 'border rounded p-2 bg-white d-flex flex-column gap-2';
+
+      const modHeader = document.createElement('div');
+      modHeader.className = 'd-flex justify-content-between align-items-center';
+      const modTitle = document.createElement('div');
+      modTitle.className = 'small fw-bold';
+      modTitle.textContent = 'Parametric Modulation (optional)';
+      const modToggle = document.createElement('input');
+      modToggle.type = 'checkbox';
+      modToggle.className = 'form-check-input';
+      const existingModulations = getFriendlyParametricModulations();
+      modToggle.checked = existingModulations.length > 0;
+      modHeader.appendChild(modTitle);
+      modHeader.appendChild(modToggle);
+      modCard.appendChild(modHeader);
+
+      const modHint = document.createElement('div');
+      modHint.className = 'small text-muted';
+      modHint.textContent = 'Pick an existing condition regressor and a numeric events.tsv column (for example rating). Stored in Model.Software.SPM.ParametricModulations.';
+      modCard.appendChild(modHint);
+
+      const availableConditions = getRunConditionRegressorsForModulation();
+      const availableValues = getNumericEventColumnsForModulation();
+
+      if (!availableConditions.length) {
+        const warn = document.createElement('div');
+        warn.className = 'small text-warning';
+        warn.textContent = 'Add at least one trial_type.* or condition.* regressor to Model.X first.';
+        modCard.appendChild(warn);
+      }
+      if (!availableValues.length) {
+        const warn = document.createElement('div');
+        warn.className = 'small text-warning';
+        warn.textContent = 'No numeric events.tsv columns detected for the selected task. Add a numeric column (for example rating) in events files.';
+        modCard.appendChild(warn);
+      }
+
+      modToggle.addEventListener('change', ()=> {
+        if (!modToggle.checked) {
+          setFriendlyParametricModulations([]);
+          rerenderModelX('Parametric modulation disabled.', 'info');
+          return;
+        }
+        const defaultEntry = normalizeParametricModulationEntry(
+          {},
+          availableConditions[0] || '',
+          availableValues[0] || '',
+          0
+        );
+        setFriendlyParametricModulations([defaultEntry]);
+        rerenderModelX('Parametric modulation enabled.', 'info');
+      });
+
+      if (existingModulations.length) {
+        existingModulations.forEach((entry, modIdx) => {
+          const row = document.createElement('div');
+          row.className = 'border rounded p-2 bg-light-subtle d-flex flex-column gap-2';
+
+          const rowTop = document.createElement('div');
+          rowTop.className = 'd-flex justify-content-between align-items-center gap-2';
+          const rowLabel = document.createElement('div');
+          rowLabel.className = 'small fw-bold';
+          rowLabel.textContent = `Modulation ${modIdx + 1}`;
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'btn btn-sm btn-outline-danger';
+          removeBtn.textContent = 'Remove';
+          removeBtn.addEventListener('click', ()=> {
+            const next = getFriendlyParametricModulations();
+            next.splice(modIdx, 1);
+            setFriendlyParametricModulations(next);
+            rerenderModelX('Parametric modulation removed.', 'info');
+          });
+          rowTop.appendChild(rowLabel);
+          rowTop.appendChild(removeBtn);
+          row.appendChild(rowTop);
+
+          const nameInput = document.createElement('input');
+          nameInput.type = 'text';
+          nameInput.className = 'form-control form-control-sm';
+          nameInput.placeholder = 'Name (for example idea_rating_mod)';
+          nameInput.value = entry.Name;
+          nameInput.addEventListener('change', ()=> {
+            const next = getFriendlyParametricModulations();
+            next[modIdx].Name = (nameInput.value || '').trim() || `parametric_mod_${modIdx + 1}`;
+            setFriendlyParametricModulations(next);
+            rerenderModelX('Parametric modulation updated.', 'info');
+          });
+          row.appendChild(nameInput);
+
+          const conditionSelect = document.createElement('select');
+          conditionSelect.className = 'form-select form-select-sm';
+          const currentCondition = normalizeStringArray(entry.Conditions)[0] || '';
+          const conditionChoices = Array.from(new Set([...availableConditions, currentCondition].filter(Boolean)));
+          const emptyCondition = document.createElement('option');
+          emptyCondition.value = '';
+          emptyCondition.textContent = conditionChoices.length ? 'Select condition regressor' : 'No condition regressors available';
+          conditionSelect.appendChild(emptyCondition);
+          conditionChoices.forEach(choice => {
+            const opt = document.createElement('option');
+            opt.value = choice;
+            opt.textContent = choice;
+            conditionSelect.appendChild(opt);
+          });
+          conditionSelect.value = currentCondition;
+          conditionSelect.addEventListener('change', ()=> {
+            const next = getFriendlyParametricModulations();
+            next[modIdx].Conditions = conditionSelect.value ? [conditionSelect.value] : [];
+            setFriendlyParametricModulations(next);
+            rerenderModelX('Parametric modulation updated.', 'info');
+          });
+          row.appendChild(conditionSelect);
+
+          const valueSelect = document.createElement('select');
+          valueSelect.className = 'form-select form-select-sm';
+          const currentValue = normalizeStringArray(entry.Values)[0] || '';
+          const valueChoices = Array.from(new Set([...availableValues, currentValue].filter(Boolean)));
+          const emptyValue = document.createElement('option');
+          emptyValue.value = '';
+          emptyValue.textContent = valueChoices.length ? 'Select numeric events.tsv column' : 'No numeric columns available';
+          valueSelect.appendChild(emptyValue);
+          valueChoices.forEach(choice => {
+            const opt = document.createElement('option');
+            opt.value = choice;
+            opt.textContent = choice;
+            valueSelect.appendChild(opt);
+          });
+          valueSelect.value = currentValue;
+          valueSelect.addEventListener('change', ()=> {
+            const next = getFriendlyParametricModulations();
+            next[modIdx].Values = valueSelect.value ? [valueSelect.value] : [];
+            setFriendlyParametricModulations(next);
+            rerenderModelX('Parametric modulation updated.', 'info');
+          });
+          row.appendChild(valueSelect);
+
+          const valueSamples = getNumericEventSampleValues(currentValue);
+          if (valueSamples.length) {
+            const sampleHint = document.createElement('div');
+            sampleHint.className = 'small text-muted';
+            sampleHint.textContent = `Sample ${currentValue}: ${valueSamples.slice(0, 5).join(', ')}`;
+            row.appendChild(sampleHint);
+          }
+
+          const polyInput = document.createElement('input');
+          polyInput.type = 'number';
+          polyInput.className = 'form-control form-control-sm';
+          polyInput.min = '1';
+          polyInput.step = '1';
+          polyInput.value = String(entry.PolynomialExpansion || 1);
+          polyInput.placeholder = 'Polynomial expansion (1 = linear)';
+          polyInput.addEventListener('change', ()=> {
+            const next = getFriendlyParametricModulations();
+            const parsed = Number(polyInput.value);
+            next[modIdx].PolynomialExpansion = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 1;
+            setFriendlyParametricModulations(next);
+            rerenderModelX('Parametric modulation updated.', 'info');
+          });
+          row.appendChild(polyInput);
+
+          modCard.appendChild(row);
+        });
+
+        const addModBtn = document.createElement('button');
+        addModBtn.type = 'button';
+        addModBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
+        addModBtn.textContent = 'Add Modulation';
+        addModBtn.addEventListener('click', ()=> {
+          const next = getFriendlyParametricModulations();
+          next.push(normalizeParametricModulationEntry(
+            {},
+            availableConditions[0] || '',
+            availableValues[0] || '',
+            next.length
+          ));
+          setFriendlyParametricModulations(next);
+          rerenderModelX('Parametric modulation added.', 'info');
+        });
+        modCard.appendChild(addModBtn);
+      }
+
+      wrapper.appendChild(modCard);
+    }
 
     const hrfCard = document.createElement('div');
     hrfCard.className = 'border rounded p-2 bg-white d-flex flex-column gap-2';
@@ -3836,8 +4179,16 @@
   function defaultArrayItemForPath(path) {
     if (path === 'Nodes') return { Level: 'Run', Name: 'subject_level', GroupBy: ['run','subject'], Model: { X: ['trial_type'], HRF: { Variables: ['trial_type'], Model: 'spm' }, Type: 'glm' }, Contrasts: [] };
     if (path === 'Edges') return getEdgeDefaultValue();
-    if (/\.Contrasts$/.test(path)) return { Name: `Contrast_${Date.now().toString().slice(-4)}`, ConditionList: ['trial_type.active','trial_type.control'], Weights: [1,-1], Test: 't' };
-    if (/\.ConditionList$/.test(path)) return 'trial_type.active';
+    if (/\.Contrasts$/.test(path)) {
+      const defaultCondition = getDefaultConditionTokenForPath(path);
+      return {
+        Name: `Contrast_${Date.now().toString().slice(-4)}`,
+        ConditionList: defaultCondition ? [defaultCondition] : [],
+        Weights: defaultCondition ? [1] : [],
+        Test: 't'
+      };
+    }
+    if (/\.ConditionList$/.test(path)) return getDefaultConditionTokenForPath(path);
     if (/\.Weights$/.test(path)) return 0;
     if (/\.X$/.test(path)) return modelEditorInterestRegressors[0] || 'trial_type';
     if (/\.GroupBy$/.test(path)) return 'run';
@@ -3846,7 +4197,8 @@
   }
   function addArrayItem(path){ const arr = getByPath(modelEditorDraft, path); if (!Array.isArray(arr)) return; arr.push(defaultArrayItemForPath(path)); }
   function moveArrayItem(path, direction){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; const targetIndex = direction === 'up' ? index-1 : index+1; if (targetIndex<0||targetIndex>=arr.length) return; [arr[index], arr[targetIndex]] = [arr[targetIndex], arr[index]]; }
-  function removeArrayItem(path){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; if (index<0||index>=arr.length) return; arr.splice(index,1); }
+  function pruneEdgesForCurrentNodes(){ const edges = getByPath(modelEditorDraft, 'Edges'); if (!Array.isArray(edges)) return; const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : []; const nodeNames = new Set(nodes.map(node => String(node?.Name || '').trim()).filter(Boolean)); const filtered = edges.filter(edge => { const source = String(edge?.Source || '').trim(); const destination = String(edge?.Destination || '').trim(); if (!source || !destination) return false; return nodeNames.has(source) && nodeNames.has(destination); }); setByPath(modelEditorDraft, 'Edges', filtered); }
+  function removeArrayItem(path){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return; if (index<0||index>=arr.length) return; arr.splice(index,1); if (arrayPath === 'Nodes') pruneEdgesForCurrentNodes(); }
   function isModelXPath(path){ return /\.Model\.X\[\d+\]$/.test(path); }
   function isDuplicateModelXRegressor(path, candidate){ const match = path.match(/^(.*)\[(\d+)\]$/); if (!match) return false; const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath); if (!Array.isArray(arr)) return false; const normalized = String(candidate||'').trim(); return arr.some((val,i) => i!==index && String(val||'').trim()===normalized); }
   function hasConfoundColumn(columns, confoundName){ const normalized = String(confoundName || '').trim(); if (!normalized) return false; return (Array.isArray(columns) ? columns : []).some(col => { const candidate = String(col || '').trim(); return candidate === normalized || candidate.startsWith(`${normalized}_`); }); }
@@ -4124,6 +4476,68 @@
     return Array.isArray(value)
       ? value.map(item => String(item || '').trim()).filter(Boolean)
       : [];
+  }
+
+  function getModelNodeByName(nodeName) {
+    const normalizedName = String(nodeName || '').trim();
+    if (!normalizedName) return null;
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    return nodes.find(node => String(node?.Name || '').trim() === normalizedName) || null;
+  }
+
+  function getNodeOutputContrastNames(node) {
+    if (!node || typeof node !== 'object') return [];
+    const explicitNames = Array.isArray(node.Contrasts)
+      ? node.Contrasts.map(contrast => String(contrast?.Name || '').trim()).filter(Boolean)
+      : [];
+    const dummyNames = normalizeEditorStringArray(node.DummyContrasts?.Contrasts);
+    return Array.from(new Set([...explicitNames, ...dummyNames]));
+  }
+
+  function getEdgeAvailableContrastNames(edge) {
+    return getNodeOutputContrastNames(getModelNodeByName(edge?.Source));
+  }
+
+  function getIncomingContrastNamesForNode(nodeIdx) {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const node = nodes[nodeIdx];
+    const destinationName = String(node?.Name || '').trim();
+    if (!destinationName) return [];
+
+    const edges = Array.isArray(modelEditorDraft?.Edges) ? modelEditorDraft.Edges : [];
+    const incoming = [];
+    edges.forEach(edge => {
+      if (String(edge?.Destination || '').trim() !== destinationName) return;
+      const availableFromSource = getEdgeAvailableContrastNames(edge);
+      const filterValues = normalizeEditorStringArray(edge?.Filter?.contrast);
+      const selected = filterValues.length
+        ? availableFromSource.filter(name => filterValues.includes(name))
+        : availableFromSource;
+      selected.forEach(name => incoming.push(name));
+    });
+
+    if (!incoming.length && nodeIdx > 0) {
+      getNodeOutputContrastNames(nodes[nodeIdx - 1]).forEach(name => incoming.push(name));
+    }
+
+    return Array.from(new Set(incoming));
+  }
+
+  function getSuggestedConditionTermsForNode(nodeIdx) {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const node = nodes[nodeIdx] || {};
+    const incomingContrasts = getIncomingContrastNamesForNode(nodeIdx);
+    const modelTerms = normalizeEditorStringArray(node.Model?.X).filter(term => term !== '1');
+    const localFallback = normalizeEditorStringArray(modelEditorInterestRegressors);
+    return Array.from(new Set([...incomingContrasts, ...modelTerms, ...localFallback]));
+  }
+
+  function getDefaultConditionTokenForPath(path) {
+    const match = String(path || '').match(/^Nodes\[(\d+)\]\./);
+    if (!match) return 'trial_type.active';
+    const nodeIdx = Number(match[1]);
+    const suggestions = getSuggestedConditionTermsForNode(nodeIdx);
+    return suggestions[0] || 'trial_type.active';
   }
 
   function getNodeWorkspaceLabel(node, idx) {
@@ -4916,6 +5330,27 @@
   function renderNodeContrastsPanel(container, node, idx) {
     const panel = createWorkspacePanel('Contrasts', 'Define named contrasts over the current node design matrix.');
     if (!Array.isArray(node.Contrasts)) node.Contrasts = [];
+    const incomingContrastNames = getIncomingContrastNamesForNode(idx);
+    const conditionSuggestions = getSuggestedConditionTermsForNode(idx);
+    const conditionDatalistId = `node-${idx}-contrast-condition-suggestions`;
+
+    if (conditionSuggestions.length) {
+      const datalist = document.createElement('datalist');
+      datalist.id = conditionDatalistId;
+      conditionSuggestions.forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        datalist.appendChild(option);
+      });
+      panel.body.appendChild(datalist);
+    }
+
+    if (incomingContrastNames.length) {
+      const hint = document.createElement('div');
+      hint.className = 'small text-muted mb-2';
+      hint.textContent = `Incoming contrasts from upstream nodes: ${incomingContrastNames.join(', ')}`;
+      panel.body.appendChild(hint);
+    }
 
     if (!node.Contrasts.length) {
       panel.body.appendChild(createInlineNote('No explicit contrasts defined yet.'));
@@ -4996,7 +5431,8 @@
       const conditionInput = document.createElement('input');
       conditionInput.type = 'text';
       conditionInput.className = 'form-control form-control-sm';
-      conditionInput.placeholder = 'trial_type.go, trial_type.stop';
+      conditionInput.placeholder = incomingContrastNames.length ? 'loss, gain' : 'trial_type.go, trial_type.stop';
+      if (conditionSuggestions.length) conditionInput.setAttribute('list', conditionDatalistId);
       conditionInput.value = normalizeEditorStringArray(contrast.ConditionList).join(', ');
       conditionInput.addEventListener('change', () => {
         contrast.ConditionList = parseCsvValues(conditionInput.value);
@@ -5049,7 +5485,13 @@
     addBtn.className = 'btn btn-sm btn-outline-primary';
     addBtn.textContent = 'Add Contrast';
     addBtn.addEventListener('click', () => {
-      node.Contrasts.push({ Name: '', ConditionList: [], Weights: [], Test: 't' });
+      const defaultCondition = conditionSuggestions[0] || '';
+      node.Contrasts.push({
+        Name: '',
+        ConditionList: defaultCondition ? [defaultCondition] : [],
+        Weights: defaultCondition ? [1] : [],
+        Test: 't'
+      });
       renderModelAccordionEditor();
       setModelEditorStatus('Contrast added.', 'info');
     });
@@ -5311,10 +5753,13 @@
       const filterLabel = document.createElement('label');
       filterLabel.className = 'form-label small mb-1';
       filterLabel.textContent = 'Filter.contrast (optional)';
+      const availableContrastNames = getEdgeAvailableContrastNames(edge);
+      const filterSuggestionsId = `edge-${idx}-filter-contrast-suggestions`;
       const filterInput = document.createElement('input');
       filterInput.type = 'text';
       filterInput.className = 'form-control form-control-sm';
-      filterInput.placeholder = 'contrast_a, contrast_b';
+      filterInput.placeholder = availableContrastNames.length ? availableContrastNames.join(', ') : 'contrast_a, contrast_b';
+      if (availableContrastNames.length) filterInput.setAttribute('list', filterSuggestionsId);
       filterInput.value = normalizeEditorStringArray(edge.Filter?.contrast).join(', ');
       filterInput.addEventListener('change', () => {
         const values = parseCsvValues(filterInput.value);
@@ -5332,6 +5777,45 @@
       });
       filterWrap.appendChild(filterLabel);
       filterWrap.appendChild(filterInput);
+
+      if (availableContrastNames.length) {
+        const datalist = document.createElement('datalist');
+        datalist.id = filterSuggestionsId;
+        availableContrastNames.forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          datalist.appendChild(option);
+        });
+        filterWrap.appendChild(datalist);
+
+        const quickRow = document.createElement('div');
+        quickRow.className = 'd-flex flex-wrap gap-1 mt-1';
+        availableContrastNames.slice(0, 10).forEach(name => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'btn btn-sm btn-outline-secondary';
+          chip.textContent = name;
+          chip.addEventListener('click', () => {
+            if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
+            edge.Filter.contrast = Array.from(new Set([
+              ...normalizeEditorStringArray(edge.Filter.contrast),
+              name
+            ]));
+            renderModelAccordionEditor();
+            setModelEditorStatus('Edge updated.', 'info');
+          });
+          quickRow.appendChild(chip);
+        });
+        filterWrap.appendChild(quickRow);
+      }
+
+      const filterHint = document.createElement('div');
+      filterHint.className = 'small text-muted mt-1';
+      filterHint.textContent = availableContrastNames.length
+        ? `Available from source node ${edge.Source || '?'}: ${availableContrastNames.join(', ')}`
+        : 'No named source contrasts were found yet. Define source Node.Contrasts first.';
+      filterWrap.appendChild(filterHint);
+
       bodyWrap.appendChild(filterWrap);
 
       card.appendChild(bodyWrap);
@@ -5588,6 +6072,77 @@
             Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
             Variables: kept
           };
+        }
+
+        function getCurrentModelXRegressors(){
+          return normalizeList(getByPath(modelEditorDraft, basePath));
+        }
+
+        function getConditionRegressorsForModulation(){
+          return getCurrentModelXRegressors()
+            .filter(reg => reg.startsWith('trial_type.') || reg.startsWith('condition.'));
+        }
+
+        function getNumericEventColumnsForModulation(){
+          return normalizeList(window.modelEditorEventNumericColumns);
+        }
+
+        function getNumericEventSampleValues(columnName){
+          const samples = (window.modelEditorEventNumericSamples && typeof window.modelEditorEventNumericSamples === 'object')
+            ? window.modelEditorEventNumericSamples
+            : {};
+          return normalizeList(samples[String(columnName || '').trim()]);
+        }
+
+        function normalizeParametricModulationEntry(entry, fallbackCondition = '', fallbackValue = '', index = 0){
+          const conditions = normalizeList(entry?.Conditions);
+          const values = normalizeList(entry?.Values);
+          const rawPoly = Number(entry?.PolynomialExpansion);
+          return {
+            Name: String(entry?.Name || `parametric_mod_${index + 1}`).trim() || `parametric_mod_${index + 1}`,
+            Conditions: conditions.length ? [conditions[0]] : (fallbackCondition ? [fallbackCondition] : []),
+            Values: values.length ? [values[0]] : (fallbackValue ? [fallbackValue] : []),
+            PolynomialExpansion: Number.isFinite(rawPoly) && rawPoly > 0 ? Math.round(rawPoly) : 1
+          };
+        }
+
+        function getParametricModulations(){
+          const modelObj = getModelObject();
+          const existing = modelObj?.Software?.SPM?.ParametricModulations;
+          if (!Array.isArray(existing)) return [];
+          const fallbackCondition = getConditionRegressorsForModulation()[0] || '';
+          const fallbackValue = getNumericEventColumnsForModulation()[0] || '';
+          return existing.map((entry, index) =>
+            normalizeParametricModulationEntry(entry, fallbackCondition, fallbackValue, index)
+          );
+        }
+
+        function setParametricModulations(nextEntries){
+          const modelObj = getModelObject();
+          if (!modelObj) return;
+
+          const normalizedEntries = Array.isArray(nextEntries)
+            ? nextEntries.map((entry, index) => normalizeParametricModulationEntry(entry, '', '', index))
+            : [];
+
+          if (!normalizedEntries.length) {
+            if (modelObj.Software && typeof modelObj.Software === 'object' && !Array.isArray(modelObj.Software)) {
+              if (modelObj.Software.SPM && typeof modelObj.Software.SPM === 'object' && !Array.isArray(modelObj.Software.SPM)) {
+                delete modelObj.Software.SPM.ParametricModulations;
+                if (!Object.keys(modelObj.Software.SPM).length) delete modelObj.Software.SPM;
+              }
+              if (!Object.keys(modelObj.Software).length) delete modelObj.Software;
+            }
+            return;
+          }
+
+          if (!modelObj.Software || typeof modelObj.Software !== 'object' || Array.isArray(modelObj.Software)) {
+            modelObj.Software = {};
+          }
+          if (!modelObj.Software.SPM || typeof modelObj.Software.SPM !== 'object' || Array.isArray(modelObj.Software.SPM)) {
+            modelObj.Software.SPM = {};
+          }
+          modelObj.Software.SPM.ParametricModulations = normalizedEntries;
         }
 
         function isHrfApplicableRegressor(reg){
@@ -5856,6 +6411,28 @@
             const actions = document.createElement('div');
             actions.className = 'modelx-chip-actions';
 
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.className = 'btn btn-sm btn-outline-secondary';
+            upBtn.title = 'Move up';
+            upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+            upBtn.disabled = idx === 0;
+            upBtn.addEventListener('click', (event)=>{
+              event.stopPropagation();
+              moveRegressorToIndex(basePath, idx, idx - 1);
+            });
+
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.className = 'btn btn-sm btn-outline-secondary';
+            downBtn.title = 'Move down';
+            downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+            downBtn.disabled = idx >= currentRegs.length - 1;
+            downBtn.addEventListener('click', (event)=>{
+              event.stopPropagation();
+              moveRegressorToIndex(basePath, idx, idx + 2);
+            });
+
             const hrfBtn = document.createElement('button');
             hrfBtn.type = 'button';
             hrfBtn.className = isRegressorHrfEnabled(reg)
@@ -5882,6 +6459,8 @@
               removeModelXRegressor(idx);
             });
 
+            actions.appendChild(upBtn);
+            actions.appendChild(downBtn);
             actions.appendChild(hrfBtn);
             actions.appendChild(delBtn);
             chip.appendChild(main);
@@ -5928,6 +6507,190 @@
         interceptBtn.textContent = 'Add intercept (1)';
         interceptBtn.addEventListener('click', ()=> addRegressorToModelX(basePath, '1', 0));
         listWrap.appendChild(interceptBtn);
+
+        if (String(getByPath(modelEditorDraft, modelPath.replace(/\.Model$/, '.Level')) || '').trim() === 'Run') {
+          const modulationCard = document.createElement('div');
+          modulationCard.className = 'border rounded p-2 mt-2 bg-white d-flex flex-column gap-2';
+
+          const modulationHeader = document.createElement('div');
+          modulationHeader.className = 'd-flex justify-content-between align-items-center';
+          const modulationTitle = document.createElement('div');
+          modulationTitle.className = 'small fw-bold';
+          modulationTitle.textContent = 'Parametric Modulation (optional)';
+          const modulationToggle = document.createElement('input');
+          modulationToggle.type = 'checkbox';
+          modulationToggle.className = 'form-check-input';
+          const existingModulations = getParametricModulations();
+          modulationToggle.checked = existingModulations.length > 0;
+          modulationHeader.appendChild(modulationTitle);
+          modulationHeader.appendChild(modulationToggle);
+          modulationCard.appendChild(modulationHeader);
+
+          const modulationHint = document.createElement('div');
+          modulationHint.className = 'small text-muted';
+          modulationHint.textContent = 'Choose a condition regressor from Model.X and a numeric events.tsv column (for example rating).';
+          modulationCard.appendChild(modulationHint);
+
+          const availableConditions = getConditionRegressorsForModulation();
+          const availableValues = getNumericEventColumnsForModulation();
+          if (!availableConditions.length) {
+            const warn = document.createElement('div');
+            warn.className = 'small text-warning';
+            warn.textContent = 'Add trial_type.* or condition.* regressors to Model.X before enabling modulation.';
+            modulationCard.appendChild(warn);
+          }
+          if (!availableValues.length) {
+            const warn = document.createElement('div');
+            warn.className = 'small text-warning';
+            warn.textContent = 'No numeric events.tsv columns detected for selected tasks.';
+            modulationCard.appendChild(warn);
+          }
+
+          modulationToggle.addEventListener('change', ()=> {
+            if (!modulationToggle.checked) {
+              setParametricModulations([]);
+              setModelEditorStatus('Parametric modulation disabled.', 'info');
+              renderModelAccordionEditor();
+              return;
+            }
+            setParametricModulations([
+              normalizeParametricModulationEntry({}, availableConditions[0] || '', availableValues[0] || '', 0)
+            ]);
+            setModelEditorStatus('Parametric modulation enabled.', 'info');
+            renderModelAccordionEditor();
+          });
+
+          if (existingModulations.length) {
+            existingModulations.forEach((entry, modIdx) => {
+              const row = document.createElement('div');
+              row.className = 'border rounded p-2 bg-light-subtle d-flex flex-column gap-2';
+
+              const rowTop = document.createElement('div');
+              rowTop.className = 'd-flex justify-content-between align-items-center';
+              const rowLabel = document.createElement('div');
+              rowLabel.className = 'small fw-bold';
+              rowLabel.textContent = `Modulation ${modIdx + 1}`;
+              const removeBtn = document.createElement('button');
+              removeBtn.type = 'button';
+              removeBtn.className = 'btn btn-sm btn-outline-danger';
+              removeBtn.textContent = 'Remove';
+              removeBtn.addEventListener('click', ()=> {
+                const next = getParametricModulations();
+                next.splice(modIdx, 1);
+                setParametricModulations(next);
+                setModelEditorStatus('Parametric modulation removed.', 'info');
+                renderModelAccordionEditor();
+              });
+              rowTop.appendChild(rowLabel);
+              rowTop.appendChild(removeBtn);
+              row.appendChild(rowTop);
+
+              const nameInput = document.createElement('input');
+              nameInput.type = 'text';
+              nameInput.className = 'form-control form-control-sm';
+              nameInput.placeholder = 'Name (for example idea_rating_mod)';
+              nameInput.value = entry.Name;
+              nameInput.addEventListener('change', ()=> {
+                const next = getParametricModulations();
+                next[modIdx].Name = (nameInput.value || '').trim() || `parametric_mod_${modIdx + 1}`;
+                setParametricModulations(next);
+                setModelEditorStatus('Parametric modulation updated.', 'info');
+                renderModelAccordionEditor();
+              });
+              row.appendChild(nameInput);
+
+              const conditionSelect = document.createElement('select');
+              conditionSelect.className = 'form-select form-select-sm';
+              const currentCondition = normalizeList(entry.Conditions)[0] || '';
+              const conditionChoices = Array.from(new Set([...availableConditions, currentCondition].filter(Boolean)));
+              const conditionEmpty = document.createElement('option');
+              conditionEmpty.value = '';
+              conditionEmpty.textContent = conditionChoices.length ? 'Select condition regressor' : 'No condition regressors available';
+              conditionSelect.appendChild(conditionEmpty);
+              conditionChoices.forEach(choice => {
+                const opt = document.createElement('option');
+                opt.value = choice;
+                opt.textContent = choice;
+                conditionSelect.appendChild(opt);
+              });
+              conditionSelect.value = currentCondition;
+              conditionSelect.addEventListener('change', ()=> {
+                const next = getParametricModulations();
+                next[modIdx].Conditions = conditionSelect.value ? [conditionSelect.value] : [];
+                setParametricModulations(next);
+                setModelEditorStatus('Parametric modulation updated.', 'info');
+                renderModelAccordionEditor();
+              });
+              row.appendChild(conditionSelect);
+
+              const valueSelect = document.createElement('select');
+              valueSelect.className = 'form-select form-select-sm';
+              const currentValue = normalizeList(entry.Values)[0] || '';
+              const valueChoices = Array.from(new Set([...availableValues, currentValue].filter(Boolean)));
+              const valueEmpty = document.createElement('option');
+              valueEmpty.value = '';
+              valueEmpty.textContent = valueChoices.length ? 'Select numeric events.tsv column' : 'No numeric columns available';
+              valueSelect.appendChild(valueEmpty);
+              valueChoices.forEach(choice => {
+                const opt = document.createElement('option');
+                opt.value = choice;
+                opt.textContent = choice;
+                valueSelect.appendChild(opt);
+              });
+              valueSelect.value = currentValue;
+              valueSelect.addEventListener('change', ()=> {
+                const next = getParametricModulations();
+                next[modIdx].Values = valueSelect.value ? [valueSelect.value] : [];
+                setParametricModulations(next);
+                setModelEditorStatus('Parametric modulation updated.', 'info');
+                renderModelAccordionEditor();
+              });
+              row.appendChild(valueSelect);
+
+              const samples = getNumericEventSampleValues(currentValue);
+              if (samples.length) {
+                const samplesHint = document.createElement('div');
+                samplesHint.className = 'small text-muted';
+                samplesHint.textContent = `Sample ${currentValue}: ${samples.slice(0, 5).join(', ')}`;
+                row.appendChild(samplesHint);
+              }
+
+              const polyInput = document.createElement('input');
+              polyInput.type = 'number';
+              polyInput.className = 'form-control form-control-sm';
+              polyInput.min = '1';
+              polyInput.step = '1';
+              polyInput.value = String(entry.PolynomialExpansion || 1);
+              polyInput.placeholder = 'Polynomial expansion (1 = linear)';
+              polyInput.addEventListener('change', ()=> {
+                const next = getParametricModulations();
+                const parsed = Number(polyInput.value);
+                next[modIdx].PolynomialExpansion = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 1;
+                setParametricModulations(next);
+                setModelEditorStatus('Parametric modulation updated.', 'info');
+                renderModelAccordionEditor();
+              });
+              row.appendChild(polyInput);
+
+              modulationCard.appendChild(row);
+            });
+
+            const addModulationBtn = document.createElement('button');
+            addModulationBtn.type = 'button';
+            addModulationBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
+            addModulationBtn.textContent = 'Add Modulation';
+            addModulationBtn.addEventListener('click', ()=> {
+              const next = getParametricModulations();
+              next.push(normalizeParametricModulationEntry({}, availableConditions[0] || '', availableValues[0] || '', next.length));
+              setParametricModulations(next);
+              setModelEditorStatus('Parametric modulation added.', 'info');
+              renderModelAccordionEditor();
+            });
+            modulationCard.appendChild(addModulationBtn);
+          }
+
+          listWrap.appendChild(modulationCard);
+        }
 
         container.appendChild(listWrap);
         return;

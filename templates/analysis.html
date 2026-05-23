@@ -397,6 +397,48 @@
     </div>
 </div>
 
+<!-- Modal for Stats Coverage Decisions -->
+<div class="modal fade" id="statsCoverageModal" tabindex="-1" aria-labelledby="statsCoverageModalLabel">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="statsCoverageModalLabel">
+                    <i class="fas fa-user-check me-2"></i>Stats Data Coverage Check
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning py-2 small mb-3" id="stats-coverage-summary"></div>
+
+                <div class="small text-muted mb-2" id="stats-coverage-tasks"></div>
+                <div class="small text-muted mb-3" id="stats-coverage-notes"></div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100 bg-light">
+                            <div class="small fw-bold text-success mb-1">Ready Subjects</div>
+                            <div class="x-small text-muted mb-2" id="stats-coverage-ready-count"></div>
+                            <ul class="small mb-0" id="stats-coverage-ready-list"></ul>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100 bg-light">
+                            <div class="small fw-bold text-danger mb-1">Missing Data</div>
+                            <div class="x-small text-muted mb-2" id="stats-coverage-missing-count"></div>
+                            <ul class="small mb-0" id="stats-coverage-missing-list"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-outline-secondary" id="stats-coverage-cancel" data-bs-dismiss="modal">Cancel Run</button>
+                <button type="button" class="btn btn-outline-primary" id="stats-coverage-continue-all">Continue As-Is</button>
+                <button type="button" class="btn btn-success" id="stats-coverage-run-ready">Continue with Ready Subjects</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ===== Contrast Builder Modal ===== -->
 <div class="modal fade" id="contrastBuilderModal" tabindex="-1" aria-labelledby="contrastBuilderModalLabel">
     <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:1120px;">
@@ -688,7 +730,11 @@
     .json-inline-value { flex: 1; min-width: 240px; }
     .json-add-btn { white-space: nowrap; }
     .json-row-actions { min-width: 84px; display: flex; justify-content: flex-end; gap: 0.3rem; }
-    .json-row-actions-modelx { min-width: 160px; }
+    .json-row-actions-modelx {
+        min-width: 248px;
+        align-items: center;
+        flex-wrap: nowrap;
+    }
     .json-row-modelx {
         align-items: center;
         background: #e8f1fa;
@@ -1396,6 +1442,10 @@
     let modelEditorDraft = null;
     let modelEditorBidsTasks = [];
     let modelEditorInterestRegressors = [];
+    let modelEditorEventSamples = { trial_type: [], condition: [] };
+    let modelEditorEventColumns = [];
+    let modelEditorEventNumericColumns = [];
+    let modelEditorEventNumericSamples = {};
     let modelEditorGroupByOptions = ['subject'];
     let modelEditorParticipantsInfo = emptyParticipantsInfo();
     let showModelTechnicalPaths = false;
@@ -1870,6 +1920,68 @@
     function normalizeStringArray(value) {
         if (!Array.isArray(value)) return [];
         return value.map(item => String(item).trim()).filter(Boolean);
+    }
+
+    function getModelNodeByName(nodeName) {
+        const normalizedName = String(nodeName || '').trim();
+        if (!normalizedName) return null;
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        return nodes.find(node => String(node?.Name || '').trim() === normalizedName) || null;
+    }
+
+    function getNodeOutputContrastNames(node) {
+        if (!node || typeof node !== 'object') return [];
+        const explicitNames = Array.isArray(node.Contrasts)
+            ? node.Contrasts.map(contrast => String(contrast?.Name || '').trim()).filter(Boolean)
+            : [];
+        const dummyNames = normalizeStringArray(node.DummyContrasts?.Contrasts);
+        return Array.from(new Set([...explicitNames, ...dummyNames]));
+    }
+
+    function getEdgeAvailableContrastNames(edge) {
+        return getNodeOutputContrastNames(getModelNodeByName(edge?.Source));
+    }
+
+    function getIncomingContrastNamesForNode(nodeIdx) {
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        const node = nodes[nodeIdx];
+        const destinationName = String(node?.Name || '').trim();
+        if (!destinationName) return [];
+
+        const edges = Array.isArray(modelEditorDraft?.Edges) ? modelEditorDraft.Edges : [];
+        const incoming = [];
+        edges.forEach(edge => {
+            if (String(edge?.Destination || '').trim() !== destinationName) return;
+            const availableFromSource = getEdgeAvailableContrastNames(edge);
+            const filterValues = normalizeStringArray(edge?.Filter?.contrast);
+            const selected = filterValues.length
+                ? availableFromSource.filter(name => filterValues.includes(name))
+                : availableFromSource;
+            selected.forEach(name => incoming.push(name));
+        });
+
+        if (!incoming.length && nodeIdx > 0) {
+            getNodeOutputContrastNames(nodes[nodeIdx - 1]).forEach(name => incoming.push(name));
+        }
+
+        return Array.from(new Set(incoming));
+    }
+
+    function getSuggestedConditionTermsForNode(nodeIdx) {
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        const node = nodes[nodeIdx] || {};
+        const incomingContrasts = getIncomingContrastNamesForNode(nodeIdx);
+        const modelTerms = normalizeStringArray(node.Model?.X).filter(term => term !== '1');
+        const localFallback = normalizeStringArray(modelEditorInterestRegressors);
+        return Array.from(new Set([...incomingContrasts, ...modelTerms, ...localFallback]));
+    }
+
+    function getDefaultConditionTokenForPath(path) {
+        const match = String(path || '').match(/^Nodes\[(\d+)\]\./);
+        if (!match) return 'trial_type.active';
+        const nodeIdx = Number(match[1]);
+        const suggestions = getSuggestedConditionTermsForNode(nodeIdx);
+        return suggestions[0] || 'trial_type.active';
     }
 
     function applyDatasetNodePreset(node, preset, options = {}) {
@@ -2651,14 +2763,15 @@
             };
         }
         if (/\.Contrasts$/.test(path)) {
+            const defaultCondition = getDefaultConditionTokenForPath(path);
             return {
                 Name: `Contrast_${Date.now().toString().slice(-4)}`,
-                ConditionList: ['trial_type.active', 'trial_type.control'],
-                Weights: [1, -1],
+                ConditionList: defaultCondition ? [defaultCondition] : [],
+                Weights: defaultCondition ? [1] : [],
                 Test: 't'
             };
         }
-        if (/\.ConditionList$/.test(path)) return 'trial_type.active';
+        if (/\.ConditionList$/.test(path)) return getDefaultConditionTokenForPath(path);
         if (/\.Weights$/.test(path)) return 0;
         if (/\.X$/.test(path)) return modelEditorInterestRegressors[0] || 'trial_type';
         if (/\.GroupBy$/.test(path)) return 'run';
@@ -2848,6 +2961,15 @@
         renderModelAccordionEditor();
     }
 
+    function moveModelXRegressorByStep(arrayPath, index, step) {
+        const arr = getByPath(modelEditorDraft, arrayPath);
+        if (!Array.isArray(arr)) return false;
+        if (step === 0) return false;
+
+        const targetIndex = step < 0 ? index - 1 : index + 2;
+        return reorderArrayItem(arrayPath, index, targetIndex);
+    }
+
     function getSuggestedRegressorsForModelXPath(arrayPath) {
         const match = String(arrayPath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
         if (!match) {
@@ -2867,6 +2989,27 @@
         return Array.from(new Set(modelEditorInterestRegressors || [])).filter(Boolean);
     }
 
+    function pruneEdgesForCurrentNodes() {
+        const edges = getByPath(modelEditorDraft, 'Edges');
+        if (!Array.isArray(edges)) return;
+
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        const nodeNames = new Set(
+            nodes
+                .map(node => String(node?.Name || '').trim())
+                .filter(Boolean)
+        );
+
+        const filteredEdges = edges.filter(edge => {
+            const source = String(edge?.Source || '').trim();
+            const destination = String(edge?.Destination || '').trim();
+            if (!source || !destination) return false;
+            return nodeNames.has(source) && nodeNames.has(destination);
+        });
+
+        setByPath(modelEditorDraft, 'Edges', filteredEdges);
+    }
+
     function removeArrayItem(path) {
         const match = path.match(/^(.*)\[(\d+)\]$/);
         if (!match) return;
@@ -2878,6 +3021,9 @@
         if (index < 0 || index >= arr.length) return;
 
         arr.splice(index, 1);
+        if (arrayPath === 'Nodes') {
+            pruneEdgesForCurrentNodes();
+        }
         if (/\.Model\.X$/.test(arrayPath)) {
             syncModelXHrfVariables(arrayPath);
         }
@@ -3003,6 +3149,7 @@
             if (match) {
                 const arrayPath = match[1];
                 const index = Number(match[2]);
+                const currentArray = getByPath(modelEditorDraft, arrayPath);
                 const regressor = String(value || '').trim();
                 const hrfEnabled = isModelXRegressorHrfEnabled(path);
 
@@ -3075,6 +3222,34 @@
                 const actions = document.createElement('div');
                 actions.className = 'json-row-actions json-row-actions-modelx';
 
+                const upBtn = document.createElement('button');
+                upBtn.type = 'button';
+                upBtn.className = 'btn btn-sm btn-outline-secondary';
+                upBtn.title = 'Move up';
+                upBtn.innerHTML = '<i class="fas fa-arrow-up"></i>';
+                upBtn.disabled = index === 0;
+                upBtn.addEventListener('click', () => {
+                    const moved = moveModelXRegressorByStep(arrayPath, index, -1);
+                    if (!moved) return;
+                    const status = document.getElementById('model-editor-status');
+                    status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Regressor order updated</div>';
+                    renderModelAccordionEditor();
+                });
+
+                const downBtn = document.createElement('button');
+                downBtn.type = 'button';
+                downBtn.className = 'btn btn-sm btn-outline-secondary';
+                downBtn.title = 'Move down';
+                downBtn.innerHTML = '<i class="fas fa-arrow-down"></i>';
+                downBtn.disabled = !Array.isArray(currentArray) || index >= currentArray.length - 1;
+                downBtn.addEventListener('click', () => {
+                    const moved = moveModelXRegressorByStep(arrayPath, index, 1);
+                    if (!moved) return;
+                    const status = document.getElementById('model-editor-status');
+                    status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Regressor order updated</div>';
+                    renderModelAccordionEditor();
+                });
+
                 const hrfBtn = document.createElement('button');
                 hrfBtn.type = 'button';
                 hrfBtn.className = hrfEnabled
@@ -3100,6 +3275,8 @@
                     renderModelAccordionEditor();
                 });
 
+                actions.appendChild(upBtn);
+                actions.appendChild(downBtn);
                 actions.appendChild(hrfBtn);
                 actions.appendChild(delBtn);
                 row.appendChild(actions);
@@ -3306,6 +3483,81 @@
                     ? modelEditorDraft.Nodes[Number(pathMatch[1])]
                     : null;
                 const isDatasetModelX = String(nodeForPath?.Level || '').trim().toLowerCase() === 'dataset';
+                const isRunModelX = String(nodeForPath?.Level || '').trim().toLowerCase() === 'run';
+                const modelPathForX = String(basePath || '').replace(/\.X$/, '');
+
+                function getModelForCurrentX() {
+                    const modelObj = getByPath(modelEditorDraft, modelPathForX);
+                    if (!modelObj || typeof modelObj !== 'object' || Array.isArray(modelObj)) return null;
+                    return modelObj;
+                }
+
+                function getConditionRegressorsForModulation() {
+                    const regs = getByPath(modelEditorDraft, basePath);
+                    return normalizeStringArray(regs)
+                        .filter(reg => reg.startsWith('trial_type.') || reg.startsWith('condition.'));
+                }
+
+                function getNumericColumnsForModulation() {
+                    return normalizeStringArray(modelEditorEventNumericColumns);
+                }
+
+                function getNumericSamplesForColumn(columnName) {
+                    if (!modelEditorEventNumericSamples || typeof modelEditorEventNumericSamples !== 'object') return [];
+                    return normalizeStringArray(modelEditorEventNumericSamples[String(columnName || '').trim()]);
+                }
+
+                function normalizeParametricModulationEntry(entry, fallbackCondition = '', fallbackValue = '', index = 0) {
+                    const conditions = normalizeStringArray(entry?.Conditions);
+                    const values = normalizeStringArray(entry?.Values);
+                    const rawPoly = Number(entry?.PolynomialExpansion);
+                    return {
+                        Name: String(entry?.Name || `parametric_mod_${index + 1}`).trim() || `parametric_mod_${index + 1}`,
+                        Conditions: conditions.length ? [conditions[0]] : (fallbackCondition ? [fallbackCondition] : []),
+                        Values: values.length ? [values[0]] : (fallbackValue ? [fallbackValue] : []),
+                        PolynomialExpansion: Number.isFinite(rawPoly) && rawPoly > 0 ? Math.round(rawPoly) : 1
+                    };
+                }
+
+                function getParametricModulationsForCurrentX() {
+                    const modelObj = getModelForCurrentX();
+                    const existing = modelObj?.Software?.SPM?.ParametricModulations;
+                    if (!Array.isArray(existing)) return [];
+                    const fallbackCondition = getConditionRegressorsForModulation()[0] || '';
+                    const fallbackValue = getNumericColumnsForModulation()[0] || '';
+                    return existing.map((entry, index) =>
+                        normalizeParametricModulationEntry(entry, fallbackCondition, fallbackValue, index)
+                    );
+                }
+
+                function setParametricModulationsForCurrentX(nextEntries) {
+                    const modelObj = getModelForCurrentX();
+                    if (!modelObj) return;
+
+                    const normalizedEntries = Array.isArray(nextEntries)
+                        ? nextEntries.map((entry, index) => normalizeParametricModulationEntry(entry, '', '', index))
+                        : [];
+
+                    if (!normalizedEntries.length) {
+                        if (modelObj.Software && typeof modelObj.Software === 'object' && !Array.isArray(modelObj.Software)) {
+                            if (modelObj.Software.SPM && typeof modelObj.Software.SPM === 'object' && !Array.isArray(modelObj.Software.SPM)) {
+                                delete modelObj.Software.SPM.ParametricModulations;
+                                if (!Object.keys(modelObj.Software.SPM).length) delete modelObj.Software.SPM;
+                            }
+                            if (!Object.keys(modelObj.Software).length) delete modelObj.Software;
+                        }
+                        return;
+                    }
+
+                    if (!modelObj.Software || typeof modelObj.Software !== 'object' || Array.isArray(modelObj.Software)) {
+                        modelObj.Software = {};
+                    }
+                    if (!modelObj.Software.SPM || typeof modelObj.Software.SPM !== 'object' || Array.isArray(modelObj.Software.SPM)) {
+                        modelObj.Software.SPM = {};
+                    }
+                    modelObj.Software.SPM.ParametricModulations = normalizedEntries;
+                }
+
                 if (uniqueRegs.length === 0) {
                     const opt = document.createElement('option');
                     opt.value = '';
@@ -3387,6 +3639,191 @@
                 controls.appendChild(dropZone);
 
                 listWrap.appendChild(controls);
+
+                if (isRunModelX) {
+                    const modulationCard = document.createElement('div');
+                    modulationCard.className = 'border rounded p-2 mb-2 bg-white d-flex flex-column gap-2';
+
+                    const modulationHeader = document.createElement('div');
+                    modulationHeader.className = 'd-flex justify-content-between align-items-center';
+                    const modulationTitle = document.createElement('div');
+                    modulationTitle.className = 'small fw-bold';
+                    modulationTitle.textContent = 'Parametric Modulation (optional)';
+                    const modulationToggle = document.createElement('input');
+                    modulationToggle.type = 'checkbox';
+                    modulationToggle.className = 'form-check-input';
+                    const existingModulations = getParametricModulationsForCurrentX();
+                    modulationToggle.checked = existingModulations.length > 0;
+                    modulationHeader.appendChild(modulationTitle);
+                    modulationHeader.appendChild(modulationToggle);
+                    modulationCard.appendChild(modulationHeader);
+
+                    const modulationHint = document.createElement('div');
+                    modulationHint.className = 'small text-muted';
+                    modulationHint.textContent = 'Select a condition regressor and numeric events.tsv column (for example rating). Saved to Model.Software.SPM.ParametricModulations.';
+                    modulationCard.appendChild(modulationHint);
+
+                    const availableConditions = getConditionRegressorsForModulation();
+                    const availableValues = getNumericColumnsForModulation();
+
+                    if (!availableConditions.length) {
+                        const warn = document.createElement('div');
+                        warn.className = 'small text-warning';
+                        warn.textContent = 'Add trial_type.* or condition.* regressors to Model.X before enabling modulation.';
+                        modulationCard.appendChild(warn);
+                    }
+                    if (!availableValues.length) {
+                        const warn = document.createElement('div');
+                        warn.className = 'small text-warning';
+                        warn.textContent = 'No numeric events.tsv columns detected for selected tasks.';
+                        modulationCard.appendChild(warn);
+                    }
+
+                    modulationToggle.addEventListener('change', () => {
+                        if (!modulationToggle.checked) {
+                            setParametricModulationsForCurrentX([]);
+                            setModelEditorStatus('Parametric modulation disabled.', 'info');
+                            renderModelAccordionEditor();
+                            return;
+                        }
+                        setParametricModulationsForCurrentX([
+                            normalizeParametricModulationEntry({}, availableConditions[0] || '', availableValues[0] || '', 0)
+                        ]);
+                        setModelEditorStatus('Parametric modulation enabled.', 'info');
+                        renderModelAccordionEditor();
+                    });
+
+                    if (existingModulations.length) {
+                        existingModulations.forEach((entry, modIdx) => {
+                            const row = document.createElement('div');
+                            row.className = 'border rounded p-2 bg-light-subtle d-flex flex-column gap-2';
+
+                            const rowTop = document.createElement('div');
+                            rowTop.className = 'd-flex justify-content-between align-items-center';
+                            const rowLabel = document.createElement('div');
+                            rowLabel.className = 'small fw-bold';
+                            rowLabel.textContent = `Modulation ${modIdx + 1}`;
+                            const removeBtn = document.createElement('button');
+                            removeBtn.type = 'button';
+                            removeBtn.className = 'btn btn-sm btn-outline-danger';
+                            removeBtn.textContent = 'Remove';
+                            removeBtn.addEventListener('click', () => {
+                                const next = getParametricModulationsForCurrentX();
+                                next.splice(modIdx, 1);
+                                setParametricModulationsForCurrentX(next);
+                                setModelEditorStatus('Parametric modulation removed.', 'info');
+                                renderModelAccordionEditor();
+                            });
+                            rowTop.appendChild(rowLabel);
+                            rowTop.appendChild(removeBtn);
+                            row.appendChild(rowTop);
+
+                            const nameInput = document.createElement('input');
+                            nameInput.type = 'text';
+                            nameInput.className = 'form-control form-control-sm';
+                            nameInput.placeholder = 'Name (for example idea_rating_mod)';
+                            nameInput.value = entry.Name;
+                            nameInput.addEventListener('change', () => {
+                                const next = getParametricModulationsForCurrentX();
+                                next[modIdx].Name = (nameInput.value || '').trim() || `parametric_mod_${modIdx + 1}`;
+                                setParametricModulationsForCurrentX(next);
+                                setModelEditorStatus('Parametric modulation updated.', 'info');
+                                renderModelAccordionEditor();
+                            });
+                            row.appendChild(nameInput);
+
+                            const conditionSelect = document.createElement('select');
+                            conditionSelect.className = 'form-select form-select-sm';
+                            const currentCondition = normalizeStringArray(entry.Conditions)[0] || '';
+                            const conditionChoices = Array.from(new Set([...availableConditions, currentCondition].filter(Boolean)));
+                            const emptyCondition = document.createElement('option');
+                            emptyCondition.value = '';
+                            emptyCondition.textContent = conditionChoices.length ? 'Select condition regressor' : 'No condition regressors available';
+                            conditionSelect.appendChild(emptyCondition);
+                            conditionChoices.forEach(choice => {
+                                const opt = document.createElement('option');
+                                opt.value = choice;
+                                opt.textContent = choice;
+                                conditionSelect.appendChild(opt);
+                            });
+                            conditionSelect.value = currentCondition;
+                            conditionSelect.addEventListener('change', () => {
+                                const next = getParametricModulationsForCurrentX();
+                                next[modIdx].Conditions = conditionSelect.value ? [conditionSelect.value] : [];
+                                setParametricModulationsForCurrentX(next);
+                                setModelEditorStatus('Parametric modulation updated.', 'info');
+                                renderModelAccordionEditor();
+                            });
+                            row.appendChild(conditionSelect);
+
+                            const valueSelect = document.createElement('select');
+                            valueSelect.className = 'form-select form-select-sm';
+                            const currentValue = normalizeStringArray(entry.Values)[0] || '';
+                            const valueChoices = Array.from(new Set([...availableValues, currentValue].filter(Boolean)));
+                            const emptyValue = document.createElement('option');
+                            emptyValue.value = '';
+                            emptyValue.textContent = valueChoices.length ? 'Select numeric events.tsv column' : 'No numeric columns available';
+                            valueSelect.appendChild(emptyValue);
+                            valueChoices.forEach(choice => {
+                                const opt = document.createElement('option');
+                                opt.value = choice;
+                                opt.textContent = choice;
+                                valueSelect.appendChild(opt);
+                            });
+                            valueSelect.value = currentValue;
+                            valueSelect.addEventListener('change', () => {
+                                const next = getParametricModulationsForCurrentX();
+                                next[modIdx].Values = valueSelect.value ? [valueSelect.value] : [];
+                                setParametricModulationsForCurrentX(next);
+                                setModelEditorStatus('Parametric modulation updated.', 'info');
+                                renderModelAccordionEditor();
+                            });
+                            row.appendChild(valueSelect);
+
+                            const valueSamples = getNumericSamplesForColumn(currentValue);
+                            if (valueSamples.length) {
+                                const sampleHint = document.createElement('div');
+                                sampleHint.className = 'small text-muted';
+                                sampleHint.textContent = `Sample ${currentValue}: ${valueSamples.slice(0, 5).join(', ')}`;
+                                row.appendChild(sampleHint);
+                            }
+
+                            const polyInput = document.createElement('input');
+                            polyInput.type = 'number';
+                            polyInput.className = 'form-control form-control-sm';
+                            polyInput.min = '1';
+                            polyInput.step = '1';
+                            polyInput.value = String(entry.PolynomialExpansion || 1);
+                            polyInput.placeholder = 'Polynomial expansion (1 = linear)';
+                            polyInput.addEventListener('change', () => {
+                                const next = getParametricModulationsForCurrentX();
+                                const parsed = Number(polyInput.value);
+                                next[modIdx].PolynomialExpansion = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 1;
+                                setParametricModulationsForCurrentX(next);
+                                setModelEditorStatus('Parametric modulation updated.', 'info');
+                                renderModelAccordionEditor();
+                            });
+                            row.appendChild(polyInput);
+
+                            modulationCard.appendChild(row);
+                        });
+
+                        const addModulationBtn = document.createElement('button');
+                        addModulationBtn.type = 'button';
+                        addModulationBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
+                        addModulationBtn.textContent = 'Add Modulation';
+                        addModulationBtn.addEventListener('click', () => {
+                            const next = getParametricModulationsForCurrentX();
+                            next.push(normalizeParametricModulationEntry({}, availableConditions[0] || '', availableValues[0] || '', next.length));
+                            setParametricModulationsForCurrentX(next);
+                            setModelEditorStatus('Parametric modulation added.', 'info');
+                            renderModelAccordionEditor();
+                        });
+                        modulationCard.appendChild(addModulationBtn);
+                    }
+
+                    listWrap.appendChild(modulationCard);
+                }
             }
 
             if (/\.GroupBy$/.test(basePath)) {
@@ -3634,6 +4071,10 @@
         const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim();
         if (!bidsDir) {
             modelEditorInterestRegressors = [];
+            modelEditorEventSamples = { trial_type: [], condition: [] };
+            modelEditorEventColumns = [];
+            modelEditorEventNumericColumns = [];
+            modelEditorEventNumericSamples = {};
             modelEditorParticipantsInfo = emptyParticipantsInfo();
             return [];
         }
@@ -3648,7 +4089,22 @@
                 })
             });
             const data = await response.json();
-            const sample = data?.dataset?.events?.sample_values || {};
+            const events = data?.dataset?.events || {};
+            const sample = events.sample_values || {};
+            modelEditorEventSamples = {
+                trial_type: normalizeStringArray(sample.trial_type),
+                condition: normalizeStringArray(sample.condition)
+            };
+            modelEditorEventColumns = normalizeStringArray(events.event_columns);
+            modelEditorEventNumericColumns = normalizeStringArray(events.numeric_columns);
+            const numericSamplesRaw = (events.numeric_sample_values && typeof events.numeric_sample_values === 'object')
+                ? events.numeric_sample_values
+                : {};
+            const numericSamples = {};
+            Object.entries(numericSamplesRaw).forEach(([columnName, values]) => {
+                numericSamples[String(columnName || '').trim()] = normalizeStringArray(values);
+            });
+            modelEditorEventNumericSamples = numericSamples;
             modelEditorParticipantsInfo = (data?.dataset?.participants && typeof data.dataset.participants === 'object')
                 ? data.dataset.participants
                 : emptyParticipantsInfo();
@@ -3656,8 +4112,8 @@
                 ? data.model.transformed_columns.map(v => String(v || '').trim()).filter(Boolean)
                 : [];
 
-            const trialRegs = (sample.trial_type || []).map(v => `trial_type.${v}`);
-            const conditionRegs = (sample.condition || []).map(v => `condition.${v}`);
+            const trialRegs = modelEditorEventSamples.trial_type.map(v => `trial_type.${v}`);
+            const conditionRegs = modelEditorEventSamples.condition.map(v => `condition.${v}`);
 
             modelEditorInterestRegressors = Array.from(new Set([
                 ...trialRegs,
@@ -3668,6 +4124,10 @@
         } catch (e) {
             console.warn('Could not load interest regressors:', e);
             modelEditorInterestRegressors = [];
+            modelEditorEventSamples = { trial_type: [], condition: [] };
+            modelEditorEventColumns = [];
+            modelEditorEventNumericColumns = [];
+            modelEditorEventNumericSamples = {};
             modelEditorParticipantsInfo = emptyParticipantsInfo();
             return [];
         }
@@ -4622,6 +5082,219 @@
         } catch (err) { console.error('Failed to load study file:', err); }
     }
 
+    function normalizeSubjectLabel(value) {
+        const token = String(value || '').trim();
+        if (!token) return '';
+        return token.toLowerCase().startsWith('sub-') ? token.slice(4) : token;
+    }
+
+    let statsCoverageModalInstance = null;
+
+    function getStatsCoverageModalInstance() {
+        const modalEl = document.getElementById('statsCoverageModal');
+        if (!modalEl) return null;
+        if (!statsCoverageModalInstance) {
+            statsCoverageModalInstance = new bootstrap.Modal(modalEl);
+        }
+        return statsCoverageModalInstance;
+    }
+
+    function fillCoverageList(listEl, lines, maxItems = 24) {
+        if (!listEl) return;
+        listEl.innerHTML = '';
+
+        if (!lines.length) {
+            const li = document.createElement('li');
+            li.className = 'text-muted';
+            li.textContent = 'none';
+            listEl.appendChild(li);
+            return;
+        }
+
+        lines.slice(0, maxItems).forEach(line => {
+            const li = document.createElement('li');
+            li.textContent = line;
+            listEl.appendChild(li);
+        });
+
+        if (lines.length > maxItems) {
+            const li = document.createElement('li');
+            li.className = 'text-muted';
+            li.textContent = `... and ${lines.length - maxItems} more`;
+            listEl.appendChild(li);
+        }
+    }
+
+    function renderCoverageModal(report) {
+        const summary = report?.summary || {};
+        const ready = Array.isArray(report?.ready_subjects) ? report.ready_subjects : [];
+        const missing = Array.isArray(report?.missing_subjects) ? report.missing_subjects : [];
+        const tasks = Array.isArray(report?.tasks_considered) ? report.tasks_considered : [];
+        const messages = Array.isArray(report?.messages) ? report.messages : [];
+
+        const summaryEl = document.getElementById('stats-coverage-summary');
+        const tasksEl = document.getElementById('stats-coverage-tasks');
+        const notesEl = document.getElementById('stats-coverage-notes');
+        const readyCountEl = document.getElementById('stats-coverage-ready-count');
+        const missingCountEl = document.getElementById('stats-coverage-missing-count');
+        const readyListEl = document.getElementById('stats-coverage-ready-list');
+        const missingListEl = document.getElementById('stats-coverage-missing-list');
+        const runReadyBtn = document.getElementById('stats-coverage-run-ready');
+
+        if (summaryEl) {
+            summaryEl.textContent = `Missing data was detected for ${summary.missing_subjects || 0} of ${summary.total_subjects || 0} subjects. Choose how to proceed.`;
+        }
+
+        if (tasksEl) {
+            tasksEl.textContent = tasks.length ? `Tasks checked: ${tasks.join(', ')}` : 'Tasks checked: all detected tasks';
+        }
+
+        if (notesEl) {
+            notesEl.textContent = messages.length ? messages.join(' ') : 'You can continue without blocking, or run only complete subjects.';
+        }
+
+        if (readyCountEl) readyCountEl.textContent = `${ready.length} subject(s) have complete data.`;
+        if (missingCountEl) missingCountEl.textContent = `${missing.length} subject(s) are missing required inputs.`;
+
+        const readyLines = ready.map(subject => `sub-${normalizeSubjectLabel(subject)}`);
+        fillCoverageList(readyListEl, readyLines);
+
+        const missingLines = missing.map(entry => {
+            const subject = normalizeSubjectLabel(entry.subject);
+            const issues = Array.isArray(entry.issues) ? entry.issues.join('; ') : 'missing required inputs';
+            return `sub-${subject}: ${issues}`;
+        });
+        fillCoverageList(missingListEl, missingLines);
+
+        if (runReadyBtn) {
+            runReadyBtn.disabled = ready.length === 0;
+            runReadyBtn.textContent = (hasProject && currentProjectId)
+                ? 'Continue with Ready Subjects + Save to Project'
+                : 'Continue with Ready Subjects';
+        }
+    }
+
+    async function openCoverageDecisionModal(report) {
+        const modalEl = document.getElementById('statsCoverageModal');
+        const cancelBtn = document.getElementById('stats-coverage-cancel');
+        const continueAllBtn = document.getElementById('stats-coverage-continue-all');
+        const runReadyBtn = document.getElementById('stats-coverage-run-ready');
+        const modal = getStatsCoverageModalInstance();
+
+        if (!modalEl || !cancelBtn || !continueAllBtn || !runReadyBtn || !modal) {
+            return { action: 'cancel' };
+        }
+
+        renderCoverageModal(report);
+
+        return await new Promise(resolve => {
+            let settled = false;
+
+            const cleanup = () => {
+                cancelBtn.removeEventListener('click', onCancel);
+                continueAllBtn.removeEventListener('click', onContinueAll);
+                runReadyBtn.removeEventListener('click', onRunReady);
+                modalEl.removeEventListener('hidden.bs.modal', onHidden);
+            };
+
+            const settle = (decision, shouldHide = true) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(decision);
+                if (shouldHide) {
+                    modal.hide();
+                }
+            };
+
+            const onCancel = () => settle({ action: 'cancel' });
+            const onContinueAll = () => settle({ action: 'continue_all' });
+            const onRunReady = () => settle({ action: 'continue_ready' });
+            const onHidden = () => settle({ action: 'cancel' }, false);
+
+            cancelBtn.addEventListener('click', onCancel);
+            continueAllBtn.addEventListener('click', onContinueAll);
+            runReadyBtn.addEventListener('click', onRunReady);
+            modalEl.addEventListener('hidden.bs.modal', onHidden);
+
+            modal.show();
+        });
+    }
+
+    async function runStatsCoverageGate() {
+        const selectedActions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
+        const checksStats = selectedActions.includes('stats') || selectedActions.includes('dataset');
+        if (!checksStats) {
+            return { allow: true, subjectsOverride: [] };
+        }
+
+        updateInternalState();
+
+        const requestPayload = {
+            project_id: currentProjectId || null,
+            bids_dir: unifiedStudyConfig.BIDS_DIR || '',
+            fmriprep_dir: unifiedStudyConfig.FMRIPREP_DIR || '',
+            model_file: unifiedStudyConfig.MODELS_FILE || '',
+            tasks: unifiedStudyConfig.TASKS || [],
+            subjects: unifiedStudyConfig.SUBJECTS || []
+        };
+
+        let report = null;
+        try {
+            const response = await fetch('/api/stats_subject_coverage', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestPayload)
+            });
+            report = await response.json();
+            if (!response.ok) {
+                const errMsg = report?.error || 'Unknown pre-check error';
+                alert(`Stats pre-check failed: ${errMsg}\n\nExecution will continue with your current settings.`);
+                return { allow: true, subjectsOverride: [] };
+            }
+        } catch (err) {
+            alert(`Stats pre-check request failed: ${err.message}\n\nExecution will continue with your current settings.`);
+            return { allow: true, subjectsOverride: [] };
+        }
+
+        const totalSubjects = Number(report?.summary?.total_subjects || 0);
+        const missingSubjects = Number(report?.summary?.missing_subjects || 0);
+        const readySubjects = Array.isArray(report?.ready_subjects) ? report.ready_subjects : [];
+
+        if (totalSubjects === 0) {
+            alert('Stats pre-check could not find any subjects to run. Please verify BIDS/fMRIPrep folders and subject selection.');
+            return { allow: false, subjectsOverride: [] };
+        }
+
+        if (missingSubjects === 0) {
+            return { allow: true, subjectsOverride: [] };
+        }
+
+        const decision = await openCoverageDecisionModal(report);
+        if (decision.action === 'cancel') {
+            return { allow: false, subjectsOverride: [] };
+        }
+
+        if (decision.action === 'continue_all') {
+            return { allow: true, subjectsOverride: [] };
+        }
+
+        if (!readySubjects.length) {
+            alert('No complete subjects are available to run with ready-only mode.');
+            return { allow: false, subjectsOverride: [] };
+        }
+
+        const subjectsOverride = readySubjects.slice();
+        if (hasProject && currentProjectId) {
+            unifiedStudyConfig.SUBJECTS = subjectsOverride.slice();
+            await syncInternalToForm();
+            updateInternalState();
+            await saveProjectConfig();
+        }
+
+        return { allow: true, subjectsOverride };
+    }
+
     // --- BUTTON EVENTS ---
     document.getElementById('btn-validate').onclick = async () => {
         updateInternalState();
@@ -4691,8 +5364,14 @@
         if (selectedContainer) {
             unifiedStudyConfig.container_type = selectedContainer.value;
         }
+
+        const coverageDecision = await runStatsCoverageGate();
+        if (!coverageDecision.allow) return;
         
         const data = getFullFormData();
+        if (coverageDecision.subjectsOverride.length > 0) {
+            data.subjects_override = coverageDecision.subjectsOverride;
+        }
         
         if (hasProject && currentProjectId) {
             // Save to project
@@ -4733,25 +5412,34 @@
     };
 
     document.getElementById('btn-run-cached').onclick = () => {
-        const data = getFullFormData();
-        
-        if (hasProject && currentProjectId) {
-            const runPayload = {
-                ...data,
-                project_id: currentProjectId
-            };
-            delete runPayload.container;
-            startExecution(runPayload);
-        } else {
-            const folder = data.config_folder;
-            const study_path = folder + data.study_filename;
-            const runPayload = {
-                ...data,
-                settings: study_path
-            };
-            delete runPayload.container;
-            startExecution(runPayload);
-        }
+        (async () => {
+            updateInternalState();
+            const coverageDecision = await runStatsCoverageGate();
+            if (!coverageDecision.allow) return;
+
+            const data = getFullFormData();
+            if (coverageDecision.subjectsOverride.length > 0) {
+                data.subjects_override = coverageDecision.subjectsOverride;
+            }
+
+            if (hasProject && currentProjectId) {
+                const runPayload = {
+                    ...data,
+                    project_id: currentProjectId
+                };
+                delete runPayload.container;
+                startExecution(runPayload);
+            } else {
+                const folder = data.config_folder;
+                const study_path = folder + data.study_filename;
+                const runPayload = {
+                    ...data,
+                    settings: study_path
+                };
+                delete runPayload.container;
+                startExecution(runPayload);
+            }
+        })();
     };
     
     document.getElementById('btn-stop').onclick = async () => {
@@ -4984,6 +5672,8 @@
             // Combine interest regressors, model X entries, and anything already in contrasts
             const pool = new Set(modelEditorInterestRegressors || []);
             const node = currentNode();
+            const incomingContrastNames = getIncomingContrastNamesForNode(cbNodeIdx);
+            incomingContrastNames.forEach(name => pool.add(name));
             if (node) {
                 (node.Model?.X || []).forEach(v => {
                     if (typeof v === 'string' && !NUISANCE_REGRESSOR_RX.test(v.trim())) {

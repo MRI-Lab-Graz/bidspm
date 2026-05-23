@@ -365,6 +365,232 @@ def _resolve_fs_path(path: str) -> str:
     return app_candidate
 
 
+def _normalize_token_list(raw: Any) -> List[str]:
+    """Normalize a scalar/list value into a deduplicated list of non-empty strings."""
+    if raw is None:
+        return []
+
+    values = raw if isinstance(raw, list) else [raw]
+    normalized = []
+    seen = set()
+    for value in values:
+        token = str(value or '').strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized.append(token)
+    return normalized
+
+
+def _normalize_subject_ids(raw: Any) -> List[str]:
+    """Normalize subject labels to bare IDs (strip optional sub- prefix)."""
+    normalized = []
+    seen = set()
+    for token in _normalize_token_list(raw):
+        label = token[4:] if token.lower().startswith('sub-') else token
+        label = label.strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        normalized.append(label)
+    return normalized
+
+
+def _sort_subject_ids(values: List[str]) -> List[str]:
+    """Sort subject IDs with numeric-friendly ordering."""
+    def _key(value: str):
+        if value.isdigit():
+            return (0, int(value), value)
+        return (1, value.lower(), value)
+
+    return sorted(values, key=_key)
+
+
+def _extract_task_from_name(filename: str) -> str:
+    """Extract task label from a BIDS-like filename."""
+    match = re.search(r'task-([^_]+)', filename)
+    return match.group(1).strip() if match else ''
+
+
+def _extract_subject_from_path(file_path: Path) -> str:
+    """Extract subject ID from file path parts."""
+    for part in file_path.parts:
+        if part.startswith('sub-') and len(part) > 4:
+            return part[4:]
+    return ''
+
+
+def _scan_subject_task_map(files: List[Path], tasks_filter: List[str]) -> Dict[str, set]:
+    """Build subject -> tasks map from file list."""
+    task_filter = set(tasks_filter or [])
+    subject_tasks: Dict[str, set] = {}
+
+    for file_path in files:
+        subject = _extract_subject_from_path(file_path)
+        if not subject:
+            continue
+
+        task = _extract_task_from_name(file_path.name)
+        if task_filter:
+            if not task or task not in task_filter:
+                continue
+        elif not task:
+            task = '*'
+
+        subject_tasks.setdefault(subject, set()).add(task or '*')
+
+    return subject_tasks
+
+
+def _model_tasks_from_file(model_file: str) -> List[str]:
+    """Load model Input.task values from a stats model JSON file."""
+    if not model_file:
+        return []
+
+    resolved = _resolve_fs_path(model_file)
+    if not resolved or not os.path.isfile(resolved):
+        return []
+
+    try:
+        with open(resolved, 'r', encoding='utf-8') as stream:
+            model = json.load(stream)
+    except Exception:
+        return []
+
+    raw_tasks = model.get('Input', {}).get('task', []) if isinstance(model, dict) else []
+    return _normalize_token_list(raw_tasks)
+
+
+def _build_stats_subject_coverage_report(
+    bids_dir: str,
+    fmriprep_dir: str,
+    tasks: List[str],
+    selected_subjects: List[str],
+    model_file: str = ''
+) -> Dict[str, Any]:
+    """Collect subject-level readiness for stats execution."""
+    tasks_considered = _normalize_token_list(tasks)
+    if not tasks_considered:
+        tasks_considered = _model_tasks_from_file(model_file)
+
+    selected = _normalize_subject_ids(selected_subjects)
+    messages: List[str] = []
+
+    resolved_bids = _resolve_fs_path(bids_dir) if bids_dir else ''
+    resolved_fmriprep = _resolve_fs_path(fmriprep_dir) if fmriprep_dir else ''
+
+    bids_path = Path(resolved_bids) if resolved_bids and os.path.isdir(resolved_bids) else None
+    fmriprep_path = Path(resolved_fmriprep) if resolved_fmriprep and os.path.isdir(resolved_fmriprep) else None
+
+    if not bids_path:
+        messages.append('BIDS folder is missing or not accessible.')
+    if not fmriprep_path:
+        messages.append('fMRIPrep folder is missing or not accessible.')
+
+    bids_subjects = set()
+    fmriprep_subjects = set()
+    events_by_subject: Dict[str, set] = {}
+    preproc_by_subject: Dict[str, set] = {}
+
+    if bids_path:
+        bids_subjects = {
+            sub_dir.name[4:]
+            for sub_dir in bids_path.glob('sub-*')
+            if sub_dir.is_dir() and len(sub_dir.name) > 4
+        }
+
+        events_files = sorted(bids_path.glob('sub-*/ses-*/func/*_events.tsv')) + \
+            sorted(bids_path.glob('sub-*/func/*_events.tsv'))
+        events_by_subject = _scan_subject_task_map(list(dict.fromkeys(events_files)), tasks_considered)
+
+    if fmriprep_path:
+        fmriprep_subjects = {
+            sub_dir.name[4:]
+            for sub_dir in fmriprep_path.glob('sub-*')
+            if sub_dir.is_dir() and len(sub_dir.name) > 4
+        }
+
+        preproc_files = sorted(fmriprep_path.glob('sub-*/ses-*/func/*desc-preproc_bold.nii*')) + \
+            sorted(fmriprep_path.glob('sub-*/func/*desc-preproc_bold.nii*'))
+        preproc_by_subject = _scan_subject_task_map(list(dict.fromkeys(preproc_files)), tasks_considered)
+
+    expected_subjects = set(selected) if selected else (
+        bids_subjects |
+        fmriprep_subjects |
+        set(events_by_subject.keys()) |
+        set(preproc_by_subject.keys())
+    )
+
+    if not expected_subjects:
+        messages.append('No subjects detected from BIDS/fMRIPrep folders.')
+
+    ready_subjects = []
+    missing_subjects = []
+
+    for subject in _sort_subject_ids(list(expected_subjects)):
+        issues = []
+
+        if subject not in bids_subjects:
+            issues.append('missing BIDS subject folder')
+
+        if subject not in fmriprep_subjects:
+            issues.append('missing fMRIPrep subject folder')
+
+        event_tasks = events_by_subject.get(subject, set())
+        preproc_tasks = preproc_by_subject.get(subject, set())
+
+        if tasks_considered:
+            missing_event_tasks = [task for task in tasks_considered if task not in event_tasks]
+            missing_preproc_tasks = [task for task in tasks_considered if task not in preproc_tasks]
+
+            if missing_event_tasks:
+                issues.append(f"missing events for task(s): {', '.join(missing_event_tasks)}")
+            if missing_preproc_tasks:
+                issues.append(f"missing fMRIPrep preproc for task(s): {', '.join(missing_preproc_tasks)}")
+        else:
+            if not event_tasks:
+                issues.append('no events files found')
+            if not preproc_tasks:
+                issues.append('no fMRIPrep preproc BOLD files found')
+
+        if issues:
+            missing_subjects.append({
+                'subject': subject,
+                'issues': issues
+            })
+        else:
+            ready_subjects.append(subject)
+
+    missing_subject_ids = [entry['subject'] for entry in missing_subjects]
+
+    return {
+        'ok': len(missing_subjects) == 0 and len(expected_subjects) > 0,
+        'non_blocking': True,
+        'tasks_considered': tasks_considered,
+        'selected_subjects': selected,
+        'paths': {
+            'bids_dir': resolved_bids,
+            'fmriprep_dir': resolved_fmriprep,
+            'model_file': _resolve_fs_path(model_file) if model_file else ''
+        },
+        'source_subject_counts': {
+            'bids': len(bids_subjects),
+            'fmriprep': len(fmriprep_subjects),
+            'events': len(events_by_subject),
+            'preproc': len(preproc_by_subject)
+        },
+        'summary': {
+            'total_subjects': len(expected_subjects),
+            'ready_subjects': len(ready_subjects),
+            'missing_subjects': len(missing_subjects)
+        },
+        'ready_subjects': ready_subjects,
+        'missing_subjects': missing_subjects,
+        'missing_subject_ids': missing_subject_ids,
+        'messages': messages
+    }
+
+
 def _extract_model_hints(model_data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract tasks, contrast levels, and replacement values from a BIDS model."""
     field_status = {
@@ -518,9 +744,24 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
             "event_columns": [],
             "sample_values": {},
             "all_values": {},
+            "numeric_columns": [],
+            "numeric_sample_values": {},
             "profile_variants": {},
             "sample_status": {}
         }
+
+    def _normalize_cell(value: Any) -> str:
+        text = str(value or '').strip()
+        if not text or text.lower() in {'n/a', 'na', 'nan', 'null'}:
+            return ''
+        return text
+
+    def _is_numeric_token(value: str) -> bool:
+        try:
+            float(value)
+            return True
+        except (TypeError, ValueError):
+            return False
 
     task_tokens = set(tasks_filter or [])
     # Only look in subject func folders — never in code/, derivatives/, etc.
@@ -538,6 +779,7 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
         "trial_type": set(),
         "condition": set()
     }
+    numeric_tracker: Dict[str, Dict[str, Any]] = {}
     profile_counts = {
         "trial_type": Counter(),
         "condition": Counter()
@@ -564,6 +806,26 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
                             if value and value != 'n/a':
                                 sample_values[col].add(value)
                                 file_values[col].add(value)
+
+                    for col_name in fieldnames:
+                        normalized = _normalize_cell(row.get(col_name, ''))
+                        if not normalized:
+                            continue
+                        if col_name not in numeric_tracker:
+                            numeric_tracker[col_name] = {
+                                "saw_numeric": False,
+                                "saw_non_numeric": False,
+                                "sample_values": []
+                            }
+                        tracker = numeric_tracker[col_name]
+                        if _is_numeric_token(normalized):
+                            tracker["saw_numeric"] = True
+                            samples = tracker["sample_values"]
+                            if normalized not in samples and len(samples) < 25:
+                                samples.append(normalized)
+                        else:
+                            tracker["saw_non_numeric"] = True
+
                     # Keep scan cheap for large files while still collecting a per-file profile.
                     if len(file_values['trial_type']) > 50 and len(file_values['condition']) > 50:
                         break
@@ -585,6 +847,16 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
             representative_values[col] = []
             profile_variants[col] = 0
 
+    numeric_columns = sorted([
+        col_name
+        for col_name, tracker in numeric_tracker.items()
+        if tracker.get("saw_numeric") and not tracker.get("saw_non_numeric")
+    ])
+    numeric_sample_values = {
+        col_name: numeric_tracker[col_name].get("sample_values", [])[:12]
+        for col_name in numeric_columns
+    }
+
     return {
         "files_scanned": min(len(event_files), max_files),
         "event_columns": sorted(event_columns),
@@ -593,6 +865,8 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
             "trial_type": sorted(sample_values['trial_type'])[:50],
             "condition": sorted(sample_values['condition'])[:50]
         },
+        "numeric_columns": numeric_columns,
+        "numeric_sample_values": numeric_sample_values,
         "profile_variants": profile_variants,
         "sample_status": {
             "trial_type": "present" if sample_values['trial_type'] else (
@@ -1188,6 +1462,46 @@ def api_preflight_check(project_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/stats_subject_coverage', methods=['POST'])
+def api_stats_subject_coverage():
+    """Pre-check subject-level data availability for stats execution."""
+    try:
+        data = request.json or {}
+        project_id = str(data.get('project_id') or '').strip()
+        project = project_manager.load_project(project_id) if project_id else None
+
+        if project_id and not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        cfg = project.config if project else None
+
+        bids_dir = (str(data.get('bids_dir') or '').strip()) if 'bids_dir' in data else (cfg.bids_folder if cfg else '')
+        fmriprep_dir = (str(data.get('fmriprep_dir') or '').strip()) if 'fmriprep_dir' in data else (cfg.fmriprep_folder if cfg else '')
+        model_file = (str(data.get('model_file') or '').strip()) if 'model_file' in data else (cfg.models_file if cfg else '')
+
+        if 'tasks' in data:
+            tasks = _normalize_token_list(data.get('tasks'))
+        else:
+            tasks = _normalize_token_list(cfg.tasks if cfg else [])
+
+        if 'subjects' in data:
+            subjects = _normalize_subject_ids(data.get('subjects'))
+        else:
+            subjects = _normalize_subject_ids(cfg.subjects if cfg else [])
+
+        report = _build_stats_subject_coverage_report(
+            bids_dir=bids_dir,
+            fmriprep_dir=fmriprep_dir,
+            tasks=tasks,
+            selected_subjects=subjects,
+            model_file=model_file
+        )
+        report['project_id'] = project_id or None
+        return jsonify(report)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/projects/<project_id>/config', methods=['GET'])
 def api_get_project_config(project_id: str):
     """Get project configuration."""
@@ -1287,6 +1601,7 @@ def run_bidspm():
     data = request.json or {}
     actions = data.get('actions', [])
     project_id = data.get('project_id')
+    subjects_override = _normalize_subject_ids(data.get('subjects_override')) if 'subjects_override' in data else []
     
     if not actions:
         return jsonify({"error": "No actions selected"}), 400
@@ -1307,6 +1622,8 @@ def run_bidspm():
             run_cfg_path = configs_dir / f"run_settings_{execution_id}.json"
 
             export_cfg = project_manager.export_config(project_id, format='bidspm') or {}
+            if subjects_override:
+                export_cfg['SUBJECTS'] = subjects_override
             with open(run_cfg_path, 'w', encoding='utf-8') as f:
                 json.dump(export_cfg, f, indent=2)
                 f.write('\n')
@@ -1316,6 +1633,25 @@ def run_bidspm():
         # If no explicit model override provided, use the project's models_file.
         if not data.get('model') and project.config.models_file:
             data['model'] = project.config.models_file
+
+    if subjects_override and data.get('settings'):
+        settings_path = str(data.get('settings')).strip()
+        if not os.path.isfile(settings_path):
+            return jsonify({"error": f"Settings file not found: {settings_path}"}), 400
+
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as stream:
+                run_config = json.load(stream)
+        except Exception as e:
+            return jsonify({"error": f"Failed to read settings file: {e}"}), 400
+
+        run_config['SUBJECTS'] = subjects_override
+        override_path = Path('config') / f"run_settings_override_{execution_id}.json"
+        override_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(override_path, 'w', encoding='utf-8') as stream:
+            json.dump(run_config, stream, indent=2)
+            stream.write('\n')
+        data['settings'] = str(override_path)
     
     # Pre-validate model if provided (uses core module)
     model_file = data.get('model')

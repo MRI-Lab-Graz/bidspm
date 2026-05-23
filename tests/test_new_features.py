@@ -27,19 +27,21 @@ class TestNewFeatures(unittest.TestCase):
         text = response.get_data(as_text=True)
         self.assertIn("Model Editor", text)
         self.assertIn("studies/model.json", text)
-        self.assertIn("Dataset: one sample t-test", text)
-        self.assertIn("Dataset: 2 samples t-test", text)
+        self.assertIn("Second-Level Presets", text)
+        self.assertIn("one sample t-test: all subjects", text)
+        self.assertIn("2 samples t-test: compare 2 groups", text)
 
     def test_analysis_page_renders_second_level_add_node_menu(self):
         response = self.client.get("/analysis")
 
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertIn("Dataset: one sample t-test", text)
-        self.assertIn("Dataset: one sample t-test by group", text)
-        self.assertIn("Dataset: 2 samples t-test", text)
-        self.assertIn("Dataset: one way ANOVA", text)
-        self.assertIn("Dataset: linear regression", text)
+        self.assertIn("Second-Level Presets", text)
+        self.assertIn("one sample t-test: all subjects", text)
+        self.assertIn("one sample t-test: one model per group", text)
+        self.assertIn("2 samples t-test: compare 2 groups", text)
+        self.assertIn("one way ANOVA: compare several groups", text)
+        self.assertIn("linear regression: numeric covariate", text)
 
     def test_api_bids_entities_missing_path_returns_defaults(self):
         response = self.client.get("/api/bids_entities", query_string={"path": "/path/that/does/not/exist"})
@@ -274,6 +276,74 @@ class TestNewFeatures(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertTrue(result.dry_run_commands)
             self.assertIn("--node_name dataset_level", result.dry_run_commands[0])
+
+    def test_api_stats_subject_coverage_reports_missing_subject_data(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            bids_dir = root / "bids"
+            fmriprep_dir = root / "fmriprep"
+
+            # Subject 01 has complete data for task motor.
+            _touch(bids_dir / "sub-01" / "func" / "sub-01_task-motor_events.tsv")
+            _touch(fmriprep_dir / "sub-01" / "func" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz")
+
+            # Subject 02 only has fMRIPrep data.
+            _touch(fmriprep_dir / "sub-02" / "func" / "sub-02_task-motor_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz")
+
+            response = self.client.post(
+                "/api/stats_subject_coverage",
+                json={
+                    "bids_dir": str(bids_dir),
+                    "fmriprep_dir": str(fmriprep_dir),
+                    "tasks": ["motor"],
+                    "subjects": ["01", "02"],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.get_json()
+
+            self.assertEqual(payload["summary"]["total_subjects"], 2)
+            self.assertEqual(payload["summary"]["ready_subjects"], 1)
+            self.assertEqual(payload["summary"]["missing_subjects"], 1)
+            self.assertEqual(payload["ready_subjects"], ["01"])
+            self.assertEqual(payload["missing_subject_ids"], ["02"])
+
+            missing_entry = payload["missing_subjects"][0]
+            self.assertEqual(missing_entry["subject"], "02")
+            self.assertTrue(any("BIDS" in issue for issue in missing_entry["issues"]))
+            self.assertTrue(any("events" in issue for issue in missing_entry["issues"]))
+
+    def test_api_stats_subject_coverage_uses_model_tasks_when_tasks_empty(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            bids_dir = root / "bids"
+            fmriprep_dir = root / "fmriprep"
+            model_file = root / "model.json"
+
+            _touch(bids_dir / "sub-01" / "func" / "sub-01_task-motor_events.tsv")
+            _touch(fmriprep_dir / "sub-01" / "func" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz")
+
+            model_file.write_text(
+                '{"Name":"demo","BIDSModelVersion":"1.0.0","Input":{"task":["motor"]},"Nodes":[]}',
+                encoding="utf-8",
+            )
+
+            response = self.client.post(
+                "/api/stats_subject_coverage",
+                json={
+                    "bids_dir": str(bids_dir),
+                    "fmriprep_dir": str(fmriprep_dir),
+                    "tasks": [],
+                    "subjects": ["01"],
+                    "model_file": str(model_file),
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.get_json()
+            self.assertEqual(payload["tasks_considered"], ["motor"])
+            self.assertTrue(payload["ok"])
 
 
 if __name__ == "__main__":
