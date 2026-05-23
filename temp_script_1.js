@@ -3,6 +3,10 @@
 (function(){
   const NUISANCE_REGRESSOR_RX = /^(framewise_displacement|trans_[xyz]|rot_[xyz]|a_comp_cor|dvars|std_dvars|non_steady_state_outlier|cosine\d*|white_matter|csf|global_signal)/;
   const REQUIRED_ROOT_KEYS = ['Name', 'BIDSModelVersion', 'Input', 'Nodes'];
+  const previewValidationState = window.__modelPreviewValidationState && typeof window.__modelPreviewValidationState === 'object'
+    ? window.__modelPreviewValidationState
+    : { timer: null, runId: 0 };
+  window.__modelPreviewValidationState = previewValidationState;
   const READONLY_MODEL_PATHS = [
     /^BIDSModelVersion$/,
     /^Input\.task$/,
@@ -72,7 +76,7 @@
     else if (typeof value === 'number') { input = document.createElement('input'); input.type='number'; input.step='any'; input.className='form-control form-control-sm font-monospace'; input.value = String(value); }
     else { input = document.createElement('input'); input.type='text'; input.className='form-control form-control-sm font-monospace'; input.value = value===null ? '' : String(value); }
     if (locked) { input.readOnly = true; input.disabled = true; input.classList.add('json-locked'); input.title = 'Locked mandatory field'; }
-    else { input.addEventListener('change', (e)=>{ const current = getByPath(modelEditorDraft, path); const newValue = parsePrimitiveInput(e.target.value, current); if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)){ const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`; e.target.value = current; return; } setByPath(modelEditorDraft, path, newValue); }); }
+    else { input.addEventListener('change', (e)=>{ const current = getByPath(modelEditorDraft, path); const newValue = parsePrimitiveInput(e.target.value, current); if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)){ const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`; e.target.value = current; return; } setByPath(modelEditorDraft, path, newValue); updateModelJsonPreview(); }); }
     inputWrap.appendChild(input); row.appendChild(inputWrap);
     if (locked) { const badge = document.createElement('span'); badge.className='badge text-bg-light border'; badge.textContent='Locked'; row.appendChild(badge); }
     else if (isModelXEntry && isNuisanceRegressor(value)) { const badge = document.createElement('span'); badge.className='badge text-bg-secondary'; badge.textContent='Nuisance'; row.appendChild(badge); }
@@ -152,6 +156,10 @@
     return note;
   }
 
+  function getSelectedModelTasks(){
+    return normalizeEditorStringArray(modelEditorDraft?.Input?.task);
+  }
+
   function parseCsvValues(raw){
     return String(raw || '')
       .split(',')
@@ -179,28 +187,38 @@
     title.textContent = 'Input.task (required)';
     wrap.appendChild(title);
 
+    const sharedInputEntityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
+      ? window.modelEditorInputEntityValues
+      : {};
+    const sharedBidsTasks = Array.isArray(window.modelEditorBidsTasks)
+      ? window.modelEditorBidsTasks
+      : [];
     const datasetTasks = Array.from(new Set([
-      ...normalizeEditorStringArray(modelEditorInputEntityValues?.task),
-      ...normalizeEditorStringArray(modelEditorBidsTasks)
+      ...normalizeEditorStringArray(sharedInputEntityValues.task),
+      ...normalizeEditorStringArray(sharedBidsTasks)
     ]));
-    const currentTasks = normalizeEditorStringArray(modelEditorDraft.Input.task);
+    const currentTasks = getSelectedModelTasks();
     const allTasks = Array.from(new Set([...datasetTasks, ...currentTasks]));
 
-    async function applySelectedTasks(tasks) {
-      modelEditorDraft.Input.task = normalizeEditorStringArray(tasks);
-      await refreshSpaceInputOptions(false);
-      await refreshModelEditorHintData(modelEditorDraft);
+    async function applySelectedTask(task) {
+      modelEditorDraft.Input.task = task ? [String(task).trim()] : [];
+      if (typeof window.refreshSpaceInputOptions === 'function') {
+        await window.refreshSpaceInputOptions(false);
+      }
+      if (typeof window.refreshModelEditorHintData === 'function') {
+        await window.refreshModelEditorHintData(modelEditorDraft);
+      }
       renderModelAccordionEditor();
       setModelEditorStatus(modelEditorDraft.Input.task.length
-        ? `Input.task updated from detected dataset tasks (${modelEditorDraft.Input.task.length} selected).`
+        ? `Input.task set to ${modelEditorDraft.Input.task[0]}.`
         : 'Input.task cleared.', modelEditorDraft.Input.task.length ? 'info' : 'warning');
     }
 
     const hint = document.createElement('div');
     hint.className = 'small text-muted';
     hint.textContent = datasetTasks.length
-      ? 'Select one or more tasks detected in the BIDS func files.'
-      : 'No tasks were detected automatically. Enter one or more task labels separated by commas.';
+      ? 'Choose one task from the detected BIDS func files. Task-derived trial types are filtered to this selection.'
+      : 'No tasks were detected automatically. Enter a single task label manually.';
     wrap.appendChild(hint);
 
     const actions = document.createElement('div');
@@ -209,53 +227,47 @@
     if (allTasks.length) {
       const select = document.createElement('select');
       select.className = 'form-select form-select-sm';
-      select.multiple = true;
-      select.size = Math.min(8, Math.max(3, allTasks.length));
-
-      const selectedSet = new Set(currentTasks);
+      const currentValue = currentTasks.length === 1 ? currentTasks[0] : '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = currentTasks.length > 1
+        ? `Multiple tasks selected in JSON (${currentTasks.join(', ')})`
+        : 'Select a task';
+      select.appendChild(placeholder);
       allTasks.forEach(task => {
         const option = document.createElement('option');
         option.value = task;
         option.textContent = datasetTasks.includes(task) ? task : `${task} (from model)`;
-        option.selected = selectedSet.has(task);
         select.appendChild(option);
       });
+      select.value = currentValue;
+      select.addEventListener('change', async ()=>{
+        await applySelectedTask(select.value);
+      });
       wrap.appendChild(select);
-
-      const selectAllBtn = document.createElement('button');
-      selectAllBtn.type = 'button';
-      selectAllBtn.className = 'btn btn-sm btn-outline-secondary';
-      selectAllBtn.textContent = 'Select all';
-      selectAllBtn.addEventListener('click', () => {
-        Array.from(select.options).forEach(option => { option.selected = true; });
-      });
-      actions.appendChild(selectAllBtn);
-
-      const applyBtn = document.createElement('button');
-      applyBtn.type = 'button';
-      applyBtn.className = 'btn btn-sm btn-outline-secondary';
-      applyBtn.textContent = 'Apply';
-      applyBtn.addEventListener('click', async ()=>{
-        const selected = Array.from(select.selectedOptions).map(option => option.value);
-        await applySelectedTasks(selected);
-      });
-      actions.appendChild(applyBtn);
 
       const clearBtn = document.createElement('button');
       clearBtn.type = 'button';
       clearBtn.className = 'btn btn-sm btn-outline-secondary';
       clearBtn.textContent = 'Clear';
       clearBtn.addEventListener('click', async ()=>{
-        Array.from(select.options).forEach(option => { option.selected = false; });
-        await applySelectedTasks([]);
+        select.value = '';
+        await applySelectedTask('');
       });
       actions.appendChild(clearBtn);
+
+      if (currentTasks.length > 1) {
+        const warn = document.createElement('div');
+        warn.className = 'small text-warning';
+        warn.textContent = 'Multiple tasks are currently stored in the model. Task-specific previews are hidden until you choose a single task here.';
+        wrap.appendChild(warn);
+      }
     } else {
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'form-control form-control-sm';
-      input.placeholder = 'e.g. motor, stroop';
-      input.value = currentTasks.join(', ');
+      input.placeholder = 'e.g. motor';
+      input.value = currentTasks[0] || '';
       wrap.appendChild(input);
 
       const applyBtn = document.createElement('button');
@@ -263,7 +275,7 @@
       applyBtn.className = 'btn btn-sm btn-outline-secondary';
       applyBtn.textContent = 'Apply';
       applyBtn.addEventListener('click', async ()=>{
-        await applySelectedTasks(parseCsvValues(input.value));
+        await applySelectedTask(input.value.trim());
       });
 
       const clearBtn = document.createElement('button');
@@ -272,7 +284,7 @@
       clearBtn.textContent = 'Clear';
       clearBtn.addEventListener('click', async ()=>{
         input.value = '';
-        await applySelectedTasks([]);
+        await applySelectedTask('');
       });
 
       actions.appendChild(applyBtn);
@@ -312,10 +324,10 @@
   }
 
   function getOverviewSectionValue(model) { const primitiveKeys = Object.entries(model || {}).filter(([key,value]) => key!=='Input' && key!=='Nodes' && (value===null || typeof value !== 'object')).map(([key])=>key); const keys = Array.from(new Set(['Name','BIDSModelVersion','Description', ...primitiveKeys])); return Object.fromEntries(keys.map(key => [key, model?.[key] ?? ''])); }
-  function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and global metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
-  function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and model-level input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Node stack with transformations, design matrices and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Connect nodes with source → destination edges', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
+  function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
+  function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: list.length>0 ? 'Nodes, transforms, design and contrasts' : 'No nodes yet. Use + Add Node to create the first node', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Source to destination node links', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
 
   function normalizeEditorStringArray(value) {
     return Array.isArray(value)
@@ -447,37 +459,594 @@
     container.appendChild(panel.panel);
   }
 
-  function renderNodeTransformationsPanel(container, node, idx) {
-    const panel = createWorkspacePanel('Transformations', 'Optional event-level transformer pipeline used before variables enter Model.X.');
-    const path = `Nodes[${idx}].Transformations`;
-
+  function ensureNodeTransformationsObject(node) {
     if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
-      panel.body.appendChild(createInlineNote('No transformations defined for this node.'));
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'btn btn-sm btn-outline-primary';
-      addBtn.textContent = 'Initialize Transformations';
-      addBtn.addEventListener('click', () => {
-        node.Transformations = { Transformer: 'bidspm', Instructions: [], GeneratedColumns: [] };
-        renderModelAccordionEditor();
-        setModelEditorStatus('Transformations initialized.', 'info');
-      });
-      panel.actions.appendChild(addBtn);
-      container.appendChild(panel.panel);
-      return;
+      node.Transformations = { Transformer: 'pybids-transforms-v1', Instructions: [], GeneratedColumns: [] };
+    }
+    if (!Array.isArray(node.Transformations.Instructions)) node.Transformations.Instructions = [];
+    if (!Array.isArray(node.Transformations.GeneratedColumns)) node.Transformations.GeneratedColumns = [];
+    if (!node.Transformations.Transformer) node.Transformations.Transformer = 'pybids-transforms-v1';
+    return node.Transformations;
+  }
+
+  function getInlineTransformerColumnSuggestions(node) {
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+    const inferredEventColumns = [];
+    if (normalizeEditorStringArray(eventSamples.trial_type).length) inferredEventColumns.push('trial_type');
+    if (normalizeEditorStringArray(eventSamples.condition).length) inferredEventColumns.push('condition');
+
+    const fromModelX = normalizeEditorStringArray(node?.Model?.X).map(value => {
+      if (value === '1') return '';
+      if (value.startsWith('trial_type.')) return 'trial_type';
+      if (value.startsWith('condition.')) return 'condition';
+      return value;
+    }).filter(Boolean);
+
+    const fromTransformGenerated = normalizeEditorStringArray(node?.Transformations?.GeneratedColumns);
+    const fromGlobalPool = normalizeEditorStringArray(window.modelEditorInterestRegressors)
+      .map(value => {
+        if (value.startsWith('trial_type.')) return 'trial_type';
+        if (value.startsWith('condition.')) return 'condition';
+        return value;
+      })
+      .filter(Boolean);
+
+    return Array.from(new Set([
+      ...inferredEventColumns,
+      ...fromModelX,
+      ...fromTransformGenerated,
+      ...fromGlobalPool
+    ])).sort((a, b) => a.localeCompare(b));
+  }
+
+  function createTransformerInstructionTemplate(opName) {
+    switch (opName) {
+      case 'Filter':
+        return { Name: 'Filter', Input: '', Query: '', Output: '' };
+      case 'Concatenate':
+        return { Name: 'Concatenate', Input: [], Output: '' };
+      case 'Factor':
+        return { Name: 'Factor', Input: [] };
+      case 'Replace':
+        return { Name: 'Replace', Input: '', Replace: [{ key: '', value: '' }], Output: '' };
+      case 'Copy':
+        return { Name: 'Copy', Input: [], Output: [] };
+      case 'Select':
+        return { Name: 'Select', Input: [] };
+      case 'Delete':
+        return { Name: 'Delete', Input: [] };
+      case 'Scale':
+        return { Name: 'Scale', Input: [], Demean: true, Rescale: true, Output: '' };
+      case 'Mean':
+        return { Name: 'Mean', Input: '', OmitNan: false, Output: '' };
+      case 'Threshold':
+        return { Name: 'Threshold', Input: '', Threshold: 0, Binarize: false, Above: true, Output: '' };
+      default:
+        return { Name: opName };
+    }
+  }
+
+  function inferFactorGeneratedColumns(inputs) {
+    const normalizedInputs = normalizeEditorStringArray(inputs);
+    if (!normalizedInputs.length) return [];
+
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+
+    const levelSets = normalizedInputs.map(column => {
+      if (column === 'trial_type') return normalizeEditorStringArray(eventSamples.trial_type);
+      if (column === 'condition') return normalizeEditorStringArray(eventSamples.condition);
+      return [];
+    });
+
+    const hasConcreteLevels = levelSets.every(levels => levels.length > 0);
+    if (!hasConcreteLevels) {
+      return normalizedInputs.map(column => `${column}_*`);
     }
 
-    const instructionCount = Array.isArray(node.Transformations.Instructions) ? node.Transformations.Instructions.length : 0;
-    const generatedCount = Array.isArray(node.Transformations.GeneratedColumns) ? node.Transformations.GeneratedColumns.length : 0;
+    const names = [];
+    const build = (index, parts) => {
+      if (index >= normalizedInputs.length) {
+        names.push(parts.join('_'));
+        return;
+      }
+      const column = normalizedInputs[index];
+      levelSets[index].forEach(level => {
+        build(index + 1, [...parts, column, level]);
+      });
+    };
+    build(0, []);
+    return names;
+  }
+
+  function inferGeneratedColumnsFromInstruction(instruction) {
+    if (!instruction || typeof instruction !== 'object') return [];
+    const opName = String(instruction.Name || '').trim();
+    const outputValues = normalizeEditorStringArray(instruction.Output);
+
+    if (opName === 'Factor') {
+      return inferFactorGeneratedColumns(instruction.Input);
+    }
+
+    if (outputValues.length) return outputValues;
+    return [];
+  }
+
+  function refreshNodeGeneratedColumnsFromInstructions(node) {
+    const transformations = ensureNodeTransformationsObject(node);
+    const generated = [];
+    transformations.Instructions.forEach(instruction => {
+      inferGeneratedColumnsFromInstruction(instruction).forEach(name => generated.push(name));
+    });
+    transformations.GeneratedColumns = Array.from(new Set(normalizeEditorStringArray(generated)));
+  }
+
+  function renderNodeTransformationsPanel(container, node, idx) {
+    const panel = createWorkspacePanel('Transformations', 'Define transformer operations for this node directly in Model Editor.');
+    const path = `Nodes[${idx}].Transformations`;
+    const transformations = ensureNodeTransformationsObject(node);
+
+    const suggestionListId = `transformer-col-suggestions-${idx}`;
+    const columnSuggestions = getInlineTransformerColumnSuggestions(node);
+
+    function rerender(message = '') {
+      refreshNodeGeneratedColumnsFromInstructions(node);
+      renderModelAccordionEditor();
+      if (message) setModelEditorStatus(message, 'info');
+    }
+
+    function addTextField(parent, options) {
+      const group = document.createElement('div');
+      group.className = 'd-flex flex-column gap-1';
+      const label = document.createElement('label');
+      label.className = 'form-label small mb-0';
+      label.textContent = options.label;
+      const input = document.createElement('input');
+      input.type = options.type || 'text';
+      input.className = 'form-control form-control-sm';
+      input.placeholder = options.placeholder || '';
+      input.value = options.value || '';
+      if (options.useSuggestions) input.setAttribute('list', suggestionListId);
+      input.addEventListener('change', () => {
+        options.onChange(input.value);
+      });
+      group.appendChild(label);
+      group.appendChild(input);
+      if (options.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'small text-muted';
+        hint.textContent = options.hint;
+        group.appendChild(hint);
+      }
+      parent.appendChild(group);
+    }
+
+    function addCheckboxField(parent, options) {
+      const wrap = document.createElement('div');
+      wrap.className = 'form-check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.className = 'form-check-input';
+      input.checked = Boolean(options.value);
+      const id = `transformer-${idx}-${options.key}-${Math.random().toString(36).slice(2, 7)}`;
+      input.id = id;
+      const label = document.createElement('label');
+      label.className = 'form-check-label small';
+      label.htmlFor = id;
+      label.textContent = options.label;
+      input.addEventListener('change', () => options.onChange(input.checked));
+      wrap.appendChild(input);
+      wrap.appendChild(label);
+      parent.appendChild(wrap);
+    }
+
+    function renderReplaceRows(parent, instruction, instIdx) {
+      if (!Array.isArray(instruction.Replace)) instruction.Replace = [];
+      if (!instruction.Replace.length) instruction.Replace.push({ key: '', value: '' });
+
+      const table = document.createElement('table');
+      table.className = 'table table-sm table-bordered mb-1';
+      const thead = document.createElement('thead');
+      thead.innerHTML = '<tr><th>Old value</th><th>New value</th><th style="width:50px;"></th></tr>';
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+
+      instruction.Replace.forEach((row, rowIdx) => {
+        const tr = document.createElement('tr');
+
+        const keyTd = document.createElement('td');
+        const keyInput = document.createElement('input');
+        keyInput.type = 'text';
+        keyInput.className = 'form-control form-control-sm';
+        keyInput.value = String(row?.key || '');
+        keyInput.addEventListener('change', () => {
+          instruction.Replace[rowIdx].key = keyInput.value;
+          rerender();
+        });
+        keyTd.appendChild(keyInput);
+
+        const valueTd = document.createElement('td');
+        const valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.className = 'form-control form-control-sm';
+        valueInput.value = String(row?.value || '');
+        valueInput.addEventListener('change', () => {
+          instruction.Replace[rowIdx].value = valueInput.value;
+          rerender();
+        });
+        valueTd.appendChild(valueInput);
+
+        const removeTd = document.createElement('td');
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn btn-sm btn-outline-danger';
+        removeBtn.textContent = 'x';
+        removeBtn.addEventListener('click', () => {
+          instruction.Replace.splice(rowIdx, 1);
+          rerender('Replacement row removed.');
+        });
+        removeTd.appendChild(removeBtn);
+
+        tr.appendChild(keyTd);
+        tr.appendChild(valueTd);
+        tr.appendChild(removeTd);
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      parent.appendChild(table);
+
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn btn-sm btn-outline-secondary';
+      addBtn.textContent = '+ Add replacement row';
+      addBtn.addEventListener('click', () => {
+        instruction.Replace.push({ key: '', value: '' });
+        rerender('Replacement row added.');
+      });
+      parent.appendChild(addBtn);
+    }
+
+    function renderInstructionCard(opName, instruction, instIdx) {
+      const card = document.createElement('div');
+      card.className = 'me-transformer-op-card';
+
+      const header = document.createElement('div');
+      header.className = 'me-transformer-op-header';
+
+      const title = document.createElement('div');
+      title.className = 'small fw-bold';
+      title.textContent = `${instIdx + 1}. ${opName}`;
+      header.appendChild(title);
+
+      const controls = document.createElement('div');
+      controls.className = 'd-flex gap-1';
+
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'btn btn-sm btn-outline-secondary';
+      upBtn.textContent = 'Up';
+      upBtn.disabled = instIdx === 0;
+      upBtn.addEventListener('click', () => {
+        const instructions = transformations.Instructions;
+        [instructions[instIdx - 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx - 1]];
+        rerender('Instruction moved.');
+      });
+
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.className = 'btn btn-sm btn-outline-secondary';
+      downBtn.textContent = 'Down';
+      downBtn.disabled = instIdx === transformations.Instructions.length - 1;
+      downBtn.addEventListener('click', () => {
+        const instructions = transformations.Instructions;
+        [instructions[instIdx + 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx + 1]];
+        rerender('Instruction moved.');
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-sm btn-outline-danger';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => {
+        transformations.Instructions.splice(instIdx, 1);
+        rerender('Instruction removed.');
+      });
+
+      controls.appendChild(upBtn);
+      controls.appendChild(downBtn);
+      controls.appendChild(removeBtn);
+      header.appendChild(controls);
+      card.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'me-transformer-op-body';
+
+      const setSingle = (field, rawValue) => {
+        instruction[field] = parseCsvValues(rawValue)[0] || '';
+        rerender();
+      };
+      const setMulti = (field, rawValue) => {
+        instruction[field] = parseCsvValues(rawValue);
+        rerender();
+      };
+      const setOutput = (rawValue) => {
+        if (opName === 'Copy') {
+          instruction.Output = parseCsvValues(rawValue);
+        } else {
+          instruction.Output = parseCsvValues(rawValue)[0] || '';
+        }
+        rerender();
+      };
+
+      if (opName === 'Filter') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addTextField(body, {
+          label: 'Query',
+          value: String(instruction.Query || ''),
+          placeholder: "trial_type == 'go'",
+          onChange: (value) => {
+            instruction.Query = String(value || '').trim();
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'filtered_col',
+          useSuggestions: true,
+          onChange: setOutput
+        });
+      } else if (opName === 'Concatenate') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Output',
+          value: String(instruction.Output || ''),
+          placeholder: 'trial_combined',
+          onChange: setOutput
+        });
+      } else if (opName === 'Factor') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+      } else if (opName === 'Replace') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        renderReplaceRows(body, instruction, instIdx);
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'trial_type_clean',
+          onChange: setOutput
+        });
+      } else if (opName === 'Copy') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Output names (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'trial_type_copy, condition_copy',
+          onChange: setOutput
+        });
+      } else if (opName === 'Select' || opName === 'Delete') {
+        addTextField(body, {
+          label: `${opName === 'Select' ? 'Columns to keep' : 'Columns to delete'} (comma-separated)`,
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type, duration',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+      } else if (opName === 'Scale') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'Demean',
+          label: 'Demean',
+          value: instruction.Demean !== false,
+          onChange: (checked) => {
+            instruction.Demean = checked;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Rescale',
+          label: 'Rescale (divide by SD)',
+          value: instruction.Rescale !== false,
+          onChange: (checked) => {
+            instruction.Rescale = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'scaled_col',
+          onChange: setOutput
+        });
+      } else if (opName === 'Mean') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'OmitNan',
+          label: 'Omit NaN',
+          value: Boolean(instruction.OmitNan),
+          onChange: (checked) => {
+            instruction.OmitNan = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'mean_col',
+          onChange: setOutput
+        });
+      } else if (opName === 'Threshold') {
+        addTextField(body, {
+          label: 'Input column',
+          value: String(instruction.Input || ''),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setSingle('Input', value)
+        });
+        addTextField(body, {
+          label: 'Threshold value',
+          type: 'number',
+          value: String(instruction.Threshold ?? 0),
+          onChange: (value) => {
+            const parsed = Number(value);
+            instruction.Threshold = Number.isFinite(parsed) ? parsed : 0;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Binarize',
+          label: 'Binarize',
+          value: Boolean(instruction.Binarize),
+          onChange: (checked) => {
+            instruction.Binarize = checked;
+            rerender();
+          }
+        });
+        addCheckboxField(body, {
+          key: 'Above',
+          label: 'Keep above threshold',
+          value: instruction.Above !== false,
+          onChange: (checked) => {
+            instruction.Above = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'thresholded_col',
+          onChange: setOutput
+        });
+      }
+
+      card.appendChild(body);
+      return card;
+    }
+
+    const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
+    refreshNodeGeneratedColumnsFromInstructions(node);
+    const generatedCount = Array.isArray(transformations.GeneratedColumns) ? transformations.GeneratedColumns.length : 0;
     const summary = document.createElement('div');
     summary.className = 'd-flex flex-wrap gap-2';
-    appendModelMetaPill(summary, node.Transformations.Transformer || 'bidspm', 'success');
+    appendModelMetaPill(summary, transformations.Transformer || 'pybids-transforms-v1', 'success');
     appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
     appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
     panel.body.appendChild(summary);
 
-    panel.body.appendChild(createInlineNote('Use the Transformer Builder for guided authoring, or edit the JSON below directly.'));
-    renderJsonEditor(panel.body, node.Transformations, path, false, 0);
+    const builder = document.createElement('div');
+    builder.className = 'me-transformer-builder';
+    builder.appendChild(createInlineNote('Add and edit operations directly here. Changes are applied to this node immediately.'));
+
+    const datalist = document.createElement('datalist');
+    datalist.id = suggestionListId;
+    columnSuggestions.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      datalist.appendChild(option);
+    });
+    builder.appendChild(datalist);
+
+    const opButtonRow = document.createElement('div');
+    opButtonRow.className = 'd-flex flex-wrap gap-1';
+    [
+      'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'Select', 'Delete',
+      'Scale', 'Mean', 'Threshold'
+    ].forEach(opName => {
+      const addOpBtn = document.createElement('button');
+      addOpBtn.type = 'button';
+      addOpBtn.className = 'btn btn-sm btn-outline-primary';
+      addOpBtn.textContent = `+ ${opName}`;
+      addOpBtn.addEventListener('click', () => {
+        transformations.Instructions.push(createTransformerInstructionTemplate(opName));
+        rerender(`Added ${opName} instruction.`);
+      });
+      opButtonRow.appendChild(addOpBtn);
+    });
+    builder.appendChild(opButtonRow);
+
+    const opList = document.createElement('div');
+    opList.className = 'me-transformer-op-list';
+    if (!transformations.Instructions.length) {
+      opList.appendChild(createInlineNote('No instructions yet. Add operations above.'));
+    } else {
+      transformations.Instructions.forEach((instruction, instIdx) => {
+        const opName = String(instruction?.Name || '').trim();
+        if (!opName) {
+          transformations.Instructions[instIdx] = createTransformerInstructionTemplate('Filter');
+        }
+        opList.appendChild(renderInstructionCard(String(transformations.Instructions[instIdx].Name || 'Filter'), transformations.Instructions[instIdx], instIdx));
+      });
+    }
+    builder.appendChild(opList);
+
+    const generatedLabel = document.createElement('div');
+    generatedLabel.className = 'small fw-bold';
+    generatedLabel.textContent = 'Generated JSON Preview';
+    builder.appendChild(generatedLabel);
+
+    const jsonPreview = document.createElement('pre');
+    jsonPreview.className = 'me-transformer-json';
+    jsonPreview.textContent = JSON.stringify(transformations, null, 2);
+    builder.appendChild(jsonPreview);
+
+    panel.body.appendChild(builder);
+
+    const advanced = document.createElement('details');
+    advanced.className = 'mt-1';
+    const advSummary = document.createElement('summary');
+    advSummary.className = 'small fw-bold';
+    advSummary.textContent = 'Advanced Transformations JSON';
+    advanced.appendChild(advSummary);
+    const advWrap = document.createElement('div');
+    advWrap.className = 'mt-2';
+    renderJsonEditor(advWrap, node.Transformations, path, false, 0);
+    advanced.appendChild(advWrap);
+    panel.body.appendChild(advanced);
 
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
@@ -1039,21 +1608,122 @@
     headerWrap.appendChild(button);
 
     if (section.kind === 'nodes' || section.kind === 'array' || section.kind === 'edges') {
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'btn btn-sm btn-outline-success json-add-btn';
-      addBtn.textContent = section.kind === 'nodes' ? '+ Add Node' : (section.kind === 'edges' ? '+ Add Edge' : '+ Add');
-      addBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const current = getByPath(modelEditorDraft, section.path);
-        if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
-        if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
-        if (section.kind === 'edges') modelEditorDraft[section.path].push(getEdgeDefaultValue());
-        else addArrayItem(section.path);
-        renderModelAccordionEditor();
-      });
-      headerWrap.appendChild(addBtn);
+      if (section.kind === 'nodes') {
+        const addNodeFromPreset = (presetValue) => {
+          let nodeList = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(nodeList)) setByPath(modelEditorDraft, section.path, []);
+          nodeList = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(nodeList)) {
+            setStatus('Could not create node list for this section.', 'danger');
+            return;
+          }
+
+          const addResult = buildNodeFromPreset(presetValue);
+          nodeList.push(addResult.node);
+          const newIndex = nodeList.length - 1;
+
+          let edgeCreated = false;
+          if (newIndex > 0) {
+            let edgeList = getByPath(modelEditorDraft, 'Edges');
+            if (!Array.isArray(edgeList)) setByPath(modelEditorDraft, 'Edges', []);
+            edgeList = getByPath(modelEditorDraft, 'Edges');
+            if (Array.isArray(edgeList)) {
+              const sourceName = String(nodeList[newIndex - 1]?.Name || '').trim();
+              const destinationName = String(nodeList[newIndex]?.Name || '').trim();
+              if (sourceName && destinationName) {
+                const hasEdge = edgeList.some(edge =>
+                  String(edge?.Source || '').trim() === sourceName
+                  && String(edge?.Destination || '').trim() === destinationName
+                );
+                if (!hasEdge) {
+                  edgeList.push({ Source: sourceName, Destination: destinationName });
+                  edgeCreated = true;
+                }
+              }
+            }
+          }
+
+          if (window.modelEditorPendingOpenPaths instanceof Set) {
+            window.modelEditorPendingOpenPaths.add(section.statePath);
+            if (edgeCreated) window.modelEditorPendingOpenPaths.add('Edges');
+          }
+          renderModelStructure();
+          renderNodeList();
+          if (addResult.forceFriendly) {
+            setRawMode(false);
+            ensureSelectionDrivenRightPane();
+            selectNodeField(newIndex, addResult.selectField || 'Model');
+          } else if (editorMode === 'full') {
+            renderModelAccordionEditor();
+          } else {
+            selectNodeField(newIndex, addResult.selectField || 'Model');
+          }
+          const edgeNote = edgeCreated ? ' Linked with an edge.' : '';
+          setStatus(`${addResult.message}${edgeNote}`, addResult.tone || 'success');
+        };
+
+        const addGroup = document.createElement('div');
+        addGroup.className = 'btn-group btn-group-sm json-add-btn';
+
+        const quickAddBtn = document.createElement('button');
+        quickAddBtn.type = 'button';
+        quickAddBtn.className = 'btn btn-sm btn-success';
+        quickAddBtn.textContent = '+ Add Node';
+        quickAddBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          addNodeFromPreset('run_basic');
+        });
+        addGroup.appendChild(quickAddBtn);
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-success dropdown-toggle dropdown-toggle-split';
+        addBtn.innerHTML = '<span class="visually-hidden">Node presets</span>';
+        addBtn.setAttribute('data-bs-toggle', 'dropdown');
+        addBtn.setAttribute('aria-expanded', 'false');
+        addBtn.setAttribute('aria-label', 'Node presets');
+        addGroup.appendChild(addBtn);
+
+        const menu = document.createElement('div');
+        menu.className = 'dropdown-menu dropdown-menu-end';
+        [
+          ['run_basic', 'Run node'],
+          ['subject_fixed', 'Subject node: fixed effects'],
+          ['dataset_basic', 'Dataset node']
+        ].forEach(([value, label]) => {
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'dropdown-item';
+          item.textContent = label;
+          item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            addNodeFromPreset(value);
+          });
+          menu.appendChild(item);
+        });
+        addGroup.appendChild(menu);
+        headerWrap.appendChild(addGroup);
+      } else {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-outline-success json-add-btn';
+        addBtn.textContent = section.kind === 'edges' ? '+ Add Edge' : '+ Add';
+        addBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const current = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
+          if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
+          if (section.kind === 'edges') modelEditorDraft[section.path].push(getEdgeDefaultValue());
+          else addArrayItem(section.path);
+          renderModelStructure();
+          renderNodeList();
+          renderModelAccordionEditor();
+        });
+        headerWrap.appendChild(addBtn);
+      }
     }
 
     header.appendChild(headerWrap);
@@ -1089,48 +1759,97 @@
         const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
           ? window.modelEditorEventSamples
           : { trial_type: [], condition: [] };
-        const trialTypeRegressors = normalizeList(eventSamples.trial_type).map(v => `trial_type.${v}`);
-        const conditionRegressors = normalizeList(eventSamples.condition).map(v => `condition.${v}`);
-        const interestRegressors = Array.from(new Set([
-          ...trialTypeRegressors,
-          ...conditionRegressors,
-          ...normalizeList(window.modelEditorInterestRegressors),
-          ...currentRegs
-        ]));
+        const selectedTasks = normalizeList(modelEditorDraft?.Input?.task);
+        const hasSingleSelectedTask = selectedTasks.length === 1;
+        const trialTypeRegressors = hasSingleSelectedTask
+          ? normalizeList(eventSamples.trial_type).map(v => `trial_type.${v}`)
+          : [];
+        const conditionRegressors = hasSingleSelectedTask
+          ? normalizeList(eventSamples.condition).map(v => `condition.${v}`)
+          : [];
         const confoundColumns = normalizeList(window.modelEditorConfoundColumns);
         const transRotConfounds = normalizeList(window.modelEditorTransRotConfounds);
         const defaultTransRot = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
+        const modelPath = basePath.replace(/\.X$/, '');
 
-        const controls = document.createElement('div');
-        controls.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
-
-        const select = document.createElement('select');
-        select.className = 'form-select form-select-sm';
-        select.style.maxWidth = '360px';
-        if (!interestRegressors.length) {
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = 'No event regressors detected';
-          select.appendChild(opt);
-        } else {
-          interestRegressors.forEach(reg => {
-            const opt = document.createElement('option');
-            opt.value = reg;
-            opt.textContent = reg;
-            select.appendChild(opt);
-          });
+        function getModelObject(){
+          const modelObj = getByPath(modelEditorDraft, modelPath);
+          return modelObj && typeof modelObj === 'object' && !Array.isArray(modelObj) ? modelObj : null;
         }
 
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'btn btn-sm btn-outline-success';
-        addBtn.textContent = '+ Add selected';
-        addBtn.disabled = !interestRegressors.length;
-        addBtn.addEventListener('click', ()=> addRegressorToModelX(basePath, select.value));
+        function getHrfVariables(){
+          const modelObj = getModelObject();
+          if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) return [];
+          return normalizeList(modelObj.HRF.Variables);
+        }
 
-        controls.appendChild(select);
-        controls.appendChild(addBtn);
-        listWrap.appendChild(controls);
+        function syncHrfVariablesWithModelX(){
+          const modelObj = getModelObject();
+          if (!modelObj || !modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) return;
+          const selected = new Set(normalizeList(getByPath(modelEditorDraft, basePath)));
+          const kept = getHrfVariables().filter(reg => selected.has(reg));
+          if (!kept.length) {
+            delete modelObj.HRF;
+            return;
+          }
+          modelObj.HRF = {
+            ...modelObj.HRF,
+            Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
+            Variables: kept
+          };
+        }
+
+        function isHrfApplicableRegressor(reg){
+          return String(reg || '').trim() !== '1';
+        }
+
+        function isRegressorHrfEnabled(reg){
+          return getHrfVariables().includes(String(reg || '').trim());
+        }
+
+        function toggleRegressorHrf(reg){
+          const normalized = String(reg || '').trim();
+          if (!normalized) return;
+          if (!isHrfApplicableRegressor(normalized)) {
+            setModelEditorStatus('Intercept is not HRF-convolved.', 'info');
+            return;
+          }
+
+          const modelObj = getModelObject();
+          if (!modelObj) return;
+          const enabled = isRegressorHrfEnabled(normalized);
+          if (enabled) {
+            if (modelObj.HRF && typeof modelObj.HRF === 'object' && !Array.isArray(modelObj.HRF)) {
+              const nextVars = getHrfVariables().filter(entry => entry !== normalized);
+              if (nextVars.length) {
+                modelObj.HRF.Variables = nextVars;
+              } else {
+                delete modelObj.HRF;
+              }
+            }
+            setModelEditorStatus(`HRF off for ${normalized}`, 'info');
+            renderModelAccordionEditor();
+            return;
+          }
+
+          if (!modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) {
+            modelObj.HRF = { Model: 'spm', Variables: [] };
+          }
+          modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+          modelObj.HRF.Variables = Array.from(new Set([...getHrfVariables(), normalized]));
+          setModelEditorStatus(`HRF on for ${normalized}`, 'info');
+          renderModelAccordionEditor();
+        }
+
+        function removeModelXRegressor(index){
+          const arr = getByPath(modelEditorDraft, basePath);
+          if (!Array.isArray(arr)) return;
+          if (index < 0 || index >= arr.length) return;
+          arr.splice(index, 1);
+          syncHrfVariablesWithModelX();
+          setModelEditorStatus('Regressor removed', 'info');
+          renderModelAccordionEditor();
+        }
 
         const trialPoolCard = document.createElement('div');
         trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
@@ -1141,7 +1860,9 @@
 
         const trialPoolHint = document.createElement('div');
         trialPoolHint.className = 'small text-muted mb-2';
-        trialPoolHint.textContent = 'Click or drag badges into Model.X.';
+        trialPoolHint.textContent = hasSingleSelectedTask
+          ? 'Drag or click badges into the Design Matrix space below.'
+          : 'Select exactly one task in Input.task to load task-specific trial types.';
         trialPoolCard.appendChild(trialPoolHint);
 
         const trialPool = document.createElement('div');
@@ -1149,7 +1870,9 @@
         if (!trialTypeRegressors.length) {
           const empty = document.createElement('div');
           empty.className = 'small text-muted';
-          empty.textContent = 'No trial_type values detected for the current BIDS/task selection.';
+          empty.textContent = hasSingleSelectedTask
+            ? 'No trial_type values detected for the current BIDS/task selection.'
+            : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
           trialPool.appendChild(empty);
         } else {
           trialTypeRegressors.forEach(reg => {
@@ -1169,6 +1892,7 @@
         }
         trialPoolCard.appendChild(trialPool);
         listWrap.appendChild(trialPoolCard);
+
 
         if (conditionRegressors.length) {
           const condPool = document.createElement('div');
@@ -1205,72 +1929,68 @@
         const nuisanceHint = document.createElement('div');
         nuisanceHint.className = 'small text-muted mb-2';
         nuisanceHint.textContent = confoundColumns.length
-          ? `Detected ${confoundColumns.length} confound columns.`
+          ? `Detected ${confoundColumns.length} confound columns. Drag or click badges into Design Matrix space.`
           : 'No confounds file detected yet. Set fMRIPrep folder to validate columns.';
         nuisanceCard.appendChild(nuisanceHint);
+
+        const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
+        if (nuisanceInModelX.length) {
+          const warning = document.createElement('div');
+          warning.className = 'alert alert-warning py-1 small mb-2';
+          warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+          nuisanceCard.appendChild(warning);
+
+          const removeNuisanceBtn = document.createElement('button');
+          removeNuisanceBtn.type = 'button';
+          removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+          removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+          removeNuisanceBtn.addEventListener('click', () => {
+            const arr = getByPath(modelEditorDraft, basePath);
+            if (!Array.isArray(arr)) return;
+            const filtered = arr.filter(reg => !isNuisanceRegressor(reg));
+            setByPath(modelEditorDraft, basePath, filtered);
+            syncHrfVariablesWithModelX();
+            setModelEditorStatus('Removed nuisance regressors from Model.X.', 'info');
+            renderModelAccordionEditor();
+          });
+          nuisanceCard.appendChild(removeNuisanceBtn);
+        }
 
         const nuisanceOptions = Array.from(new Set([
           ...defaultTransRot,
           'framewise_displacement',
-          ...transRotConfounds,
-          ...currentRegs.filter(isNuisanceRegressor)
+          ...transRotConfounds
         ]));
         const nuisanceGrid = document.createElement('div');
-        nuisanceGrid.className = 'modelx-nuisance-grid';
-        const nuisanceCheckboxes = [];
+        nuisanceGrid.className = 'modelx-pool';
 
         nuisanceOptions.forEach(reg => {
           const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
-          const alreadySelected = currentRegs.includes(reg);
-
-          const wrap = document.createElement('label');
-          wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.className = 'form-check-input mt-0';
-          checkbox.checked = alreadySelected || presentInConfounds;
-          checkbox.disabled = !presentInConfounds && !alreadySelected;
-
-          const label = document.createElement('span');
-          label.className = 'small';
-          label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
-
-          wrap.appendChild(checkbox);
-          wrap.appendChild(label);
-          nuisanceGrid.appendChild(wrap);
-          nuisanceCheckboxes.push({ checkbox, reg });
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = presentInConfounds
+            ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+            : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+          badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+          badge.draggable = true;
+          badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+          badge.addEventListener('dragstart', (event)=>{
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+            event.dataTransfer.setData('text/plain', reg);
+          });
+          nuisanceGrid.appendChild(badge);
         });
         nuisanceCard.appendChild(nuisanceGrid);
-
-        const nuisanceActions = document.createElement('div');
-        nuisanceActions.className = 'd-flex gap-2 mt-2';
-        const addCheckedNuisanceBtn = document.createElement('button');
-        addCheckedNuisanceBtn.type = 'button';
-        addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
-        addCheckedNuisanceBtn.textContent = 'Add checked nuisance';
-        addCheckedNuisanceBtn.addEventListener('click', ()=>{
-          const arr = getByPath(modelEditorDraft, basePath);
-          if (!Array.isArray(arr)) return;
-          let added = 0;
-          nuisanceCheckboxes.forEach(entry => {
-            if (!entry.checkbox.checked) return;
-            if (arr.includes(entry.reg)) return;
-            arr.push(entry.reg);
-            added += 1;
-          });
-          if (!added) {
-            setModelEditorStatus('No new nuisance regressors were added.', 'info');
-            return;
-          }
-          setModelEditorStatus(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
-          renderModelAccordionEditor();
-        });
-        nuisanceActions.appendChild(addCheckedNuisanceBtn);
-        nuisanceCard.appendChild(nuisanceActions);
         listWrap.appendChild(nuisanceCard);
 
+        const dropZoneTitle = document.createElement('div');
+        dropZoneTitle.className = 'small fw-bold mb-1';
+        dropZoneTitle.textContent = 'Design Matrix space';
+        listWrap.appendChild(dropZoneTitle);
+
         const dropZone = document.createElement('div');
-        dropZone.className = 'd-flex flex-column gap-2 modelx-drop-zone mb-2';
+        dropZone.className = 'modelx-drop-zone mb-2';
         const onDropAtIndex = (event, index) => {
           const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
           const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
@@ -1297,60 +2017,85 @@
 
         if (!currentRegs.length) {
           const empty = document.createElement('div');
-          empty.className = 'small text-muted';
-          empty.textContent = 'Drop trial-type badges here to build Model.X.';
+          empty.className = 'small text-muted w-100';
+          empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
           dropZone.appendChild(empty);
         } else {
           currentRegs.forEach((reg, idx) => {
-            const row = document.createElement('div');
-            row.className = 'modelx-reg-row d-flex align-items-center gap-2';
-            row.draggable = true;
+            const chip = document.createElement('div');
+            chip.className = 'modelx-chip';
+            chip.draggable = true;
+            chip.title = 'Drag to reorder';
 
-            row.addEventListener('dragstart', (event)=>{
+            chip.addEventListener('dragstart', (event)=>{
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('application/x-modelx-index', String(idx));
               event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
               event.dataTransfer.setData('text/plain', String(reg));
             });
-            row.addEventListener('dragover', (event)=>{
+            chip.addEventListener('dragover', (event)=>{
               event.preventDefault();
-              row.classList.add('is-drop-target');
+              chip.classList.add('is-drop-target');
             });
-            row.addEventListener('dragleave', ()=> row.classList.remove('is-drop-target'));
-            row.addEventListener('drop', (event)=>{
+            chip.addEventListener('dragleave', ()=> chip.classList.remove('is-drop-target'));
+            chip.addEventListener('drop', (event)=>{
               event.preventDefault();
               event.stopPropagation();
-              row.classList.remove('is-drop-target');
+              chip.classList.remove('is-drop-target');
               onDropAtIndex(event, idx);
             });
+            chip.addEventListener('dragend', ()=> chip.classList.remove('is-drop-target'));
+
+            const main = document.createElement('div');
+            main.className = 'modelx-chip-main';
 
             const handle = document.createElement('span');
-            handle.className = 'modelx-reg-handle';
+            handle.className = 'modelx-chip-handle';
             handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
 
             const label = document.createElement('span');
-            label.className = 'badge text-bg-light border flex-grow-1 text-start';
+            label.className = isNuisanceRegressor(reg)
+              ? 'badge text-bg-secondary modelx-chip-label'
+              : 'badge bg-primary modelx-chip-label';
             label.textContent = reg;
 
-            const role = document.createElement('span');
-            role.className = isNuisanceRegressor(reg) ? 'badge text-bg-secondary' : 'badge text-bg-success';
-            role.textContent = isNuisanceRegressor(reg) ? 'Nuisance' : 'Interest';
+            main.appendChild(handle);
+            main.appendChild(label);
+
+            const actions = document.createElement('div');
+            actions.className = 'modelx-chip-actions';
+
+            const hrfBtn = document.createElement('button');
+            hrfBtn.type = 'button';
+            hrfBtn.className = isRegressorHrfEnabled(reg)
+              ? 'btn btn-sm btn-success'
+              : 'btn btn-sm btn-outline-secondary';
+            hrfBtn.textContent = isRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
+            if (isHrfApplicableRegressor(reg)) {
+              hrfBtn.addEventListener('click', (event)=>{
+                event.stopPropagation();
+                toggleRegressorHrf(reg);
+              });
+            } else {
+              hrfBtn.disabled = true;
+              hrfBtn.textContent = 'HRF n/a';
+            }
 
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
-            delBtn.className = 'btn btn-sm btn-outline-danger';
+            delBtn.className = 'modelx-chip-remove';
             delBtn.title = 'Remove regressor';
             delBtn.innerHTML = '<i class="fas fa-times"></i>';
-            delBtn.addEventListener('click', ()=>{
-              removeArrayItem(`${basePath}[${idx}]`);
-              renderModelAccordionEditor();
+            delBtn.addEventListener('click', (event)=>{
+              event.stopPropagation();
+              removeModelXRegressor(idx);
             });
 
-            row.appendChild(handle);
-            row.appendChild(label);
-            row.appendChild(role);
-            row.appendChild(delBtn);
-            dropZone.appendChild(row);
+            actions.appendChild(hrfBtn);
+            actions.appendChild(delBtn);
+            chip.appendChild(main);
+            chip.appendChild(actions);
+            dropZone.appendChild(chip);
           });
         }
         listWrap.appendChild(dropZone);
@@ -1399,7 +2144,33 @@
 
       if (/\.GroupBy$/.test(basePath)) { const controls = document.createElement('div'); controls.className='d-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white'; const current = Array.isArray(node)?node:[]; const remaining = (modelEditorGroupByOptions||['subject']).filter(opt=>!current.includes(opt)); const select = document.createElement('select'); select.className='form-select form-select-sm'; select.style.maxWidth='260px'; const sourceOptions = remaining.length ? remaining : (modelEditorGroupByOptions || ['subject']); sourceOptions.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; select.appendChild(opt); }); controls.appendChild(select); const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-sm btn-outline-success'; addBtn.textContent='+ Add'; addBtn.disabled = remaining.length===0; addBtn.addEventListener('click', ()=>{ const value = select.value; const arr = getByPath(modelEditorDraft, basePath); if (!Array.isArray(arr)) return; if (arr.includes(value)) { const status = document.getElementById('model-editor-status'); status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`; return; } arr.push(value); renderModelAccordionEditor(); }); controls.appendChild(addBtn); listWrap.appendChild(controls); }
       node.forEach((item, idx) => { const itemPath = `${basePath}[${idx}]`; const locked = inheritedLocked || isReadonlyModelPath(itemPath); let displayLabel; if (item !== null && typeof item === 'object') displayLabel = item.Name || `#${idx+1}`; else displayLabel = item !== null && item !== '' ? String(item) : `#${idx+1}`; if (item !== null && typeof item === 'object') createBranchAccordion(listWrap, displayLabel, itemPath, item, locked, depth); else createPrimitiveRow(listWrap, `#${idx+1}`, item, itemPath, locked, depth); }); container.appendChild(listWrap); return; }
-    if (node !== null && typeof node === 'object') { const objWrap = document.createElement('div'); objWrap.className='accordion'; Object.entries(node).forEach(([key, value])=>{ if (/^Nodes\[\d+\]$/.test(basePath) && (key==='Level' || key==='Name')) return; const path = basePath ? `${basePath}.${key}` : key; const locked = inheritedLocked || isReadonlyModelPath(path); if (value !== null && typeof value === 'object') createBranchAccordion(objWrap, key, path, value, locked, depth); else createPrimitiveRow(objWrap, key, value, path, locked, depth); }); container.appendChild(objWrap); return; }
+    if (node !== null && typeof node === 'object') {
+      const objWrap = document.createElement('div');
+      objWrap.className='accordion';
+      let suppressedHrfVariables = false;
+
+      Object.entries(node).forEach(([key, value])=>{
+        if (/^Nodes\[\d+\]$/.test(basePath) && (key==='Level' || key==='Name')) return;
+        if (/\.Model\.HRF$/.test(basePath) && key === 'Variables') {
+          suppressedHrfVariables = true;
+          return;
+        }
+        const path = basePath ? `${basePath}.${key}` : key;
+        const locked = inheritedLocked || isReadonlyModelPath(path);
+        if (value !== null && typeof value === 'object') createBranchAccordion(objWrap, key, path, value, locked, depth);
+        else createPrimitiveRow(objWrap, key, value, path, locked, depth);
+      });
+
+      if (suppressedHrfVariables) {
+        const hint = document.createElement('div');
+        hint.className = 'small text-muted border rounded p-2 mb-2 bg-light-subtle';
+        hint.textContent = 'HRF.Variables are controlled by the HRF on/off tags in Design Matrix space.';
+        objWrap.appendChild(hint);
+      }
+
+      container.appendChild(objWrap);
+      return;
+    }
     createPrimitiveRow(container, basePath||'value', node, basePath||'value', inheritedLocked, depth);
   }
 
@@ -1407,7 +2178,82 @@
 
   function renderModelEditorSummary(summary){ const summaryPanel = document.getElementById('model-editor-summary'); const progressBar = document.getElementById('model-editor-progress-bar'); const score = document.getElementById('model-editor-score'); const ring = document.getElementById('model-editor-score-ring'); const ringLabel = document.getElementById('model-editor-score-ring-label'); const sectionSummary = document.getElementById('model-editor-section-summary'); if (!summaryPanel || !progressBar || !score || !ring || !ringLabel || !sectionSummary) return; if (!summary) { summaryPanel.classList.add('d-none'); sectionSummary.innerHTML=''; return; } summaryPanel.classList.remove('d-none'); progressBar.style.width = `${summary.score}%`; score.textContent = `${summary.score}%`; ring.style.setProperty('--model-progress', String(summary.score)); ringLabel.textContent = `${summary.score}%`; sectionSummary.innerHTML=''; summary.sections.forEach(section=>{ const row = document.createElement('div'); row.className='model-section-summary-row'; const label = document.createElement('span'); label.className='section-label'; label.textContent = section.label; const dot = document.createElement('span'); dot.className = `completeness-dot ${section.stats.dotClass}`; dot.title = `${section.stats.filled}/${section.stats.total}`; const pills = document.createElement('div'); pills.className='model-meta-pills'; section.stats.badges.forEach(badge=>appendModelMetaPill(pills, badge.text, badge.tone)); row.appendChild(label); row.appendChild(dot); row.appendChild(pills); sectionSummary.appendChild(row); }); }
 
-  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); modelEditorOpenPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
+  function updateModelJsonPreview(){
+    const preview = document.getElementById('model-json-preview');
+    if (!preview) return;
+    if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
+      preview.textContent = 'Load a model to see the live JSON preview.';
+      preview.classList.add('model-editor-preview-empty');
+      setModelPreviewValidationState('idle', 'Load a model to run live schema validation.');
+      return;
+    }
+    preview.textContent = JSON.stringify(modelEditorDraft, null, 2);
+    preview.classList.remove('model-editor-preview-empty');
+    scheduleModelPreviewValidation();
+  }
+
+  function setModelPreviewValidationState(state, message) {
+    const badge = document.getElementById('model-preview-validation-badge');
+    const text = document.getElementById('model-preview-validation-text');
+    if (!badge || !text) return;
+
+    const badgeMap = {
+      idle: 'bg-secondary',
+      checking: 'bg-info text-dark',
+      valid: 'bg-success',
+      invalid: 'bg-danger',
+      error: 'bg-warning text-dark'
+    };
+
+    badge.className = `badge ${badgeMap[state] || 'bg-secondary'}`;
+    badge.textContent = state;
+    text.textContent = message;
+  }
+
+  function scheduleModelPreviewValidation() {
+    if (previewValidationState.timer) clearTimeout(previewValidationState.timer);
+    previewValidationState.timer = setTimeout(() => {
+      validateModelPreviewLive();
+    }, 250);
+  }
+
+  async function validateModelPreviewLive() {
+    const runId = ++previewValidationState.runId;
+    if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
+      setModelPreviewValidationState('idle', 'Load a model to run live schema validation.');
+      return;
+    }
+
+    const snapshot = structuredClone(modelEditorDraft);
+    setModelPreviewValidationState('checking', 'Validating live JSON preview...');
+
+    try {
+      const response = await fetch('/validate_model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: snapshot })
+      });
+
+      const result = await response.json();
+      if (runId !== previewValidationState.runId) return;
+
+      if (result.valid) {
+        if (result.warning) {
+          setModelPreviewValidationState('valid', `Valid model (${result.warning})`);
+        } else {
+          setModelPreviewValidationState('valid', 'Valid BIDS Stats Model.');
+        }
+      } else {
+        const msg = result.error ? String(result.error) : 'Schema validation failed.';
+        setModelPreviewValidationState('invalid', msg);
+      }
+    } catch (err) {
+      if (runId !== previewValidationState.runId) return;
+      setModelPreviewValidationState('error', `Validation request failed: ${err.message}`);
+    }
+  }
+
+  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); const openPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); if (window.modelEditorPendingOpenPaths instanceof Set && window.modelEditorPendingOpenPaths.size) { window.modelEditorPendingOpenPaths.forEach(path=>openPaths.add(path)); window.modelEditorPendingOpenPaths.clear(); } modelEditorOpenPaths = openPaths; editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); updateModelJsonPreview(); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
   // Filter sections to display based on current left-pane selection
   const sel = window.currentSelection || { type: 'model' };
   let sectionsToRender = summary.sections;
@@ -1430,7 +2276,7 @@
       if (sel.field) modelEditorOpenPaths.add(`${nodePath}.${sel.field}`);
     }
   }
-  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); }
+  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); updateModelJsonPreview(); }
 
   // expose saveModelEditor for the outer script
   async function saveModelEditor(){

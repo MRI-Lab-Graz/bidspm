@@ -900,7 +900,10 @@
         border-radius: 1rem;
         box-shadow: 0 10px 24px rgba(17, 77, 143, 0.08);
         margin-bottom: 0.9rem;
-        overflow: hidden;
+        overflow: visible;
+    }
+    .model-section-card .dropdown-menu {
+        z-index: 1085;
     }
     .model-section-card .accordion-header { margin: 0; }
     .model-section-toggle {
@@ -1397,6 +1400,7 @@
     let modelEditorParticipantsInfo = emptyParticipantsInfo();
     let showModelTechnicalPaths = false;
     let modelEditorOpenPaths = new Set(); // tracks which accordion panels are open across re-renders
+    let modelEditorPendingOpenPaths = new Set();
     let modelXDragState = null;
     const previewValidationState = { timer: null, runId: 0 };
 
@@ -1543,7 +1547,9 @@
         return createModelStats({
             filled,
             total,
-            subtitle: 'Nodes, transforms, design and contrasts',
+            subtitle: list.length > 0
+                ? 'Nodes, transforms, design and contrasts'
+                : 'No nodes yet. Use + Add Node to create the first node',
             badges: [
                 { text: `Required ${list.length > 0 ? 1 : 0}/1`, tone: list.length > 0 ? 'success' : 'warning' },
                 { text: `Ready ${readyNodes}/${list.length || 0}`, tone: list.length > 0 ? getModelPillTone(readyNodes, list.length) : 'neutral' },
@@ -1861,6 +1867,11 @@
         return `${normalizedBase}_${Date.now().toString().slice(-4)}`;
     }
 
+    function normalizeStringArray(value) {
+        if (!Array.isArray(value)) return [];
+        return value.map(item => String(item).trim()).filter(Boolean);
+    }
+
     function applyDatasetNodePreset(node, preset, options = {}) {
         const participantsInfo = getModelEditorParticipantsInfo();
         const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
@@ -2009,6 +2020,21 @@
                     Contrasts: []
                 },
                 message: 'Added subject-level fixed-effects node.',
+                tone: 'success'
+            };
+        }
+
+        if (preset === 'dataset_basic') {
+            return {
+                node: {
+                    Level: 'Dataset',
+                    Name: getUniqueModelNodeName('dataset_level'),
+                    GroupBy: ['contrast'],
+                    Model: { Type: 'glm', X: ['1'] },
+                    DummyContrasts: { Test: 't' },
+                    Contrasts: []
+                },
+                message: 'Added dataset-level node. Configure second-level preset in Node.Model.',
                 tone: 'success'
             };
         }
@@ -2430,19 +2456,72 @@
 
         if (section.kind === 'nodes' || section.kind === 'array') {
             if (section.kind === 'nodes') {
+                const addNodeFromPreset = (presetValue) => {
+                    let nodeList = getByPath(modelEditorDraft, section.path);
+                    if (!Array.isArray(nodeList)) {
+                        setByPath(modelEditorDraft, section.path, []);
+                    }
+                    nodeList = getByPath(modelEditorDraft, section.path);
+                    if (!Array.isArray(nodeList)) {
+                        setModelEditorStatus('Could not create node list for this section.', 'danger');
+                        return;
+                    }
+
+                    const result = buildNodeFromPreset(presetValue);
+                    nodeList.push(result.node);
+                    const newIndex = nodeList.length - 1;
+
+                    let edgeCreated = false;
+                    if (newIndex > 0) {
+                        let edgeList = getByPath(modelEditorDraft, 'Edges');
+                        if (!Array.isArray(edgeList)) {
+                            setByPath(modelEditorDraft, 'Edges', []);
+                        }
+                        edgeList = getByPath(modelEditorDraft, 'Edges');
+                        if (Array.isArray(edgeList)) {
+                            const sourceName = String(nodeList[newIndex - 1]?.Name || '').trim();
+                            const destinationName = String(nodeList[newIndex]?.Name || '').trim();
+                            if (sourceName && destinationName) {
+                                const hasEdge = edgeList.some(edge =>
+                                    String(edge?.Source || '').trim() === sourceName
+                                    && String(edge?.Destination || '').trim() === destinationName
+                                );
+                                if (!hasEdge) {
+                                    edgeList.push({ Source: sourceName, Destination: destinationName });
+                                    edgeCreated = true;
+                                }
+                            }
+                        }
+                    }
+
+                    modelEditorPendingOpenPaths.add(section.statePath);
+                    if (edgeCreated) modelEditorPendingOpenPaths.add('Edges');
+                    renderModelAccordionEditor();
+                    const edgeNote = edgeCreated ? ' Added linking edge.' : '';
+                    setModelEditorStatus(`${result.message}${edgeNote}`, result.tone || 'success');
+                };
+
                 const addGroup = document.createElement('div');
                 addGroup.className = 'btn-group btn-group-sm json-add-btn';
 
-                const addBtn = document.createElement('button');
-                addBtn.type = 'button';
-                addBtn.className = 'btn btn-sm btn-outline-success dropdown-toggle';
-                addBtn.textContent = '+ Add Node';
-                addBtn.setAttribute('data-bs-toggle', 'dropdown');
-                addBtn.setAttribute('aria-expanded', 'false');
-                addBtn.addEventListener('click', (e) => {
+                const quickAddBtn = document.createElement('button');
+                quickAddBtn.type = 'button';
+                quickAddBtn.className = 'btn btn-sm btn-success';
+                quickAddBtn.textContent = '+ Add Node';
+                quickAddBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    addNodeFromPreset('run_basic');
                 });
+                addGroup.appendChild(quickAddBtn);
+
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'btn btn-sm btn-success dropdown-toggle dropdown-toggle-split';
+                addBtn.innerHTML = '<span class="visually-hidden">Node presets</span>';
+                addBtn.setAttribute('data-bs-toggle', 'dropdown');
+                addBtn.setAttribute('aria-expanded', 'false');
+                addBtn.setAttribute('aria-label', 'Node presets');
                 addGroup.appendChild(addBtn);
 
                 const menu = document.createElement('div');
@@ -2450,11 +2529,7 @@
                 [
                     ['run_basic', 'Run node'],
                     ['subject_fixed', 'Subject node: fixed effects'],
-                    ['one_sample_all', 'Dataset: one sample t-test'],
-                    ['one_sample_by_group', 'Dataset: one sample t-test by group'],
-                    ['two_sample_groups', 'Dataset: 2 samples t-test'],
-                    ['one_way_anova', 'Dataset: one way ANOVA'],
-                    ['linear_regression', 'Dataset: linear regression']
+                    ['dataset_basic', 'Dataset node']
                 ].forEach(([value, label]) => {
                     const item = document.createElement('button');
                     item.type = 'button';
@@ -2463,17 +2538,7 @@
                     item.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const current = getByPath(modelEditorDraft, section.path);
-                        if (!Array.isArray(current)) {
-                            setByPath(modelEditorDraft, section.path, []);
-                        }
-                        if (!Array.isArray(getByPath(modelEditorDraft, section.path))) {
-                            modelEditorDraft[section.path] = [];
-                        }
-                        const result = buildNodeFromPreset(value);
-                        modelEditorDraft[section.path].push(result.node);
-                        renderModelAccordionEditor();
-                        setModelEditorStatus(result.message, result.tone || 'success');
+                        addNodeFromPreset(value);
                     });
                     menu.appendChild(item);
                 });
@@ -2760,7 +2825,7 @@
         renderModelAccordionEditor();
     }
 
-    function addRegressorToModelX(arrayPath, regressor) {
+    function addRegressorToModelX(arrayPath, regressor, insertIndex = null) {
         const status = document.getElementById('model-editor-status');
         const arr = getByPath(modelEditorDraft, arrayPath);
         if (!Array.isArray(arr)) return;
@@ -2773,10 +2838,33 @@
             return;
         }
 
-        arr.push(normalized);
+        if (insertIndex === null || insertIndex === undefined || insertIndex < 0 || insertIndex > arr.length) {
+            arr.push(normalized);
+        } else {
+            arr.splice(insertIndex, 0, normalized);
+        }
         syncModelXHrfVariables(arrayPath);
         status.innerHTML = '';
         renderModelAccordionEditor();
+    }
+
+    function getSuggestedRegressorsForModelXPath(arrayPath) {
+        const match = String(arrayPath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
+        if (!match) {
+            return Array.from(new Set(modelEditorInterestRegressors || [])).filter(Boolean);
+        }
+
+        const nodeIdx = Number(match[1]);
+        const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
+        const level = String(node?.Level || '').trim().toLowerCase();
+        if (level === 'dataset') {
+            const participants = getModelEditorParticipantsInfo();
+            const categorical = normalizeStringArray(participants.categorical_columns);
+            const numeric = normalizeStringArray(participants.numeric_columns);
+            return Array.from(new Set(['1', ...categorical, ...numeric])).filter(Boolean);
+        }
+
+        return Array.from(new Set(modelEditorInterestRegressors || [])).filter(Boolean);
     }
 
     function removeArrayItem(path) {
@@ -2941,9 +3029,12 @@
                 row.insertBefore(dragHandle, keyEl);
 
                 row.addEventListener('dragover', (event) => {
-                    if (!modelXDragState || modelXDragState.arrayPath !== arrayPath) return;
+                    const hasRowMove = Boolean(modelXDragState && modelXDragState.arrayPath === arrayPath);
+                    const droppedRegressor = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+                    const hasExternalRegressor = Boolean(droppedRegressor);
+                    if (!hasRowMove && !hasExternalRegressor) return;
                     event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
+                    event.dataTransfer.dropEffect = hasRowMove ? 'move' : 'copy';
                     const rect = row.getBoundingClientRect();
                     const dropAfter = event.clientY > (rect.top + rect.height / 2);
                     row.dataset.dropAfter = dropAfter ? '1' : '0';
@@ -2957,22 +3048,28 @@
                     event.preventDefault();
                     const sourcePath = modelXDragState?.arrayPath || event.dataTransfer.getData('application/x-modelx-arraypath');
                     const sourceIndexRaw = modelXDragState ? String(modelXDragState.index) : event.dataTransfer.getData('application/x-modelx-index');
+                    const droppedRegressor = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
                     const dropAfter = row.dataset.dropAfter === '1';
                     const targetIndex = dropAfter ? index + 1 : index;
                     delete row.dataset.dropAfter;
                     row.classList.remove('is-drop-target');
-                    if (sourcePath !== arrayPath || sourceIndexRaw === '') return;
+                    if (sourcePath === arrayPath && sourceIndexRaw !== '') {
+                        const sourceIndex = Number(sourceIndexRaw);
+                        if (Number.isNaN(sourceIndex)) return;
 
-                    const sourceIndex = Number(sourceIndexRaw);
-                    if (Number.isNaN(sourceIndex)) return;
+                        const moved = reorderArrayItem(arrayPath, sourceIndex, targetIndex);
+                        if (!moved) return;
 
-                    const moved = reorderArrayItem(arrayPath, sourceIndex, targetIndex);
-                    if (!moved) return;
+                        const status = document.getElementById('model-editor-status');
+                        status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Regressor order updated</div>';
+                        modelXDragState = null;
+                        renderModelAccordionEditor();
+                        return;
+                    }
 
-                    const status = document.getElementById('model-editor-status');
-                    status.innerHTML = '<div class="alert alert-info py-1 x-small mb-2">Regressor order updated</div>';
-                    modelXDragState = null;
-                    renderModelAccordionEditor();
+                    if (droppedRegressor) {
+                        addRegressorToModelX(arrayPath, droppedRegressor, targetIndex);
+                    }
                 });
 
                 const actions = document.createElement('div');
@@ -3203,11 +3300,18 @@
                 select.className = 'form-select form-select-sm';
                 select.style.maxWidth = '340px';
 
-                const uniqueRegs = Array.from(new Set(modelEditorInterestRegressors || []));
+                const uniqueRegs = getSuggestedRegressorsForModelXPath(basePath);
+                const pathMatch = String(basePath).match(/^Nodes\[(\d+)\]\.Model\.X$/);
+                const nodeForPath = pathMatch && Array.isArray(modelEditorDraft?.Nodes)
+                    ? modelEditorDraft.Nodes[Number(pathMatch[1])]
+                    : null;
+                const isDatasetModelX = String(nodeForPath?.Level || '').trim().toLowerCase() === 'dataset';
                 if (uniqueRegs.length === 0) {
                     const opt = document.createElement('option');
                     opt.value = '';
-                    opt.textContent = 'No event regressors detected';
+                    opt.textContent = isDatasetModelX
+                        ? 'No participants.tsv variables detected'
+                        : 'No event regressors detected';
                     select.appendChild(opt);
                 } else {
                     uniqueRegs.forEach(reg => {
@@ -3240,6 +3344,47 @@
                 customBtn.textContent = 'Add custom';
                 customBtn.addEventListener('click', () => addRegressorToModelX(basePath, customInput.value));
                 controls.appendChild(customBtn);
+
+                if (uniqueRegs.length > 0) {
+                    const regPool = document.createElement('div');
+                    regPool.className = 'd-flex flex-wrap gap-2 w-100 mt-2';
+                    uniqueRegs.forEach(reg => {
+                        const badge = document.createElement('button');
+                        badge.type = 'button';
+                        badge.className = 'btn btn-sm btn-outline-primary';
+                        badge.textContent = reg;
+                        badge.draggable = true;
+                        badge.addEventListener('click', () => addRegressorToModelX(basePath, reg));
+                        badge.addEventListener('dragstart', (event) => {
+                            event.dataTransfer.effectAllowed = 'copy';
+                            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                            event.dataTransfer.setData('text/plain', reg);
+                        });
+                        regPool.appendChild(badge);
+                    });
+                    controls.appendChild(regPool);
+                }
+
+                const dropZone = document.createElement('div');
+                dropZone.className = 'small text-muted border rounded p-2 w-100';
+                dropZone.textContent = 'Drop regressor badges here or onto existing regressors to insert and reorder.';
+                dropZone.addEventListener('dragover', (event) => {
+                    const droppedRegressor = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+                    if (!droppedRegressor) return;
+                    event.preventDefault();
+                    dropZone.classList.add('bg-light');
+                });
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('bg-light');
+                });
+                dropZone.addEventListener('drop', (event) => {
+                    event.preventDefault();
+                    dropZone.classList.remove('bg-light');
+                    const droppedRegressor = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+                    if (!droppedRegressor) return;
+                    addRegressorToModelX(basePath, droppedRegressor);
+                });
+                controls.appendChild(dropZone);
 
                 listWrap.appendChild(controls);
             }
@@ -3350,11 +3495,16 @@
         const status = document.getElementById('model-editor-status');
 
         // Save which collapse panels are currently open so we can restore them after re-render
-        modelEditorOpenPaths = new Set(
+        const openPaths = new Set(
             Array.from(editor.querySelectorAll('.accordion-collapse.show'))
                  .map(el => el.dataset.jsonPath || '')
                  .filter(Boolean)
         );
+        if (modelEditorPendingOpenPaths.size) {
+            modelEditorPendingOpenPaths.forEach(path => openPaths.add(path));
+            modelEditorPendingOpenPaths.clear();
+        }
+        modelEditorOpenPaths = openPaths;
 
         editor.innerHTML = '';
 
@@ -4279,6 +4429,7 @@
             modelEditorDraft = structuredClone(modelContent);
             if (pathLabel) pathLabel.textContent = modelPath;
             modelEditorOpenPaths = new Set();
+            modelEditorPendingOpenPaths = new Set();
             renderModelAccordionEditor();
             refreshExecutionNodeOptions(modelContent);
 

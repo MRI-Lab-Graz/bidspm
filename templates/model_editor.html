@@ -398,7 +398,10 @@
     border-radius: 1rem;
     box-shadow: 0 10px 24px rgba(17, 77, 143, 0.08);
     margin-bottom: 0.9rem;
-    overflow: hidden;
+    overflow: visible;
+  }
+  .model-section-card .dropdown-menu {
+    z-index: 1085;
   }
   .model-section-card .accordion-header { margin: 0; }
   .model-section-toggle {
@@ -771,6 +774,9 @@
   window.showModelTechnicalPaths = Boolean(window.showModelTechnicalPaths);
   window.modelEditorOpenPaths = window.modelEditorOpenPaths instanceof Set
     ? window.modelEditorOpenPaths
+    : new Set();
+  window.modelEditorPendingOpenPaths = window.modelEditorPendingOpenPaths instanceof Set
+    ? window.modelEditorPendingOpenPaths
     : new Set();
   let editorMode = 'full'; // 'full' or 'friendly'
   let rawMode = false;
@@ -2080,6 +2086,23 @@
       };
     }
 
+    if (preset === 'dataset_basic') {
+      return {
+        node: {
+          Level: 'Dataset',
+          Name: getUniqueNodeName('dataset_level'),
+          GroupBy: ['contrast'],
+          Model: { Type: 'glm', X: ['1'] },
+          DummyContrasts: { Test: 't' },
+          Contrasts: []
+        },
+        message: 'Added dataset-level node. Configure second-level preset in Node.Model.',
+        tone: 'success',
+        selectField: 'Model',
+        forceFriendly: true
+      };
+    }
+
     if (['one_sample_all', 'one_sample_by_group', 'two_sample_groups', 'one_way_anova', 'linear_regression'].includes(preset)) {
       const node = {
         Level: 'Dataset',
@@ -2372,35 +2395,98 @@
 
     const xHint = document.createElement('div');
     xHint.className = 'small text-muted';
-    xHint.textContent = 'Use comma-separated values. Keep 1 as the intercept and add participant columns like group or age for second-level designs.';
+    xHint.textContent = 'Use drag/drop or click badges to build Model.X. Keep 1 as intercept and add participants.tsv variables as needed.';
     xCard.appendChild(xHint);
 
-    const xInput = document.createElement('input');
-    xInput.type = 'text';
-    xInput.className = 'form-control form-control-sm';
-    xInput.value = modelObj.X.join(', ');
-    xCard.appendChild(xInput);
+    function addDatasetRegressor(value, insertIndex = null) {
+      const normalized = String(value || '').trim();
+      if (!normalized) return false;
+      if (!Array.isArray(modelObj.X)) modelObj.X = [];
+      if (modelObj.X.includes(normalized)) {
+        setStatus(`Regressor already present: ${normalized}`, 'warning');
+        return false;
+      }
+
+      if (insertIndex === null || insertIndex === undefined || insertIndex < 0 || insertIndex > modelObj.X.length) {
+        modelObj.X.push(normalized);
+      } else {
+        modelObj.X.splice(insertIndex, 0, normalized);
+      }
+      rerender('Dataset Model.X updated.', 'info');
+      return true;
+    }
+
+    function reorderDatasetRegressor(fromIndex, toIndex) {
+      if (!Array.isArray(modelObj.X)) return;
+      if (fromIndex === toIndex) return;
+      if (fromIndex < 0 || fromIndex >= modelObj.X.length) return;
+      if (toIndex < 0 || toIndex > modelObj.X.length) return;
+
+      const [moved] = modelObj.X.splice(fromIndex, 1);
+      let targetIndex = toIndex;
+      if (fromIndex < toIndex) targetIndex -= 1;
+      modelObj.X.splice(targetIndex, 0, moved);
+      rerender('Regressor order updated.', 'info');
+    }
+
+    function applyDroppedDatasetRegressor(event, targetIndex) {
+      const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
+      const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+
+      if (sourceIndexRaw !== '') {
+        const sourceIndex = Number(sourceIndexRaw);
+        if (!Number.isNaN(sourceIndex)) {
+          reorderDatasetRegressor(sourceIndex, targetIndex);
+          return;
+        }
+      }
+
+      if (droppedValue) addDatasetRegressor(droppedValue, targetIndex);
+    }
+
+    const datasetRegressorOptions = Array.from(new Set(['1', ...categoricalColumns, ...numericColumns])).filter(Boolean);
+
+    const participantPoolHint = document.createElement('div');
+    participantPoolHint.className = 'small text-muted';
+    participantPoolHint.textContent = 'participants.tsv variables (drag/click):';
+    xCard.appendChild(participantPoolHint);
+
+    const participantPool = document.createElement('div');
+    participantPool.className = 'modelx-pool';
+    if (!datasetRegressorOptions.length) {
+      const emptyPool = document.createElement('div');
+      emptyPool.className = 'small text-muted';
+      emptyPool.textContent = 'No participants.tsv variables detected yet.';
+      participantPool.appendChild(emptyPool);
+    } else {
+      datasetRegressorOptions.forEach(reg => {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = reg === '1'
+          ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+          : 'btn btn-sm btn-outline-primary modelx-reg-badge';
+        badge.textContent = reg;
+        badge.draggable = true;
+        badge.addEventListener('click', () => addDatasetRegressor(reg));
+        badge.addEventListener('dragstart', (event) => {
+          event.dataTransfer.effectAllowed = 'copy';
+          event.dataTransfer.setData('application/x-modelx-regressor', reg);
+          event.dataTransfer.setData('text/plain', reg);
+        });
+        participantPool.appendChild(badge);
+      });
+    }
+    xCard.appendChild(participantPool);
 
     const xActions = document.createElement('div');
     xActions.className = 'd-flex flex-wrap gap-2';
-
-    const applyXBtn = document.createElement('button');
-    applyXBtn.type = 'button';
-    applyXBtn.className = 'btn btn-sm btn-outline-secondary';
-    applyXBtn.textContent = 'Apply Model.X';
-    applyXBtn.addEventListener('click', ()=>{
-      setModelX(xInput.value.split(',').map(token => token.trim()).filter(Boolean));
-      rerender('Dataset Model.X updated.', 'info');
-    });
-    xActions.appendChild(applyXBtn);
 
     const addInterceptBtn = document.createElement('button');
     addInterceptBtn.type = 'button';
     addInterceptBtn.className = 'btn btn-sm btn-outline-secondary';
     addInterceptBtn.textContent = 'Add Intercept (1)';
     addInterceptBtn.addEventListener('click', ()=>{
-      if (!modelObj.X.includes('1')) modelObj.X.unshift('1');
-      rerender('Intercept added to dataset Model.X.', 'info');
+      addDatasetRegressor('1', 0);
     });
     xActions.appendChild(addInterceptBtn);
 
@@ -2414,8 +2500,7 @@
         setStatus('Select a grouping variable first.', 'warning');
         return;
       }
-      if (!modelObj.X.includes(groupVariable)) modelObj.X.push(groupVariable);
-      rerender(`Added ${groupVariable} to dataset Model.X.`, 'info');
+      addDatasetRegressor(groupVariable);
     });
     xActions.appendChild(addGroupVariableBtn);
 
@@ -2429,11 +2514,93 @@
         setStatus('Select a numeric covariate first.', 'warning');
         return;
       }
-      if (!modelObj.X.includes(covariate)) modelObj.X.push(covariate);
-      rerender(`Added ${covariate} to dataset Model.X.`, 'info');
+      addDatasetRegressor(covariate);
     });
     xActions.appendChild(addCovariateBtn);
     xCard.appendChild(xActions);
+
+    const dropZone = document.createElement('div');
+    dropZone.className = 'modelx-drop-zone';
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      dropZone.classList.add('is-over');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('is-over');
+    });
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dropZone.classList.remove('is-over');
+      applyDroppedDatasetRegressor(event, Array.isArray(modelObj.X) ? modelObj.X.length : 0);
+    });
+
+    if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted w-100';
+      empty.textContent = 'Drop variable badges here to build dataset Model.X.';
+      dropZone.appendChild(empty);
+    } else {
+      modelObj.X.forEach((reg, regIdx) => {
+        const chip = document.createElement('div');
+        chip.className = 'modelx-chip';
+        chip.draggable = true;
+        chip.title = 'Drag to reorder';
+
+        chip.addEventListener('dragstart', (event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('application/x-modelx-index', String(regIdx));
+          event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
+          event.dataTransfer.setData('text/plain', String(reg));
+        });
+        chip.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          chip.classList.add('is-drop-target');
+        });
+        chip.addEventListener('dragleave', () => chip.classList.remove('is-drop-target'));
+        chip.addEventListener('drop', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          chip.classList.remove('is-drop-target');
+          applyDroppedDatasetRegressor(event, regIdx);
+        });
+        chip.addEventListener('dragend', () => chip.classList.remove('is-drop-target'));
+
+        const main = document.createElement('div');
+        main.className = 'modelx-chip-main';
+
+        const handle = document.createElement('span');
+        handle.className = 'modelx-chip-handle';
+        handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        main.appendChild(handle);
+
+        const label = document.createElement('span');
+        label.className = reg === '1'
+          ? 'badge text-bg-secondary modelx-chip-label'
+          : 'badge bg-primary modelx-chip-label';
+        label.textContent = String(reg);
+        main.appendChild(label);
+
+        const actions = document.createElement('div');
+        actions.className = 'modelx-chip-actions';
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'modelx-chip-remove';
+        delBtn.title = 'Remove regressor';
+        delBtn.innerHTML = '<i class="fas fa-times"></i>';
+        delBtn.addEventListener('click', () => {
+          modelObj.X.splice(regIdx, 1);
+          rerender('Regressor removed from dataset Model.X.', 'info');
+        });
+        actions.appendChild(delBtn);
+
+        chip.appendChild(main);
+        chip.appendChild(actions);
+        dropZone.appendChild(chip);
+      });
+    }
+
+    xCard.appendChild(dropZone);
     wrapper.appendChild(xCard);
 
     const advanced = document.createElement('details');
@@ -3950,7 +4117,7 @@
   function getOverviewSectionValue(model) { const primitiveKeys = Object.entries(model || {}).filter(([key,value]) => key!=='Input' && key!=='Nodes' && (value===null || typeof value !== 'object')).map(([key])=>key); const keys = Array.from(new Set(['Name','BIDSModelVersion','Description', ...primitiveKeys])); return Object.fromEntries(keys.map(key => [key, model?.[key] ?? ''])); }
   function getOverviewSectionStats(model) { const overviewValue = getOverviewSectionValue(model); const keys = Object.keys(overviewValue); const filled = keys.filter(key => isFilledModelValue(overviewValue[key])).length; const requiredKeys = ['Name','BIDSModelVersion']; const requiredFilled = requiredKeys.filter(key => isFilledModelValue(model?.[key])).length; return { filled, total: keys.length, subtitle:'Name, version and metadata', badges:[ { text: `Required ${requiredFilled}/${requiredKeys.length}`, tone: requiredFilled===requiredKeys.length ? 'success' : 'warning' }, { text: `Fields ${filled}/${keys.length}`, tone: getModelPillTone(filled, keys.length) } ], dotClass: getCompletionDotClass(filled, keys.length) }; }
   function getInputSectionStats(inputValue) { const selectedTasks = Array.isArray(inputValue?.task)?inputValue.task.filter(Boolean).length:0; const extraInput = inputValue && typeof inputValue==='object' ? Object.fromEntries(Object.entries(inputValue).filter(([key])=>key!=='task')) : {}; const extraStats = getDirectFieldCompletion(extraInput); const total = 1 + (Object.keys(extraInput).length ? extraStats.total : 0); const filled = (selectedTasks>0?1:0) + (Object.keys(extraInput).length ? extraStats.filled : 0); return { filled, total, subtitle:'Tasks and input filters', badges:[ { text: `Required ${selectedTasks>0?1:0}/1`, tone: selectedTasks>0 ? 'success' : 'warning' }, { text: `Selected ${selectedTasks}`, tone: selectedTasks>0 ? 'success' : 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
-  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: 'Nodes, transforms, design and contrasts', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
+  function getNodesSectionStats(nodes){ const list = Array.isArray(nodes)?nodes:[]; const readyNodes = list.filter(node => { const checks=[ Boolean(node?.Level), Boolean(node?.Name), Array.isArray(node?.GroupBy)&&node.GroupBy.length>0, Boolean(node?.Model?.Type), Array.isArray(node?.Model?.X)&&node.Model.X.length>0 ]; return checks.every(Boolean); }).length; const total = list.length>0 ? list.length : 1; const filled = readyNodes; return { filled, total, subtitle: list.length>0 ? 'Nodes, transforms, design and contrasts' : 'No nodes yet. Use + Add Node to create the first node', badges:[ { text: `Required ${list.length>0?1:0}/1`, tone: list.length>0 ? 'success' : 'warning' }, { text: `Ready ${readyNodes}/${list.length||0}`, tone: list.length>0 ? getModelPillTone(readyNodes,list.length) : 'neutral' }, { text: `Nodes ${list.length}`, tone: 'neutral' } ], dotClass: getCompletionDotClass(filled,total) }; }
   function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const ready = list.filter(edge => Boolean(edge?.Source) && Boolean(edge?.Destination)).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Source to destination node links', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
 
   function normalizeEditorStringArray(value) {
@@ -5233,19 +5400,80 @@
 
     if (section.kind === 'nodes' || section.kind === 'array' || section.kind === 'edges') {
       if (section.kind === 'nodes') {
+        const addNodeFromPreset = (presetValue) => {
+          let nodeList = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(nodeList)) setByPath(modelEditorDraft, section.path, []);
+          nodeList = getByPath(modelEditorDraft, section.path);
+          if (!Array.isArray(nodeList)) {
+            setStatus('Could not create node list for this section.', 'danger');
+            return;
+          }
+
+          const addResult = buildNodeFromPreset(presetValue);
+          nodeList.push(addResult.node);
+          const newIndex = nodeList.length - 1;
+
+          let edgeCreated = false;
+          if (newIndex > 0) {
+            let edgeList = getByPath(modelEditorDraft, 'Edges');
+            if (!Array.isArray(edgeList)) setByPath(modelEditorDraft, 'Edges', []);
+            edgeList = getByPath(modelEditorDraft, 'Edges');
+            if (Array.isArray(edgeList)) {
+              const sourceName = String(nodeList[newIndex - 1]?.Name || '').trim();
+              const destinationName = String(nodeList[newIndex]?.Name || '').trim();
+              if (sourceName && destinationName) {
+                const hasEdge = edgeList.some(edge =>
+                  String(edge?.Source || '').trim() === sourceName
+                  && String(edge?.Destination || '').trim() === destinationName
+                );
+                if (!hasEdge) {
+                  edgeList.push({ Source: sourceName, Destination: destinationName });
+                  edgeCreated = true;
+                }
+              }
+            }
+          }
+
+          if (window.modelEditorPendingOpenPaths instanceof Set) {
+            window.modelEditorPendingOpenPaths.add(section.statePath);
+            if (edgeCreated) window.modelEditorPendingOpenPaths.add('Edges');
+          }
+          renderModelStructure();
+          renderNodeList();
+          if (addResult.forceFriendly) {
+            setRawMode(false);
+            ensureSelectionDrivenRightPane();
+            selectNodeField(newIndex, addResult.selectField || 'Model');
+          } else if (editorMode === 'full') {
+            renderModelAccordionEditor();
+          } else {
+            selectNodeField(newIndex, addResult.selectField || 'Model');
+          }
+          const edgeNote = edgeCreated ? ' Linked with an edge.' : '';
+          setStatus(`${addResult.message}${edgeNote}`, addResult.tone || 'success');
+        };
+
         const addGroup = document.createElement('div');
         addGroup.className = 'btn-group btn-group-sm json-add-btn';
 
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'btn btn-sm btn-outline-success dropdown-toggle';
-        addBtn.textContent = '+ Add Node';
-        addBtn.setAttribute('data-bs-toggle', 'dropdown');
-        addBtn.setAttribute('aria-expanded', 'false');
-        addBtn.addEventListener('click', (e) => {
+        const quickAddBtn = document.createElement('button');
+        quickAddBtn.type = 'button';
+        quickAddBtn.className = 'btn btn-sm btn-success';
+        quickAddBtn.textContent = '+ Add Node';
+        quickAddBtn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
+          addNodeFromPreset('run_basic');
         });
+        addGroup.appendChild(quickAddBtn);
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-sm btn-success dropdown-toggle dropdown-toggle-split';
+        addBtn.innerHTML = '<span class="visually-hidden">Node presets</span>';
+        addBtn.setAttribute('data-bs-toggle', 'dropdown');
+        addBtn.setAttribute('aria-expanded', 'false');
+        addBtn.setAttribute('aria-label', 'Node presets');
         addGroup.appendChild(addBtn);
 
         const menu = document.createElement('div');
@@ -5253,11 +5481,7 @@
         [
           ['run_basic', 'Run node'],
           ['subject_fixed', 'Subject node: fixed effects'],
-          ['one_sample_all', 'Dataset: one sample t-test'],
-          ['one_sample_by_group', 'Dataset: one sample t-test by group'],
-          ['two_sample_groups', 'Dataset: 2 samples t-test'],
-          ['one_way_anova', 'Dataset: one way ANOVA'],
-          ['linear_regression', 'Dataset: linear regression']
+          ['dataset_basic', 'Dataset node']
         ].forEach(([value, label]) => {
           const item = document.createElement('button');
           item.type = 'button';
@@ -5266,24 +5490,7 @@
           item.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const current = getByPath(modelEditorDraft, section.path);
-            if (!Array.isArray(current)) setByPath(modelEditorDraft, section.path, []);
-            if (!Array.isArray(getByPath(modelEditorDraft, section.path))) modelEditorDraft[section.path] = [];
-            const addResult = buildNodeFromPreset(value);
-            modelEditorDraft[section.path].push(addResult.node);
-            renderModelStructure();
-            renderNodeList();
-            const newIndex = modelEditorDraft[section.path].length - 1;
-            if (addResult.forceFriendly) {
-              setRawMode(false);
-              ensureSelectionDrivenRightPane();
-              selectNodeField(newIndex, addResult.selectField || 'Model');
-            } else if (editorMode === 'full') {
-              renderModelAccordionEditor();
-            } else {
-              selectNodeField(newIndex, addResult.selectField || 'Model');
-            }
-            setStatus(addResult.message, addResult.tone || 'success');
+            addNodeFromPreset(value);
           });
           menu.appendChild(item);
         });
@@ -5837,7 +6044,7 @@
     }
   }
 
-  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); modelEditorOpenPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); updateModelJsonPreview(); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
+  function renderModelAccordionEditor(){ const editor = document.getElementById('model-editor-accordion'); const status = document.getElementById('model-editor-status'); const openPaths = new Set(Array.from(editor.querySelectorAll('.accordion-collapse.show')).map(el=>el.dataset.jsonPath||'').filter(Boolean)); if (window.modelEditorPendingOpenPaths instanceof Set && window.modelEditorPendingOpenPaths.size) { window.modelEditorPendingOpenPaths.forEach(path=>openPaths.add(path)); window.modelEditorPendingOpenPaths.clear(); } modelEditorOpenPaths = openPaths; editor.innerHTML=''; if (!modelEditorDraft || typeof modelEditorDraft !== 'object') { renderModelEditorSummary(null); updateModelJsonPreview(); editor.innerHTML = '<div class="text-muted small">No model loaded.</div>'; return; } const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft)); if (missing.length) { status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`; } if (!Array.isArray(modelEditorDraft.Input?.task)) { if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {}; modelEditorDraft.Input.task = []; } const summary = computeModelEditorSummary(modelEditorDraft); renderModelEditorSummary(summary);
   // Filter sections to display based on current left-pane selection
   const sel = window.currentSelection || { type: 'model' };
   let sectionsToRender = summary.sections;

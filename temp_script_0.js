@@ -2,10 +2,15 @@
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
   const CURRENT_PROJECT_ID = "";
+  const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
+  const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
   let model = null;
   window.modelEditorDraft = null;
-  let modelEditorBidsTasks = [];
+  let modelEditorBidsTasks = Array.isArray(window.modelEditorBidsTasks)
+    ? window.modelEditorBidsTasks
+    : [];
+  window.modelEditorBidsTasks = modelEditorBidsTasks;
   window.modelEditorInterestRegressors = Array.isArray(window.modelEditorInterestRegressors)
     ? window.modelEditorInterestRegressors
     : [];
@@ -18,15 +23,28 @@
   window.modelEditorTransRotConfounds = Array.isArray(window.modelEditorTransRotConfounds)
     ? window.modelEditorTransRotConfounds
     : [];
+  window.modelEditorParticipantsInfo = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+    ? window.modelEditorParticipantsInfo
+    : { columns: [], categorical_columns: [], numeric_columns: [], sample_values: {}, numeric_stats: {}, sample_status: 'missing-dir' };
   window.modelEditorGroupByOptions = (Array.isArray(window.modelEditorGroupByOptions) && window.modelEditorGroupByOptions.length)
     ? window.modelEditorGroupByOptions
     : ['subject'];
-  let modelEditorInputEntityValues = {};
+  let modelEditorInputEntityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
+    ? window.modelEditorInputEntityValues
+    : {};
+  const previewValidationState = window.__modelPreviewValidationState && typeof window.__modelPreviewValidationState === 'object'
+    ? window.__modelPreviewValidationState
+    : { timer: null, runId: 0 };
+  window.__modelPreviewValidationState = previewValidationState;
+  window.modelEditorInputEntityValues = modelEditorInputEntityValues;
   let attemptedBidsDirAutofill = false;
   let attemptedFmriprepDirAutofill = false;
   window.showModelTechnicalPaths = Boolean(window.showModelTechnicalPaths);
   window.modelEditorOpenPaths = window.modelEditorOpenPaths instanceof Set
     ? window.modelEditorOpenPaths
+    : new Set();
+  window.modelEditorPendingOpenPaths = window.modelEditorPendingOpenPaths instanceof Set
+    ? window.modelEditorPendingOpenPaths
     : new Set();
   let editorMode = 'full'; // 'full' or 'friendly'
   let rawMode = false;
@@ -91,7 +109,7 @@
       const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
       node.Transformations = {
         ...existingTransformations,
-        Transformer: payload.transformations?.Transformer || 'bidspm',
+        Transformer: payload.transformations?.Transformer || 'pybids-transforms-v1',
         Instructions: instructions,
         GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
       };
@@ -104,6 +122,71 @@
       message: `Applied transformer pipeline to ${runNodes.length} Run-level node(s) with ${generatedColumns.length} generated variable(s). Save Model to persist it.`
     };
   }
+
+  function getCurrentModelPathValue() {
+    const input = document.getElementById('model-path-input');
+    return String(input?.value || modelPath || '').trim();
+  }
+
+  function getTransformerBuilderUrl() {
+    const projectId = String(CURRENT_PROJECT_ID || '').trim();
+    const baseUrl = projectId
+      ? `/transformer-builder/${encodeURIComponent(projectId)}`
+      : '/transformer-builder';
+    return `${baseUrl}?embedded=1`;
+  }
+
+  function prepareTransformerLaunchContext(nodeIndex = null) {
+    const payload = {
+      projectId: String(CURRENT_PROJECT_ID || '').trim(),
+      modelPath: getCurrentModelPathValue(),
+      bidsDir: String(document.getElementById('input-BIDS_DIR')?.value || '').trim(),
+      nodeIndex: Number.isInteger(nodeIndex) ? nodeIndex : null
+    };
+    try {
+      sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
+    } catch (e) {
+      // Ignore storage failures; builder can still be used with manual inputs.
+    }
+  }
+
+  async function applyPendingTransformerIntoCurrentModel(modelPathHint = '') {
+    const targetPath = String(modelPathHint || getCurrentModelPathValue()).trim();
+    if (!targetPath || !model || typeof model !== 'object') return false;
+
+    const result = consumePendingTransformerPayload(targetPath);
+    if (!result) return false;
+
+    modelEditorDraft = model;
+    await refreshModelEditorHintData(model);
+    renderModelStructure();
+    renderNodeList();
+    currentSelection = { type: 'model' };
+    window.currentSelection = currentSelection;
+    selectedLabel.textContent = 'Model Workspace';
+    selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
+    if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+    refreshRawEditorFromSelection();
+    setStatus(result.message, result.tone || 'success');
+    return true;
+  }
+
+  window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
+  window.getModelEditorTransformerBuilderUrl = getTransformerBuilderUrl;
+  window.modelEditorInlineTransformerNodeIdx = Number.isInteger(window.modelEditorInlineTransformerNodeIdx)
+    ? window.modelEditorInlineTransformerNodeIdx
+    : null;
+
+  window.addEventListener('message', async (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data && typeof event.data === 'object' ? event.data : null;
+    if (!data || data.type !== TRANSFORMER_APPLIED_EVENT) return;
+
+    const applied = await applyPendingTransformerIntoCurrentModel(String(data.modelPath || '').trim());
+    if (!applied) {
+      setStatus('Transformer payload received but could not be applied to the currently loaded model.', 'warning');
+    }
+  });
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
 
@@ -305,6 +388,10 @@
         session: [],
         subject: []
       };
+      modelEditorBidsTasks = [];
+      window.modelEditorGroupByOptions = ['subject'];
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
+      window.modelEditorBidsTasks = modelEditorBidsTasks;
       return;
     }
 
@@ -328,6 +415,12 @@
         session: normalizedValues.session,
         subject: normalizedValues.subject
       };
+      modelEditorBidsTasks = [...normalizedValues.task];
+      window.modelEditorGroupByOptions = (Array.isArray(payload?.groupby_options) && payload.groupby_options.length)
+        ? payload.groupby_options
+        : ['subject'];
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
+      window.modelEditorBidsTasks = modelEditorBidsTasks;
     } catch (e) {
       modelEditorInputEntityValues = {
         ...modelEditorInputEntityValues,
@@ -336,6 +429,10 @@
         session: [],
         subject: []
       };
+      modelEditorBidsTasks = [];
+      window.modelEditorGroupByOptions = ['subject'];
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
+      window.modelEditorBidsTasks = modelEditorBidsTasks;
     }
   }
 
@@ -349,6 +446,7 @@
         ...modelEditorInputEntityValues,
         space: []
       };
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       if (showStatusMessage) {
         setStatus('Set fMRIPrep folder to load available spaces.', 'warning');
       }
@@ -367,6 +465,7 @@
         ...modelEditorInputEntityValues,
         space: Array.isArray(spaces) ? spaces : []
       };
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       if (showStatusMessage) {
         setStatus(`Loaded ${modelEditorInputEntityValues.space.length} spaces from fMRIPrep.`, 'success');
       }
@@ -375,6 +474,7 @@
         ...modelEditorInputEntityValues,
         space: []
       };
+      window.modelEditorInputEntityValues = modelEditorInputEntityValues;
       if (showStatusMessage) {
         setStatus('Could not read fMRIPrep spaces: ' + e.message, 'warning');
       }
@@ -422,6 +522,17 @@
     return MODEL_NUISANCE_RX.test(value.trim());
   }
 
+  function emptyParticipantsInfo(){
+    return {
+      columns: [],
+      categorical_columns: [],
+      numeric_columns: [],
+      sample_values: {},
+      numeric_stats: {},
+      sample_status: 'missing-dir'
+    };
+  }
+
   function confoundColumnExists(columnName, confoundColumns){
     const normalized = String(columnName || '').trim();
     if (!normalized) return false;
@@ -438,6 +549,7 @@
     if (!bidsDir) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
         window.modelEditorTransRotConfounds = [];
@@ -460,6 +572,7 @@
       if (data.error) {
         window.modelEditorInterestRegressors = [];
         window.modelEditorEventSamples = { trial_type: [], condition: [] };
+        window.modelEditorParticipantsInfo = emptyParticipantsInfo();
         if (!prepDir) {
           window.modelEditorConfoundColumns = [];
           window.modelEditorTransRotConfounds = [];
@@ -482,15 +595,22 @@
       const confounds = data?.dataset?.confounds || {};
       window.modelEditorConfoundColumns = normalizeStringArray(confounds.columns);
       window.modelEditorTransRotConfounds = normalizeStringArray(confounds.trans_rot_present);
+      window.modelEditorParticipantsInfo = (data?.dataset?.participants && typeof data.dataset.participants === 'object')
+        ? data.dataset.participants
+        : emptyParticipantsInfo();
     } catch (e) {
       window.modelEditorInterestRegressors = [];
       window.modelEditorEventSamples = { trial_type: [], condition: [] };
+      window.modelEditorParticipantsInfo = emptyParticipantsInfo();
       if (!prepDir) {
         window.modelEditorConfoundColumns = [];
         window.modelEditorTransRotConfounds = [];
       }
     }
   }
+
+  window.refreshSpaceInputOptions = refreshSpaceInputOptions;
+  window.refreshModelEditorHintData = refreshModelEditorHintData;
 
   function inputValueAsSelection(value){
     if (Array.isArray(value)) return value.map(v => String(v));
@@ -1051,6 +1171,236 @@
     return null;
   }
 
+  function getModelEditorParticipantsInfo(){
+    return (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+      ? window.modelEditorParticipantsInfo
+      : emptyParticipantsInfo();
+  }
+
+  function slugifyNodeToken(value){
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase();
+  }
+
+  function getUniqueNodeName(baseName){
+    const normalizedBase = String(baseName || '').trim() || 'node';
+    const existing = new Set(
+      (Array.isArray(model?.Nodes) ? model.Nodes : [])
+        .map(node => String(node?.Name || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (!existing.has(normalizedBase.toLowerCase())) return normalizedBase;
+    for (let idx = 2; idx < 1000; idx += 1) {
+      const candidate = `${normalizedBase}_${idx}`;
+      if (!existing.has(candidate.toLowerCase())) return candidate;
+    }
+    return `${normalizedBase}_${Date.now().toString().slice(-4)}`;
+  }
+
+  function applyDatasetNodePreset(node, preset, options = {}){
+    const participantsInfo = getModelEditorParticipantsInfo();
+    const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+    const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+    const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+      ? participantsInfo.sample_values
+      : {};
+
+    const groupVariable = String(options.groupVariable || categoricalColumns[0] || '').trim();
+    const covariate = String(options.covariate || numericColumns[0] || '').trim();
+    const allLevels = normalizeStringArray(sampleValues[groupVariable]);
+    const groupA = String(options.groupA || allLevels[0] || '').trim();
+    const groupB = String(options.groupB || allLevels.find(level => level !== groupA) || allLevels[0] || '').trim();
+
+    node.Level = 'Dataset';
+    if (!node.Model || typeof node.Model !== 'object' || Array.isArray(node.Model)) node.Model = {};
+    node.Model = {
+      ...node.Model,
+      Type: String(node.Model.Type || 'glm').trim() || 'glm',
+      X: ['1']
+    };
+    delete node.Model.HRF;
+    delete node.Transformations;
+
+    let message = 'Applied dataset preset.';
+    let tone = 'success';
+
+    if (preset === 'one_sample_all') {
+      node.GroupBy = ['contrast'];
+      node.Description = 'one sample t-test: averaging across all subjects';
+      node.DummyContrasts = { Test: 't' };
+      node.Contrasts = [];
+      return { message: 'Applied all-subject one-sample dataset preset.', tone, suggestedName: 'dataset_level' };
+    }
+
+    if (preset === 'one_sample_by_group') {
+      node.GroupBy = groupVariable ? ['contrast', groupVariable] : ['contrast'];
+      node.Description = groupVariable
+        ? `one sample t-test for each ${groupVariable} group`
+        : 'one sample t-test for each group';
+      node.DummyContrasts = { Test: 't' };
+      node.Contrasts = [];
+      message = groupVariable
+        ? `Applied one-sample-by-group preset using ${groupVariable}.`
+        : 'Added one-sample-by-group scaffold. Select a participants.tsv grouping variable to finish setup.';
+      tone = groupVariable ? 'success' : 'warning';
+      return { message, tone, suggestedName: groupVariable ? `within_${slugifyNodeToken(groupVariable)}_group` : 'within_group' };
+    }
+
+    if (preset === 'two_sample_groups') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = groupVariable ? ['1', groupVariable] : ['1'];
+      node.Description = groupVariable
+        ? `2 sample t-test between ${groupVariable} groups`
+        : '2 sample t-test between groups';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (groupVariable && groupA && groupB && groupA !== groupB) {
+        node.Contrasts = [{
+          Name: `${slugifyNodeToken(groupA)}_gt_${slugifyNodeToken(groupB)}`,
+          ConditionList: [`${groupVariable}.${groupA}`, `${groupVariable}.${groupB}`],
+          Weights: [1, -1],
+          Test: 't'
+        }];
+        message = `Applied two-sample group comparison using ${groupVariable}.`;
+        tone = 'success';
+      } else {
+        message = groupVariable
+          ? `Added two-sample scaffold using ${groupVariable}. Pick the two group values in Node.Model to finish the contrast.`
+          : 'Added two-sample scaffold. Select a categorical participants.tsv variable to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: groupVariable ? `between_${slugifyNodeToken(groupVariable)}_groups` : 'between_groups' };
+    }
+
+    if (preset === 'one_way_anova') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = groupVariable ? ['1', groupVariable] : ['1'];
+      node.Description = groupVariable
+        ? `one way ANOVA across ${groupVariable}`
+        : 'one way ANOVA across groups';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (groupVariable && allLevels.length >= 2) {
+        node.Contrasts = [{
+          Name: `average_across_${slugifyNodeToken(groupVariable) || 'groups'}`,
+          ConditionList: allLevels.map(level => `${groupVariable}.${level}`),
+          Weights: allLevels.map(() => 1),
+          Test: 't'
+        }];
+        message = `Applied one-way ANOVA scaffold using ${groupVariable}.`;
+        tone = 'success';
+      } else {
+        message = groupVariable
+          ? `Added one-way ANOVA scaffold using ${groupVariable}. More observed group values are needed to build the contrast automatically.`
+          : 'Added one-way ANOVA scaffold. Select a categorical participants.tsv variable to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: groupVariable ? `${slugifyNodeToken(groupVariable)}_anova` : 'one_way_anova' };
+    }
+
+    if (preset === 'linear_regression') {
+      node.GroupBy = ['contrast'];
+      node.Model.X = covariate ? ['1', covariate] : ['1'];
+      node.Description = covariate
+        ? `linear regression with ${covariate}`
+        : 'linear regression with numeric covariate';
+      delete node.DummyContrasts;
+      node.Contrasts = [];
+      if (covariate) {
+        node.Contrasts = [
+          {
+            Name: `${slugifyNodeToken(covariate)}_positive`,
+            ConditionList: [covariate],
+            Weights: [1],
+            Test: 't'
+          },
+          {
+            Name: `${slugifyNodeToken(covariate)}_negative`,
+            ConditionList: [covariate],
+            Weights: [-1],
+            Test: 't'
+          }
+        ];
+        message = `Applied linear regression preset using ${covariate}.`;
+        tone = 'success';
+      } else {
+        message = 'Added linear regression scaffold. Select a numeric participants.tsv covariate to finish setup.';
+        tone = 'warning';
+      }
+      return { message, tone, suggestedName: covariate ? `${slugifyNodeToken(covariate)}_regression` : 'dataset_regression' };
+    }
+
+    return { message, tone, suggestedName: 'dataset_level' };
+  }
+
+  function buildNodeFromPreset(preset){
+    if (preset === 'subject_fixed') {
+      return {
+        node: {
+          Level: 'Subject',
+          Name: getUniqueNodeName('subject_level'),
+          GroupBy: ['contrast', 'subject'],
+          Model: { Type: 'glm', X: ['1'] },
+          DummyContrasts: { Test: 't' },
+          Contrasts: []
+        },
+        message: 'Added subject-level fixed-effects node.',
+        tone: 'success',
+        selectField: 'Model'
+      };
+    }
+
+    if (preset === 'dataset_basic') {
+      return {
+        node: {
+          Level: 'Dataset',
+          Name: getUniqueNodeName('dataset_level'),
+          GroupBy: ['contrast'],
+          Model: { Type: 'glm', X: ['1'] },
+          DummyContrasts: { Test: 't' },
+          Contrasts: []
+        },
+        message: 'Added dataset-level node. Configure second-level preset in Node.Model.',
+        tone: 'success',
+        selectField: 'Model',
+        forceFriendly: true
+      };
+    }
+
+    if (['one_sample_all', 'one_sample_by_group', 'two_sample_groups', 'one_way_anova', 'linear_regression'].includes(preset)) {
+      const node = {
+        Level: 'Dataset',
+        Name: '',
+        GroupBy: ['contrast'],
+        Model: { Type: 'glm', X: ['1'] },
+        DummyContrasts: { Test: 't' },
+        Contrasts: []
+      };
+      const result = applyDatasetNodePreset(node, preset);
+      node.Name = getUniqueNodeName(result.suggestedName || 'dataset_level');
+      return {
+        node,
+        message: result.message,
+        tone: result.tone,
+        selectField: 'Model',
+        forceFriendly: true
+      };
+    }
+
+    const node = cloneJson(defaultArrayItemForPath('Nodes'));
+    node.Name = getUniqueNodeName('run_level');
+    return {
+      node,
+      message: 'Added run-level node.',
+      tone: 'success',
+      selectField: 'Model'
+    };
+  }
+
   function normalizeStringArray(value){
     if (!Array.isArray(value)) return [];
     return value.map(v => String(v).trim()).filter(Boolean);
@@ -1068,8 +1418,505 @@
     return node.Model;
   }
 
+  function renderDatasetNodeModelFieldEditor(node, idx, modelObj){
+    const wrapper = document.createElement('div');
+    wrapper.className = 'd-flex flex-column gap-3';
+
+    const participantsInfo = getModelEditorParticipantsInfo();
+    const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+    const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+    const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+      ? participantsInfo.sample_values
+      : {};
+    modelObj.X = normalizeStringArray(modelObj.X);
+    if (!modelObj.X.length) modelObj.X = ['1'];
+
+    function rerender(message, tone = 'info'){
+      renderModelStructure();
+      renderNodeModelFieldEditor(node, idx);
+      setStatus(message, tone);
+    }
+
+    function createFieldRow(labelText){
+      const row = document.createElement('div');
+      row.className = 'd-flex flex-column gap-1';
+      const label = document.createElement('label');
+      label.className = 'form-label small mb-0';
+      label.textContent = labelText;
+      row.appendChild(label);
+      return { row, label };
+    }
+
+    function setModelX(values){
+      const normalized = normalizeStringArray(values);
+      modelObj.X = normalized.length ? normalized : ['1'];
+    }
+
+    const help = document.createElement('div');
+    help.className = 'small text-muted';
+    help.innerHTML = 'Dataset-level nodes use <strong>participants.tsv</strong> variables for grouping and covariates. Apply a preset, then refine <strong>Contrasts</strong> and <strong>Edges.Filter.contrast</strong> if you need a more specific second-level model.';
+    wrapper.appendChild(help);
+
+    const typeRow = createFieldRow('Model Type');
+    const typeInput = document.createElement('input');
+    typeInput.type = 'text';
+    typeInput.className = 'form-control form-control-sm';
+    typeInput.value = modelObj.Type || 'glm';
+    typeInput.addEventListener('change', ()=>{
+      modelObj.Type = (typeInput.value || '').trim() || 'glm';
+      renderModelStructure();
+      setStatus('Node Model.Type updated', 'info');
+    });
+    typeRow.row.appendChild(typeInput);
+    wrapper.appendChild(typeRow.row);
+
+    const presetCard = document.createElement('div');
+    presetCard.className = 'border rounded p-3 bg-white d-flex flex-column gap-2';
+    const presetTitle = document.createElement('div');
+    presetTitle.className = 'small fw-bold';
+    presetTitle.textContent = 'Second-Level Presets';
+    presetCard.appendChild(presetTitle);
+
+    const presetHint = document.createElement('div');
+    presetHint.className = 'small text-muted';
+    presetHint.textContent = 'Presets update Node.Model, Node.GroupBy, and dataset-level contrasts together.';
+    presetCard.appendChild(presetHint);
+
+    const presetRow = createFieldRow('Preset');
+    const presetSelect = document.createElement('select');
+    presetSelect.className = 'form-select form-select-sm';
+    [
+      ['one_sample_all', 'one sample t-test: all subjects'],
+      ['one_sample_by_group', 'one sample t-test: one model per group'],
+      ['two_sample_groups', '2 samples t-test: compare 2 groups'],
+      ['one_way_anova', 'one way ANOVA: compare several groups'],
+      ['linear_regression', 'linear regression: numeric covariate']
+    ].forEach(([value, label])=>{
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      presetSelect.appendChild(opt);
+    });
+    presetRow.row.appendChild(presetSelect);
+    presetCard.appendChild(presetRow.row);
+
+    const defaultGroupVar = node.GroupBy.find(value => categoricalColumns.includes(String(value)))
+      || modelObj.X.find(value => categoricalColumns.includes(String(value)))
+      || categoricalColumns[0]
+      || '';
+    const defaultCovariate = modelObj.X.find(value => numericColumns.includes(String(value)))
+      || numericColumns[0]
+      || '';
+
+    const groupVarRow = createFieldRow('Grouping Variable');
+    const groupVarSelect = document.createElement('select');
+    groupVarSelect.className = 'form-select form-select-sm';
+    const emptyGroupVar = document.createElement('option');
+    emptyGroupVar.value = '';
+    emptyGroupVar.textContent = categoricalColumns.length ? 'Select participant column' : 'No categorical participant columns found';
+    groupVarSelect.appendChild(emptyGroupVar);
+    categoricalColumns.forEach(column => {
+      const opt = document.createElement('option');
+      opt.value = column;
+      opt.textContent = column;
+      groupVarSelect.appendChild(opt);
+    });
+    groupVarSelect.value = defaultGroupVar;
+    groupVarRow.row.appendChild(groupVarSelect);
+    presetCard.appendChild(groupVarRow.row);
+
+    const covariateRow = createFieldRow('Numeric Covariate');
+    const covariateSelect = document.createElement('select');
+    covariateSelect.className = 'form-select form-select-sm';
+    const emptyCovariate = document.createElement('option');
+    emptyCovariate.value = '';
+    emptyCovariate.textContent = numericColumns.length ? 'Select numeric participant column' : 'No numeric participant columns found';
+    covariateSelect.appendChild(emptyCovariate);
+    numericColumns.forEach(column => {
+      const opt = document.createElement('option');
+      opt.value = column;
+      opt.textContent = column;
+      covariateSelect.appendChild(opt);
+    });
+    covariateSelect.value = defaultCovariate;
+    covariateRow.row.appendChild(covariateSelect);
+    presetCard.appendChild(covariateRow.row);
+
+    const groupALevelRow = createFieldRow('Group A');
+    const groupALevelSelect = document.createElement('select');
+    groupALevelSelect.className = 'form-select form-select-sm';
+    groupALevelRow.row.appendChild(groupALevelSelect);
+    presetCard.appendChild(groupALevelRow.row);
+
+    const groupBLevelRow = createFieldRow('Group B');
+    const groupBLevelSelect = document.createElement('select');
+    groupBLevelSelect.className = 'form-select form-select-sm';
+    groupBLevelRow.row.appendChild(groupBLevelSelect);
+    presetCard.appendChild(groupBLevelRow.row);
+
+    const valuesHint = document.createElement('div');
+    valuesHint.className = 'small text-muted';
+    presetCard.appendChild(valuesHint);
+
+    function updateGroupLevelOptions(){
+      const groupVariable = groupVarSelect.value;
+      const levels = normalizeStringArray(sampleValues[groupVariable]);
+      groupALevelSelect.innerHTML = '';
+      groupBLevelSelect.innerHTML = '';
+
+      if (!levels.length) {
+        const emptyA = document.createElement('option');
+        emptyA.value = '';
+        emptyA.textContent = 'No sample values found';
+        const emptyB = emptyA.cloneNode(true);
+        groupALevelSelect.appendChild(emptyA);
+        groupBLevelSelect.appendChild(emptyB);
+        valuesHint.textContent = groupVariable
+          ? `No sample values were found for ${groupVariable}.`
+          : 'Pick a grouping variable to inspect its observed values.';
+        return;
+      }
+
+      levels.forEach(level => {
+        const optionA = document.createElement('option');
+        optionA.value = level;
+        optionA.textContent = level;
+        groupALevelSelect.appendChild(optionA);
+
+        const optionB = document.createElement('option');
+        optionB.value = level;
+        optionB.textContent = level;
+        groupBLevelSelect.appendChild(optionB);
+      });
+
+      groupALevelSelect.value = levels[0] || '';
+      groupBLevelSelect.value = levels[1] || levels[0] || '';
+      valuesHint.textContent = `${groupVariable} values: ${levels.join(', ')}`;
+    }
+
+    function updatePresetVisibility(){
+      const preset = presetSelect.value;
+      const needsGrouping = ['one_sample_by_group', 'two_sample_groups', 'one_way_anova'].includes(preset);
+      const needsTwoGroups = preset === 'two_sample_groups';
+      const needsCovariate = preset === 'linear_regression';
+      groupVarRow.row.style.display = needsGrouping ? 'flex' : 'none';
+      groupALevelRow.row.style.display = needsTwoGroups ? 'flex' : 'none';
+      groupBLevelRow.row.style.display = needsTwoGroups ? 'flex' : 'none';
+      covariateRow.row.style.display = needsCovariate ? 'flex' : 'none';
+      valuesHint.style.display = needsGrouping ? 'block' : 'none';
+      if (needsGrouping) updateGroupLevelOptions();
+    }
+
+    groupVarSelect.addEventListener('change', updateGroupLevelOptions);
+    presetSelect.addEventListener('change', updatePresetVisibility);
+    updatePresetVisibility();
+
+    const applyPresetBtn = document.createElement('button');
+    applyPresetBtn.type = 'button';
+    applyPresetBtn.className = 'btn btn-sm btn-outline-primary align-self-start';
+    applyPresetBtn.textContent = 'Apply Preset';
+    applyPresetBtn.addEventListener('click', ()=>{
+      const result = applyDatasetNodePreset(node, presetSelect.value, {
+        groupVariable: groupVarSelect.value.trim(),
+        covariate: covariateSelect.value.trim(),
+        groupA: groupALevelSelect.value.trim(),
+        groupB: groupBLevelSelect.value.trim()
+      });
+      modelObj = ensureNodeModelObject(node, idx);
+      setModelX(modelObj.X);
+      rerender(result.message, result.tone || 'success');
+    });
+    presetCard.appendChild(applyPresetBtn);
+    wrapper.appendChild(presetCard);
+
+    const participantsCard = document.createElement('div');
+    participantsCard.className = 'border rounded p-3 bg-light-subtle d-flex flex-column gap-2';
+    const participantsTitle = document.createElement('div');
+    participantsTitle.className = 'small fw-bold';
+    participantsTitle.textContent = 'participants.tsv Variables';
+    participantsCard.appendChild(participantsTitle);
+
+    const participantsHint = document.createElement('div');
+    participantsHint.className = 'small text-muted';
+    participantsHint.textContent = participantsInfo.sample_status === 'present'
+      ? 'Categorical variables are useful for GroupBy. Numeric variables can be used as regressors in Model.X for covariate analyses.'
+      : 'No participants.tsv metadata is available yet. Group comparisons and covariate models depend on participants.tsv columns.';
+    participantsCard.appendChild(participantsHint);
+
+    const categoricalText = document.createElement('div');
+    categoricalText.className = 'small';
+    categoricalText.innerHTML = `<strong>Categorical:</strong> ${categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected'}`;
+    participantsCard.appendChild(categoricalText);
+
+    const numericText = document.createElement('div');
+    numericText.className = 'small';
+    numericText.innerHTML = `<strong>Numeric:</strong> ${numericColumns.length ? numericColumns.join(', ') : 'none detected'}`;
+    participantsCard.appendChild(numericText);
+    wrapper.appendChild(participantsCard);
+
+    const xCard = document.createElement('div');
+    xCard.className = 'border rounded p-3 bg-white d-flex flex-column gap-2';
+    const xTitle = document.createElement('div');
+    xTitle.className = 'small fw-bold';
+    xTitle.textContent = 'Design Matrix Regressors (Model.X)';
+    xCard.appendChild(xTitle);
+
+    const xHint = document.createElement('div');
+    xHint.className = 'small text-muted';
+    xHint.textContent = 'Use drag/drop or click badges to build Model.X. Keep 1 as intercept and add participants.tsv variables as needed.';
+    xCard.appendChild(xHint);
+
+    function addDatasetRegressor(value, insertIndex = null) {
+      const normalized = String(value || '').trim();
+      if (!normalized) return false;
+      if (!Array.isArray(modelObj.X)) modelObj.X = [];
+      if (modelObj.X.includes(normalized)) {
+        setStatus(`Regressor already present: ${normalized}`, 'warning');
+        return false;
+      }
+
+      if (insertIndex === null || insertIndex === undefined || insertIndex < 0 || insertIndex > modelObj.X.length) {
+        modelObj.X.push(normalized);
+      } else {
+        modelObj.X.splice(insertIndex, 0, normalized);
+      }
+      rerender('Dataset Model.X updated.', 'info');
+      return true;
+    }
+
+    function reorderDatasetRegressor(fromIndex, toIndex) {
+      if (!Array.isArray(modelObj.X)) return;
+      if (fromIndex === toIndex) return;
+      if (fromIndex < 0 || fromIndex >= modelObj.X.length) return;
+      if (toIndex < 0 || toIndex > modelObj.X.length) return;
+
+      const [moved] = modelObj.X.splice(fromIndex, 1);
+      let targetIndex = toIndex;
+      if (fromIndex < toIndex) targetIndex -= 1;
+      modelObj.X.splice(targetIndex, 0, moved);
+      rerender('Regressor order updated.', 'info');
+    }
+
+    function applyDroppedDatasetRegressor(event, targetIndex) {
+      const sourceIndexRaw = event.dataTransfer.getData('application/x-modelx-index');
+      const droppedValue = (event.dataTransfer.getData('application/x-modelx-regressor') || event.dataTransfer.getData('text/plain') || '').trim();
+
+      if (sourceIndexRaw !== '') {
+        const sourceIndex = Number(sourceIndexRaw);
+        if (!Number.isNaN(sourceIndex)) {
+          reorderDatasetRegressor(sourceIndex, targetIndex);
+          return;
+        }
+      }
+
+      if (droppedValue) addDatasetRegressor(droppedValue, targetIndex);
+    }
+
+    const datasetRegressorOptions = Array.from(new Set(['1', ...categoricalColumns, ...numericColumns])).filter(Boolean);
+
+    const participantPoolHint = document.createElement('div');
+    participantPoolHint.className = 'small text-muted';
+    participantPoolHint.textContent = 'participants.tsv variables (drag/click):';
+    xCard.appendChild(participantPoolHint);
+
+    const participantPool = document.createElement('div');
+    participantPool.className = 'modelx-pool';
+    if (!datasetRegressorOptions.length) {
+      const emptyPool = document.createElement('div');
+      emptyPool.className = 'small text-muted';
+      emptyPool.textContent = 'No participants.tsv variables detected yet.';
+      participantPool.appendChild(emptyPool);
+    } else {
+      datasetRegressorOptions.forEach(reg => {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = reg === '1'
+          ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+          : 'btn btn-sm btn-outline-primary modelx-reg-badge';
+        badge.textContent = reg;
+        badge.draggable = true;
+        badge.addEventListener('click', () => addDatasetRegressor(reg));
+        badge.addEventListener('dragstart', (event) => {
+          event.dataTransfer.effectAllowed = 'copy';
+          event.dataTransfer.setData('application/x-modelx-regressor', reg);
+          event.dataTransfer.setData('text/plain', reg);
+        });
+        participantPool.appendChild(badge);
+      });
+    }
+    xCard.appendChild(participantPool);
+
+    const xActions = document.createElement('div');
+    xActions.className = 'd-flex flex-wrap gap-2';
+
+    const addInterceptBtn = document.createElement('button');
+    addInterceptBtn.type = 'button';
+    addInterceptBtn.className = 'btn btn-sm btn-outline-secondary';
+    addInterceptBtn.textContent = 'Add Intercept (1)';
+    addInterceptBtn.addEventListener('click', ()=>{
+      addDatasetRegressor('1', 0);
+    });
+    xActions.appendChild(addInterceptBtn);
+
+    const addGroupVariableBtn = document.createElement('button');
+    addGroupVariableBtn.type = 'button';
+    addGroupVariableBtn.className = 'btn btn-sm btn-outline-secondary';
+    addGroupVariableBtn.textContent = 'Add Group Variable';
+    addGroupVariableBtn.addEventListener('click', ()=>{
+      const groupVariable = groupVarSelect.value.trim();
+      if (!groupVariable) {
+        setStatus('Select a grouping variable first.', 'warning');
+        return;
+      }
+      addDatasetRegressor(groupVariable);
+    });
+    xActions.appendChild(addGroupVariableBtn);
+
+    const addCovariateBtn = document.createElement('button');
+    addCovariateBtn.type = 'button';
+    addCovariateBtn.className = 'btn btn-sm btn-outline-secondary';
+    addCovariateBtn.textContent = 'Add Numeric Covariate';
+    addCovariateBtn.addEventListener('click', ()=>{
+      const covariate = covariateSelect.value.trim();
+      if (!covariate) {
+        setStatus('Select a numeric covariate first.', 'warning');
+        return;
+      }
+      addDatasetRegressor(covariate);
+    });
+    xActions.appendChild(addCovariateBtn);
+    xCard.appendChild(xActions);
+
+    const dropZone = document.createElement('div');
+    dropZone.className = 'modelx-drop-zone';
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      dropZone.classList.add('is-over');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('is-over');
+    });
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dropZone.classList.remove('is-over');
+      applyDroppedDatasetRegressor(event, Array.isArray(modelObj.X) ? modelObj.X.length : 0);
+    });
+
+    if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted w-100';
+      empty.textContent = 'Drop variable badges here to build dataset Model.X.';
+      dropZone.appendChild(empty);
+    } else {
+      modelObj.X.forEach((reg, regIdx) => {
+        const chip = document.createElement('div');
+        chip.className = 'modelx-chip';
+        chip.draggable = true;
+        chip.title = 'Drag to reorder';
+
+        chip.addEventListener('dragstart', (event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('application/x-modelx-index', String(regIdx));
+          event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
+          event.dataTransfer.setData('text/plain', String(reg));
+        });
+        chip.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          chip.classList.add('is-drop-target');
+        });
+        chip.addEventListener('dragleave', () => chip.classList.remove('is-drop-target'));
+        chip.addEventListener('drop', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          chip.classList.remove('is-drop-target');
+          applyDroppedDatasetRegressor(event, regIdx);
+        });
+        chip.addEventListener('dragend', () => chip.classList.remove('is-drop-target'));
+
+        const main = document.createElement('div');
+        main.className = 'modelx-chip-main';
+
+        const handle = document.createElement('span');
+        handle.className = 'modelx-chip-handle';
+        handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        main.appendChild(handle);
+
+        const label = document.createElement('span');
+        label.className = reg === '1'
+          ? 'badge text-bg-secondary modelx-chip-label'
+          : 'badge bg-primary modelx-chip-label';
+        label.textContent = String(reg);
+        main.appendChild(label);
+
+        const actions = document.createElement('div');
+        actions.className = 'modelx-chip-actions';
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'modelx-chip-remove';
+        delBtn.title = 'Remove regressor';
+        delBtn.innerHTML = '<i class="fas fa-times"></i>';
+        delBtn.addEventListener('click', () => {
+          modelObj.X.splice(regIdx, 1);
+          rerender('Regressor removed from dataset Model.X.', 'info');
+        });
+        actions.appendChild(delBtn);
+
+        chip.appendChild(main);
+        chip.appendChild(actions);
+        dropZone.appendChild(chip);
+      });
+    }
+
+    xCard.appendChild(dropZone);
+    wrapper.appendChild(xCard);
+
+    const advanced = document.createElement('details');
+    advanced.className = 'border rounded p-2';
+    const advJsonSummary = document.createElement('summary');
+    advJsonSummary.className = 'small fw-bold';
+    advJsonSummary.textContent = 'Advanced JSON (Model only)';
+    advanced.appendChild(advJsonSummary);
+
+    const advHelp = document.createElement('div');
+    advHelp.className = 'small text-muted mt-2';
+    advHelp.textContent = 'Use this for uncommon dataset-level designs or to refine what the preset created.';
+    advanced.appendChild(advHelp);
+
+    const advTa = document.createElement('textarea');
+    advTa.className = 'form-control font-monospace mt-2';
+    advTa.style.minHeight = '180px';
+    advTa.value = JSON.stringify(modelObj, null, 2);
+    advanced.appendChild(advTa);
+
+    const advApply = document.createElement('button');
+    advApply.type = 'button';
+    advApply.className = 'btn btn-sm btn-outline-secondary mt-2';
+    advApply.textContent = 'Apply Advanced JSON';
+    advApply.addEventListener('click', ()=>{
+      try {
+        const parsed = JSON.parse(advTa.value);
+        node.Model = parsed;
+        ensureNodeModelObject(node, idx);
+        renderModelStructure();
+        renderNodeModelFieldEditor(node, idx);
+        setStatus('Node Model updated from advanced JSON', 'info');
+      } catch (e) {
+        setStatus('Invalid JSON for Node.Model: ' + e.message, 'danger');
+      }
+    });
+    advanced.appendChild(advApply);
+    wrapper.appendChild(advanced);
+
+    return wrapper;
+  }
+
   function renderNodeModelFieldEditor(node, idx){
     const modelObj = ensureNodeModelObject(node, idx);
+    if (String(node?.Level || '').trim() === 'Dataset') {
+      friendlyEditor.appendChild(renderDatasetNodeModelFieldEditor(node, idx, modelObj));
+      return;
+    }
     const wrapper = document.createElement('div');
     wrapper.className = 'd-flex flex-column gap-3';
 
@@ -1107,19 +1954,78 @@
     const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
       ? window.modelEditorEventSamples
       : { trial_type: [], condition: [] };
-    const trialTypeRegressors = normalizeStringArray(eventSamples.trial_type).map(v => `trial_type.${v}`);
-    const conditionRegressors = normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`);
-    const suggestions = Array.from(new Set([
-      ...trialTypeRegressors,
-      ...conditionRegressors,
-      ...normalizeStringArray(window.modelEditorInterestRegressors),
-      ...normalizeStringArray(modelObj.X)
-    ]));
+    const selectedTasks = normalizeStringArray(modelEditorDraft?.Input?.task);
+    const hasSingleSelectedTask = selectedTasks.length === 1;
+    const trialTypeRegressors = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.trial_type).map(v => `trial_type.${v}`)
+      : [];
+    const conditionRegressors = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`)
+      : [];
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
     const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
 
+    function normalizeFriendlyHrfVariables(){
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') return [];
+      return normalizeStringArray(modelObj.HRF.Variables);
+    }
+
+    function syncFriendlyHrfVariables(){
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') return;
+      const selected = new Set(normalizeStringArray(modelObj.X));
+      const kept = normalizeFriendlyHrfVariables().filter(reg => selected.has(reg));
+      if (!kept.length) {
+        delete modelObj.HRF;
+        return;
+      }
+      modelObj.HRF = {
+        ...modelObj.HRF,
+        Model: String(modelObj.HRF.Model || 'spm').trim() || 'spm',
+        Variables: kept
+      };
+    }
+
+    function isHrfApplicableRegressor(regressor){
+      return String(regressor || '').trim() !== '1';
+    }
+
+    function isFriendlyRegressorHrfEnabled(regressor){
+      return normalizeFriendlyHrfVariables().includes(String(regressor || '').trim());
+    }
+
+    function toggleFriendlyRegressorHrf(regressor){
+      const normalized = String(regressor || '').trim();
+      if (!normalized) return;
+      if (!isHrfApplicableRegressor(normalized)) {
+        setStatus('Intercept is not HRF-convolved.', 'info');
+        return;
+      }
+
+      const currentlyEnabled = isFriendlyRegressorHrfEnabled(normalized);
+      if (currentlyEnabled) {
+        if (modelObj.HRF && typeof modelObj.HRF === 'object') {
+          const nextVars = normalizeFriendlyHrfVariables().filter(reg => reg !== normalized);
+          if (nextVars.length) {
+            modelObj.HRF.Variables = nextVars;
+          } else {
+            delete modelObj.HRF;
+          }
+        }
+        rerenderModelX(`HRF off for ${normalized}`, 'info');
+        return;
+      }
+
+      if (!modelObj.HRF || typeof modelObj.HRF !== 'object') {
+        modelObj.HRF = { Model: 'spm', Variables: [] };
+      }
+      modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+      modelObj.HRF.Variables = Array.from(new Set([...normalizeFriendlyHrfVariables(), normalized]));
+      rerenderModelX(`HRF on for ${normalized}`, 'info');
+    }
+
     function rerenderModelX(message, tone = 'info'){
       modelObj.X = normalizeStringArray(modelObj.X);
+      syncFriendlyHrfVariables();
       renderModelStructure();
       renderNodeModelFieldEditor(node, idx);
       setStatus(message, tone);
@@ -1171,31 +2077,6 @@
       if (droppedValue) addModelXRegressor(droppedValue, targetIndex);
     }
 
-    if (suggestions.length) {
-      const quickAddRow = document.createElement('div');
-      quickAddRow.className = 'd-flex flex-wrap gap-2';
-
-      const suggestionSelect = document.createElement('select');
-      suggestionSelect.className = 'form-select form-select-sm';
-      suggestionSelect.style.maxWidth = '360px';
-      suggestions.forEach(reg => {
-        const opt = document.createElement('option');
-        opt.value = reg;
-        opt.textContent = reg;
-        suggestionSelect.appendChild(opt);
-      });
-
-      const addSuggestedBtn = document.createElement('button');
-      addSuggestedBtn.type = 'button';
-      addSuggestedBtn.className = 'btn btn-sm btn-outline-secondary';
-      addSuggestedBtn.textContent = 'Add Selected';
-      addSuggestedBtn.addEventListener('click', ()=> addModelXRegressor(suggestionSelect.value));
-
-      quickAddRow.appendChild(suggestionSelect);
-      quickAddRow.appendChild(addSuggestedBtn);
-      xCard.appendChild(quickAddRow);
-    }
-
     const trialPoolCard = document.createElement('div');
     trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
     const trialPoolTitle = document.createElement('div');
@@ -1205,7 +2086,9 @@
 
     const trialPoolHint = document.createElement('div');
     trialPoolHint.className = 'small text-muted mb-2';
-    trialPoolHint.textContent = 'Click or drag a badge into the design matrix list.';
+    trialPoolHint.textContent = hasSingleSelectedTask
+      ? 'Drag or click badges into the Design Matrix space below.'
+      : 'Select exactly one task in Input.task to load task-specific trial types.';
     trialPoolCard.appendChild(trialPoolHint);
 
     const trialPool = document.createElement('div');
@@ -1213,7 +2096,9 @@
     if (!trialTypeRegressors.length) {
       const empty = document.createElement('div');
       empty.className = 'small text-muted';
-      empty.textContent = 'No trial_type values detected. Check BIDS folder and events files.';
+      empty.textContent = hasSingleSelectedTask
+        ? 'No trial_type values detected. Check BIDS folder and events files.'
+        : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
       trialPool.appendChild(empty);
     } else {
       trialTypeRegressors.forEach(reg => {
@@ -1268,71 +2153,63 @@
     const nuisanceHint = document.createElement('div');
     nuisanceHint.className = 'small text-muted mb-2';
     nuisanceHint.textContent = confoundColumns.length
-      ? `Detected ${confoundColumns.length} confound columns. Checked items can be added safely.`
+      ? `Detected ${confoundColumns.length} confound columns. Drag or click badges into Design Matrix space.`
       : 'No confounds file detected yet. Set fMRIPrep folder to validate trans/rot columns.';
     nuisanceCard.appendChild(nuisanceHint);
+
+    const nuisanceInModelX = normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor);
+    if (nuisanceInModelX.length) {
+      const warning = document.createElement('div');
+      warning.className = 'alert alert-warning py-1 small mb-2';
+      warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+      nuisanceCard.appendChild(warning);
+
+      const removeNuisanceBtn = document.createElement('button');
+      removeNuisanceBtn.type = 'button';
+      removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+      removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+      removeNuisanceBtn.addEventListener('click', ()=>{
+        modelObj.X = normalizeStringArray(modelObj.X).filter(reg => !isLikelyNuisanceRegressor(reg));
+        rerenderModelX('Removed nuisance regressors from Model.X.', 'info');
+      });
+      nuisanceCard.appendChild(removeNuisanceBtn);
+    }
 
     const nuisanceOptions = Array.from(new Set([
       ...DEFAULT_TRANS_ROT_REGRESSORS,
       'framewise_displacement',
-      ...transRotConfounds,
-      ...normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor)
+      ...transRotConfounds
     ]));
     const nuisanceGrid = document.createElement('div');
-    nuisanceGrid.className = 'modelx-nuisance-grid';
-    const nuisanceCheckboxes = [];
+    nuisanceGrid.className = 'modelx-pool';
 
     nuisanceOptions.forEach(reg => {
-      const wrap = document.createElement('label');
-      wrap.className = 'form-check d-flex align-items-center gap-2 mb-0';
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'form-check-input mt-0';
-
       const presentInConfounds = confoundColumnExists(reg, confoundColumns) || transRotConfounds.includes(reg);
-      const alreadyInModel = modelObj.X.includes(reg);
-      checkbox.checked = alreadyInModel || presentInConfounds;
-      checkbox.disabled = !presentInConfounds && !alreadyInModel;
-
-      const label = document.createElement('span');
-      label.className = 'small';
-      label.textContent = presentInConfounds ? reg : `${reg} (missing in confounds)`;
-
-      wrap.appendChild(checkbox);
-      wrap.appendChild(label);
-      nuisanceGrid.appendChild(wrap);
-      nuisanceCheckboxes.push({ checkbox, reg, presentInConfounds, alreadyInModel });
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = presentInConfounds
+        ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+        : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+      badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+      badge.draggable = true;
+      badge.addEventListener('click', ()=> addModelXRegressor(reg));
+      badge.addEventListener('dragstart', (event)=>{
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/x-modelx-regressor', reg);
+        event.dataTransfer.setData('text/plain', reg);
+      });
+      nuisanceGrid.appendChild(badge);
     });
     nuisanceCard.appendChild(nuisanceGrid);
-
-    const nuisanceActions = document.createElement('div');
-    nuisanceActions.className = 'd-flex gap-2 mt-2';
-    const addCheckedNuisanceBtn = document.createElement('button');
-    addCheckedNuisanceBtn.type = 'button';
-    addCheckedNuisanceBtn.className = 'btn btn-sm btn-outline-secondary';
-    addCheckedNuisanceBtn.textContent = 'Add Checked Nuisance';
-    addCheckedNuisanceBtn.addEventListener('click', ()=>{
-      if (!Array.isArray(modelObj.X)) modelObj.X = [];
-      let added = 0;
-      nuisanceCheckboxes.forEach(entry => {
-        if (!entry.checkbox.checked) return;
-        if (modelObj.X.includes(entry.reg)) return;
-        modelObj.X.push(entry.reg);
-        added += 1;
-      });
-      if (!added) {
-        setStatus('No new nuisance regressors were added.', 'info');
-        return;
-      }
-      rerenderModelX(`Added ${added} nuisance regressor${added === 1 ? '' : 's'}.`, 'info');
-    });
-    nuisanceActions.appendChild(addCheckedNuisanceBtn);
-    nuisanceCard.appendChild(nuisanceActions);
     xCard.appendChild(nuisanceCard);
 
+    const xListTitle = document.createElement('div');
+    xListTitle.className = 'small fw-bold';
+    xListTitle.textContent = 'Design Matrix space';
+    xCard.appendChild(xListTitle);
+
     const xList = document.createElement('div');
-    xList.className = 'd-flex flex-column gap-2 modelx-drop-zone';
+    xList.className = 'modelx-drop-zone';
     xList.addEventListener('dragover', (event)=>{
       event.preventDefault();
       xList.classList.add('is-over');
@@ -1348,63 +2225,90 @@
 
     if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
       const empty = document.createElement('div');
-      empty.className = 'small text-muted';
-      empty.textContent = 'Drop trial-type badges here to build Model.X.';
+      empty.className = 'small text-muted w-100';
+      empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
       xList.appendChild(empty);
     } else {
       modelObj.X.forEach((reg, regIdx) => {
-        const regRow = document.createElement('div');
-        regRow.className = 'modelx-reg-row d-flex align-items-center gap-2';
-        regRow.draggable = true;
-        regRow.dataset.regressorIndex = String(regIdx);
+        const regChip = document.createElement('div');
+        regChip.className = 'modelx-chip';
+        regChip.draggable = true;
+        regChip.title = 'Drag to reorder';
 
-        regRow.addEventListener('dragstart', (event)=>{
+        regChip.addEventListener('dragstart', (event)=>{
           event.dataTransfer.effectAllowed = 'move';
           event.dataTransfer.setData('application/x-modelx-index', String(regIdx));
           event.dataTransfer.setData('application/x-modelx-regressor', String(reg));
+          event.dataTransfer.setData('text/plain', String(reg));
         });
-        regRow.addEventListener('dragover', (event)=>{
+        regChip.addEventListener('dragover', (event)=>{
           event.preventDefault();
-          regRow.classList.add('is-drop-target');
+          regChip.classList.add('is-drop-target');
         });
-        regRow.addEventListener('dragleave', ()=>{
-          regRow.classList.remove('is-drop-target');
+        regChip.addEventListener('dragleave', ()=>{
+          regChip.classList.remove('is-drop-target');
         });
-        regRow.addEventListener('drop', (event)=>{
+        regChip.addEventListener('drop', (event)=>{
           event.preventDefault();
           event.stopPropagation();
-          regRow.classList.remove('is-drop-target');
+          regChip.classList.remove('is-drop-target');
           applyDroppedRegressor(event, regIdx);
         });
+        regChip.addEventListener('dragend', ()=>{
+          regChip.classList.remove('is-drop-target');
+        });
+
+        const main = document.createElement('div');
+        main.className = 'modelx-chip-main';
 
         const handle = document.createElement('span');
-        handle.className = 'modelx-reg-handle';
+        handle.className = 'modelx-chip-handle';
         handle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
 
         const regBadge = document.createElement('span');
-        regBadge.className = 'badge text-bg-light border flex-grow-1 text-start';
+        regBadge.className = isLikelyNuisanceRegressor(String(reg))
+          ? 'badge text-bg-secondary modelx-chip-label'
+          : 'badge bg-primary modelx-chip-label';
         regBadge.textContent = String(reg);
 
-        const roleBadge = document.createElement('span');
-        roleBadge.className = isLikelyNuisanceRegressor(String(reg))
-          ? 'badge text-bg-secondary'
-          : 'badge text-bg-success';
-        roleBadge.textContent = isLikelyNuisanceRegressor(String(reg)) ? 'Nuisance' : 'Interest';
+        main.appendChild(handle);
+        main.appendChild(regBadge);
+
+        const actions = document.createElement('div');
+        actions.className = 'modelx-chip-actions';
+
+        const hrfBtn = document.createElement('button');
+        hrfBtn.type = 'button';
+        hrfBtn.className = isFriendlyRegressorHrfEnabled(reg)
+          ? 'btn btn-sm btn-success'
+          : 'btn btn-sm btn-outline-secondary';
+        hrfBtn.textContent = isFriendlyRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
+        if (isHrfApplicableRegressor(reg)) {
+          hrfBtn.addEventListener('click', (event)=>{
+            event.stopPropagation();
+            toggleFriendlyRegressorHrf(reg);
+          });
+        } else {
+          hrfBtn.disabled = true;
+          hrfBtn.textContent = 'HRF n/a';
+        }
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.className = 'btn btn-sm btn-outline-danger';
-        removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
-        removeBtn.addEventListener('click', ()=>{
+        removeBtn.className = 'modelx-chip-remove';
+        removeBtn.title = 'Remove regressor';
+        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeBtn.addEventListener('click', (event)=>{
+          event.stopPropagation();
           modelObj.X.splice(regIdx, 1);
           rerenderModelX('Regressor removed', 'info');
         });
 
-        regRow.appendChild(handle);
-        regRow.appendChild(regBadge);
-        regRow.appendChild(roleBadge);
-        regRow.appendChild(removeBtn);
-        xList.appendChild(regRow);
+        actions.appendChild(hrfBtn);
+        actions.appendChild(removeBtn);
+        regChip.appendChild(main);
+        regChip.appendChild(actions);
+        xList.appendChild(regChip);
       });
     }
     xCard.appendChild(xList);
@@ -1463,16 +2367,18 @@
     hrfHeader.className = 'd-flex justify-content-between align-items-center';
     const hrfTitle = document.createElement('div');
     hrfTitle.className = 'small fw-bold';
-    hrfTitle.textContent = 'HRF (optional)';
+    hrfTitle.textContent = 'HRF defaults (optional)';
     const hrfToggle = document.createElement('input');
     hrfToggle.type = 'checkbox';
     hrfToggle.className = 'form-check-input';
     hrfToggle.checked = Boolean(modelObj.HRF && typeof modelObj.HRF === 'object');
     hrfToggle.addEventListener('change', ()=>{
       if (hrfToggle.checked) {
+        const previous = modelObj.HRF && typeof modelObj.HRF === 'object' ? modelObj.HRF : {};
         modelObj.HRF = {
-          Model: 'spm',
-          Variables: normalizeStringArray(modelObj.X).slice(0, 1)
+          ...previous,
+          Model: String(previous.Model || 'spm').trim() || 'spm',
+          Variables: normalizeFriendlyHrfVariables()
         };
       } else {
         delete modelObj.HRF;
@@ -1484,6 +2390,11 @@
     hrfHeader.appendChild(hrfTitle);
     hrfHeader.appendChild(hrfToggle);
     hrfCard.appendChild(hrfHeader);
+
+    const hrfHint = document.createElement('div');
+    hrfHint.className = 'small text-muted';
+    hrfHint.textContent = 'Use the HRF on/off tag on each Design Matrix regressor to control HRF.Variables.';
+    hrfCard.appendChild(hrfHint);
 
     if (modelObj.HRF && typeof modelObj.HRF === 'object') {
       const hrfModelRow = document.createElement('div');
@@ -1503,25 +2414,6 @@
       hrfModelRow.appendChild(hrfModelLabel);
       hrfModelRow.appendChild(hrfModelInput);
       hrfCard.appendChild(hrfModelRow);
-
-      const hrfVarsRow = document.createElement('div');
-      hrfVarsRow.className = 'd-flex flex-column gap-1';
-      const hrfVarsLabel = document.createElement('label');
-      hrfVarsLabel.className = 'form-label small mb-0';
-      hrfVarsLabel.textContent = 'HRF.Variables (comma-separated)';
-      const hrfVarsInput = document.createElement('input');
-      hrfVarsInput.type = 'text';
-      hrfVarsInput.className = 'form-control form-control-sm';
-      hrfVarsInput.value = normalizeStringArray(modelObj.HRF.Variables).join(', ');
-      hrfVarsInput.addEventListener('change', ()=>{
-        const parsed = normalizeStringArray((hrfVarsInput.value || '').split(','));
-        modelObj.HRF.Variables = parsed;
-        renderModelStructure();
-        setStatus('Node Model.HRF.Variables updated', 'info');
-      });
-      hrfVarsRow.appendChild(hrfVarsLabel);
-      hrfVarsRow.appendChild(hrfVarsInput);
-      hrfCard.appendChild(hrfVarsRow);
     }
 
     wrapper.appendChild(hrfCard);
@@ -1690,7 +2582,11 @@
       help.textContent = 'Reserved options: run, session, subject, contrast. Additional metadata fields are also allowed.';
       wrapper.appendChild(help);
 
-      const allOptions = Array.from(new Set([...GROUPBY_RESERVED_OPTIONS, ...node.GroupBy]));
+      const allOptions = Array.from(new Set([
+        ...GROUPBY_RESERVED_OPTIONS,
+        ...normalizeStringArray(window.modelEditorGroupByOptions),
+        ...node.GroupBy
+      ]));
       const select = document.createElement('select');
       select.className = 'form-select';
       select.multiple = true;
