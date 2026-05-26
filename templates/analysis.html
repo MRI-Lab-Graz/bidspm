@@ -3233,34 +3233,16 @@
         const hint = document.createElement('span');
         hint.className = 'small text-muted me-auto';
         hint.textContent = hasTransformations
-            ? 'Transformations block is present on this node.'
-            : 'No Transformations block on this node.';
+            ? 'Transformer pipeline is attached to this node.'
+            : 'No transformer pipeline attached yet.';
         panel.appendChild(hint);
-
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = hasTransformations ? 'btn btn-sm btn-outline-success' : 'btn btn-sm btn-outline-secondary';
-        addBtn.innerHTML = '<i class="fas fa-plus me-1"></i>Add Transformations';
-        addBtn.title = hasTransformations
-            ? 'Transformations already exists; click to open it'
-            : 'Add a Transformations block to this node';
-        addBtn.addEventListener('click', () => {
-            if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
-                node.Transformations = { Transformer: 'bidspm', Instructions: [] };
-            }
-            if (basePath) {
-                modelEditorPendingOpenPaths.add(`${basePath}.Transformations`);
-            }
-            renderModelAccordionEditor();
-        });
-        panel.appendChild(addBtn);
 
         const builderBtn = document.createElement('button');
         builderBtn.type = 'button';
         builderBtn.className = 'btn btn-sm btn-outline-secondary';
         builderBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Transformer Builder';
         builderBtn.title = 'Open the visual Transformer Builder';
-        builderBtn.addEventListener('click', () => openTransformerBuilder());
+        builderBtn.addEventListener('click', () => openTransformerBuilder(String(node?.Level || '').trim()));
         panel.appendChild(builderBtn);
 
         return panel;
@@ -4966,7 +4948,7 @@
             // Mask quick-set panel for Node objects
             if (/^Nodes\[\d+\]$/.test(basePath)) {
                 container.appendChild(createNodeMaskPicker(node));
-                // Transformations panel is always available so users can add/open it at any time.
+                // Builder launch panel is always available for transformer workflows.
                 container.appendChild(createAddTransformationsPanel(node, basePath));
             }
 
@@ -5993,22 +5975,88 @@
         }
     }
 
-    function persistTransformerLaunchContext() {
+    function inferTransformerLaunchNodeLevel() {
+        const normalizeLevel = (value) => ['Run', 'Session', 'Subject', 'Dataset']
+            .find(level => level.toLowerCase() === String(value || '').trim().toLowerCase()) || '';
+
+        const collectNodePaths = (paths) => {
+            const list = Array.isArray(paths) ? paths : Array.from(paths || []);
+            return list
+                .map(path => String(path || '').trim())
+                .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
+        };
+
+        const openPaths = collectNodePaths(modelEditorOpenPaths);
+        const pendingPaths = collectNodePaths(modelEditorPendingOpenPaths);
+        const domOpenPaths = Array.from(document.querySelectorAll('#model-editor-accordion .accordion-collapse.show'))
+            .map(el => String(el.dataset.jsonPath || '').trim())
+            .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
+
+        const orderedCandidates = [...pendingPaths, ...openPaths, ...domOpenPaths].reverse();
+        for (const path of orderedCandidates) {
+            const match = path.match(/^Nodes\[(\d+)\]/);
+            if (!match) continue;
+            const nodeIdx = Number(match[1]);
+            const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
+            const level = normalizeLevel(node?.Level);
+            if (level) return level;
+        }
+
+        const configuredNodeName = String(document.getElementById('input-NODE_NAME')?.value || '').trim();
+        if (configuredNodeName && Array.isArray(modelEditorDraft?.Nodes)) {
+            const configuredNode = modelEditorDraft.Nodes.find(node => String(node?.Name || '').trim() === configuredNodeName);
+            const level = normalizeLevel(configuredNode?.Level);
+            if (level) return level;
+        }
+
+        return '';
+    }
+
+    function persistTransformerLaunchContext(nodeLevel = '') {
         try {
+            const inferredNodeLevel = inferTransformerLaunchNodeLevel();
+            const normalizedNodeLevel = ['Run', 'Session', 'Subject', 'Dataset']
+                .find(level => level.toLowerCase() === String(nodeLevel || '').trim().toLowerCase()) || '';
+            const effectiveNodeLevel = normalizedNodeLevel || inferredNodeLevel;
+            const launchSnapshotSource = (modelEditorDraft && typeof modelEditorDraft === 'object' && !Array.isArray(modelEditorDraft))
+                ? modelEditorDraft
+                : null;
             const payload = {
+                launchId: `transformer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                 projectId: currentProjectId || '',
                 modelPath: document.getElementById('input-MODELS_FILE')?.value?.trim() || '',
                 bidsDir: document.getElementById('input-BIDS_DIR')?.value?.trim() || '',
-                fmriprepDir: document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || ''
+                fmriprepDir: document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || '',
+                modelSnapshot: launchSnapshotSource ? structuredClone(launchSnapshotSource) : null,
+                launchAt: Date.now(),
+                nodeLevel: effectiveNodeLevel || null,
+                sourceScope: effectiveNodeLevel
+                    ? (effectiveNodeLevel === 'Run' ? 'events' : 'participants')
+                    : 'auto'
             };
-            sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
+            try {
+                sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
+            } catch (withSnapshotError) {
+                const fallback = { ...payload };
+                delete fallback.modelSnapshot;
+                try {
+                    sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(fallback));
+                } catch (fallbackError) {
+                    try {
+                        sessionStorage.removeItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
+                    } catch (cleanupError) {
+                        // Ignore storage cleanup failures.
+                    }
+                    throw fallbackError;
+                }
+            }
         } catch (e) {
             console.warn('Could not persist transformer launch context:', e);
         }
     }
 
-    function openTransformerBuilder() {
-        persistTransformerLaunchContext();
+    function openTransformerBuilder(nodeLevel = '') {
+        persistTransformerLaunchContext(nodeLevel);
         const baseUrl = currentProjectId
             ? `/transformer-builder/${encodeURIComponent(currentProjectId)}`
             : '/transformer-builder';

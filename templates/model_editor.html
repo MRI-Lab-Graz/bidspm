@@ -715,10 +715,6 @@
       min-width: 0;
     }
   }
-</style>
-{% endblock %}
-
-{% block content %}
   .transformer-unsaved-banner {
     position: sticky;
     top: 0.5rem;
@@ -739,6 +735,10 @@
     color: #8a6110;
     margin-top: 0.35rem;
   }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="row mb-3">
   <div class="col-12 d-flex justify-content-between align-items-center">
     <h4 class="mb-0"><i class="fas fa-edit me-2"></i>Model Editor</h4>
@@ -972,6 +972,85 @@
     setTransformerUnsavedBanner(false, '');
   }
 
+  function readTransformerLaunchContext() {
+    try {
+      const raw = sessionStorage.getItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearTransformerLaunchContext() {
+    try {
+      sessionStorage.removeItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
+    } catch (e) {
+      // Ignore storage cleanup failures.
+    }
+  }
+
+  function createTransformerLaunchId() {
+    return `transformer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function normalizeFsPath(path) {
+    const raw = String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
+    if (!raw) return '';
+    const unified = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
+    const absolute = unified.startsWith('/');
+    const parts = [];
+    unified.split('/').forEach(part => {
+      if (!part || part === '.') return;
+      if (part === '..') {
+        if (parts.length && parts[parts.length - 1] !== '..') {
+          parts.pop();
+        } else if (!absolute) {
+          parts.push(part);
+        }
+        return;
+      }
+      parts.push(part);
+    });
+    const normalized = parts.join('/');
+    return absolute ? `/${normalized}` : normalized;
+  }
+
+  function stripPathQueryAndHash(path) {
+    const normalized = normalizeFsPath(path);
+    if (!normalized) return '';
+    const hashIdx = normalized.indexOf('#');
+    const noHash = hashIdx >= 0 ? normalized.slice(0, hashIdx) : normalized;
+    const queryIdx = noHash.indexOf('?');
+    return queryIdx >= 0 ? noHash.slice(0, queryIdx) : noHash;
+  }
+
+  function safeDecodePath(path) {
+    try {
+      return decodeURIComponent(path);
+    } catch (e) {
+      return path;
+    }
+  }
+
+  function areModelPathsEquivalent(pathA, pathB) {
+    const leftRaw = stripPathQueryAndHash(pathA);
+    const rightRaw = stripPathQueryAndHash(pathB);
+    if (!leftRaw || !rightRaw) return false;
+
+    const left = normalizeFsPath(safeDecodePath(leftRaw));
+    const right = normalizeFsPath(safeDecodePath(rightRaw));
+    if (!left || !right) return false;
+    if (left === right) return true;
+
+    const leftAbs = left.startsWith('/');
+    const rightAbs = right.startsWith('/');
+    if (!leftAbs && rightAbs && right.endsWith(`/${left}`)) return true;
+    if (!rightAbs && leftAbs && left.endsWith(`/${right}`)) return true;
+
+    return false;
+  }
+
   window.modelEditorMarkUnsavedTransformerChanges = markTransformerUnsavedChanges;
   window.modelEditorClearUnsavedTransformerChanges = clearTransformerUnsavedChanges;
 
@@ -994,8 +1073,7 @@
     ]));
   }
 
-  function consumePendingTransformerPayload(targetModelPath) {
-    const payload = readPendingTransformerPayload();
+  function consumeTransformerPayload(payload, targetModelPath) {
     if (!payload || !model || typeof model !== 'object') return null;
 
     const payloadProjectId = String(payload.projectId || '').trim();
@@ -1006,27 +1084,70 @@
 
     const payloadModelPath = String(payload.modelPath || '').trim();
     const normalizedTargetPath = String(targetModelPath || '').trim();
-    if (payloadModelPath && normalizedTargetPath && payloadModelPath !== normalizedTargetPath) {
+    if (payloadModelPath && normalizedTargetPath && !areModelPathsEquivalent(payloadModelPath, normalizedTargetPath)) {
       return null;
+    }
+
+    const payloadLaunchId = String(payload.launchId || '').trim();
+    if (payloadLaunchId) {
+      const launchContext = readTransformerLaunchContext();
+      const launchContextId = String(launchContext?.launchId || '').trim();
+      const launchContextPath = String(launchContext?.modelPath || '').trim();
+      const snapshotTargetPath = payloadModelPath || normalizedTargetPath || launchContextPath;
+      const payloadModelSnapshot = (launchContext?.modelSnapshot && typeof launchContext.modelSnapshot === 'object' && !Array.isArray(launchContext.modelSnapshot))
+        ? structuredClone(launchContext.modelSnapshot)
+        : null;
+      const validLaunchSnapshot = Boolean(
+        launchContextId
+        && launchContextId === payloadLaunchId
+        && payloadModelSnapshot
+        && Array.isArray(payloadModelSnapshot.Nodes)
+        && (!launchContextPath || !snapshotTargetPath || areModelPathsEquivalent(launchContextPath, snapshotTargetPath))
+      );
+
+      if (!validLaunchSnapshot) {
+        return {
+          appliedToTargetNodes: false,
+          staleHandoff: true,
+          tone: 'warning',
+          message: 'Transformer output was returned from a stale editor session, so it was not applied. Reopen Transformer Builder from the current model editor and apply again.'
+        };
+      }
+
+      model = payloadModelSnapshot;
+      modelEditorDraft = model;
     }
 
     const generatedColumns = normalizeStringArray(payload.generatedColumns);
     const instructions = Array.isArray(payload.transformations?.Instructions)
       ? structuredClone(payload.transformations.Instructions)
       : [];
-    const runNodes = Array.isArray(model.Nodes)
-      ? model.Nodes.filter(node => node && typeof node === 'object' && String(node.Level || '').trim() === 'Run')
+    const allowedLevels = ['Run', 'Session', 'Subject', 'Dataset'];
+    const normalizeLevel = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      return allowedLevels.find(level => level.toLowerCase() === raw) || '';
+    };
+    const targetLevels = normalizeStringArray(payload.targetLevels)
+      .map(normalizeLevel)
+      .filter(level => allowedLevels.includes(level));
+    const effectiveTargetLevels = targetLevels.length ? Array.from(new Set(targetLevels)) : ['Run'];
+    const targetNodes = Array.isArray(model.Nodes)
+      ? model.Nodes.filter(node => node && typeof node === 'object' && effectiveTargetLevels.includes(normalizeLevel(node.Level)))
       : [];
 
-    if (!runNodes.length) {
+    if (!targetNodes.length) {
+      const targetText = effectiveTargetLevels.length === allowedLevels.length
+        ? 'selected'
+        : effectiveTargetLevels.join('/');
       return {
-        appliedToRunNodes: false,
+        appliedToTargetNodes: false,
+        targetLevels: effectiveTargetLevels,
         tone: 'warning',
-        message: 'Pending transformer output found, but the model has no Run-level nodes to apply it to.'
+        message: `Pending transformer output found, but the model has no ${targetText} node(s) to apply it to.`
       };
     }
 
-    runNodes.forEach(node => {
+    targetNodes.forEach(node => {
       const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
         ? node.Transformations
         : {};
@@ -1041,11 +1162,18 @@
 
     extendInterestRegressorPool(generatedColumns);
 
+    const levelsText = effectiveTargetLevels.join(', ');
     return {
-      appliedToRunNodes: true,
+      appliedToTargetNodes: true,
+      targetLevels: effectiveTargetLevels,
       tone: 'success',
-      message: `Applied transformer pipeline to ${runNodes.length} Run-level node(s) with ${generatedColumns.length} generated variable(s). Save Model to persist it.`
+      message: `Applied transformer pipeline to ${targetNodes.length} node(s) at level(s): ${levelsText}. Generated variables: ${generatedColumns.length}. Design Matrix was not changed; add generated variables to Model.X manually if needed. Save Model to persist it.`
     };
+  }
+
+  function consumePendingTransformerPayload(targetModelPath) {
+    const payload = readPendingTransformerPayload();
+    return consumeTransformerPayload(payload, targetModelPath);
   }
 
   function getCurrentModelPathValue() {
@@ -1055,32 +1183,85 @@
 
   function getTransformerBuilderUrl() {
     const projectId = String(CURRENT_PROJECT_ID || '').trim();
-    const baseUrl = projectId
+    return projectId
       ? `/transformer-builder/${encodeURIComponent(projectId)}`
       : '/transformer-builder';
-    return `${baseUrl}?embedded=1`;
   }
 
-  function prepareTransformerLaunchContext(nodeIndex = null) {
-    const payload = {
-      projectId: String(CURRENT_PROJECT_ID || '').trim(),
-      modelPath: getCurrentModelPathValue(),
-      bidsDir: String(document.getElementById('input-BIDS_DIR')?.value || '').trim(),
-      nodeIndex: Number.isInteger(nodeIndex) ? nodeIndex : null
-    };
+  function resolveTransformerLaunchNodeIndex(nodeIndex = null) {
+    if (Number.isInteger(nodeIndex)) return nodeIndex;
+    if (Number.isInteger(window.modelEditorInlineTransformerNodeIdx)) return window.modelEditorInlineTransformerNodeIdx;
+    if (Number.isInteger(currentNodeIndex)) return currentNodeIndex;
+    const selection = window.currentSelection;
+    if (selection && selection.type === 'nodeField' && Number.isInteger(selection.idx)) {
+      return selection.idx;
+    }
+    return null;
+  }
+
+  function persistTransformerLaunchContextPayload(payload) {
+    const value = (payload && typeof payload === 'object' && !Array.isArray(payload))
+      ? payload
+      : {};
     try {
-      sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(payload));
-    } catch (e) {
-      // Ignore storage failures; builder can still be used with manual inputs.
+      sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(value));
+      return true;
+    } catch (withSnapshotError) {
+      const fallback = { ...value };
+      delete fallback.modelSnapshot;
+      try {
+        sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(fallback));
+        return true;
+      } catch (fallbackError) {
+        try {
+          sessionStorage.removeItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
+        } catch (cleanupError) {
+          // Ignore storage cleanup failures.
+        }
+        return false;
+      }
     }
   }
 
-  async function applyPendingTransformerIntoCurrentModel(modelPathHint = '') {
+  function prepareTransformerLaunchContext(nodeIndex = null) {
+    const resolvedNodeIndex = resolveTransformerLaunchNodeIndex(nodeIndex);
+    const launchNode = (Number.isInteger(resolvedNodeIndex) && Array.isArray(model?.Nodes))
+      ? model.Nodes[resolvedNodeIndex]
+      : null;
+    const launchNodeLevel = String(launchNode?.Level || '').trim();
+    const launchSnapshotSource = (modelEditorDraft && typeof modelEditorDraft === 'object' && !Array.isArray(modelEditorDraft))
+      ? modelEditorDraft
+      : model;
+    const payload = {
+      launchId: createTransformerLaunchId(),
+      projectId: String(CURRENT_PROJECT_ID || '').trim(),
+      modelPath: getCurrentModelPathValue(),
+      bidsDir: String(document.getElementById('input-BIDS_DIR')?.value || '').trim(),
+      modelSnapshot: (launchSnapshotSource && typeof launchSnapshotSource === 'object' && !Array.isArray(launchSnapshotSource))
+        ? structuredClone(launchSnapshotSource)
+        : null,
+      launchAt: Date.now(),
+      nodeIndex: Number.isInteger(resolvedNodeIndex) ? resolvedNodeIndex : null,
+      nodeLevel: launchNodeLevel || null,
+      sourceScope: launchNodeLevel
+        ? (launchNodeLevel.toLowerCase() === 'run' ? 'events' : 'participants')
+        : 'auto'
+    };
+    persistTransformerLaunchContextPayload(payload);
+  }
+
+  async function applyTransformerPayloadIntoCurrentModel(payload, modelPathHint = '', options = {}) {
+    const clearPending = Boolean(options.clearPending);
     const targetPath = String(modelPathHint || getCurrentModelPathValue()).trim();
     if (!targetPath || !model || typeof model !== 'object') return false;
 
-    const result = consumePendingTransformerPayload(targetPath);
+    const result = consumeTransformerPayload(payload, targetPath);
     if (!result) return false;
+    if (result.staleHandoff) {
+      if (clearPending) clearPendingTransformerPayload();
+      setStatus(result.message, result.tone || 'warning');
+      return true;
+    }
 
     modelEditorDraft = model;
     await refreshModelEditorHintData(model);
@@ -1092,12 +1273,21 @@
     selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
     if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
     refreshRawEditorFromSelection();
-    if (result.appliedToRunNodes) {
+    if (result.appliedToTargetNodes) {
       markTransformerUnsavedChanges(result.message);
-      clearPendingTransformerPayload();
+      if (clearPending) {
+        clearPendingTransformerPayload();
+        if (String(payload.launchId || '').trim()) clearTransformerLaunchContext();
+      }
     }
     setStatus(result.message, result.tone || 'success');
     return true;
+  }
+
+  async function applyPendingTransformerIntoCurrentModel(modelPathHint = '') {
+    const payload = readPendingTransformerPayload();
+    if (!payload) return false;
+    return applyTransformerPayloadIntoCurrentModel(payload, modelPathHint, { clearPending: true });
   }
 
   window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
@@ -1110,6 +1300,33 @@
     if (event.origin !== window.location.origin) return;
     const data = event.data && typeof event.data === 'object' ? event.data : null;
     if (!data || data.type !== TRANSFORMER_APPLIED_EVENT) return;
+
+    const hasDirectPayload = Boolean(
+      data.transformations
+      && typeof data.transformations === 'object'
+      && !Array.isArray(data.transformations)
+      && Array.isArray(data.transformations.Instructions)
+    );
+    if (hasDirectPayload) {
+      const directPayload = {
+        launchId: String(data.launchId || '').trim(),
+        projectId: String(data.projectId || '').trim(),
+        modelPath: String(data.modelPath || '').trim(),
+        transformations: structuredClone(data.transformations),
+        generatedColumns: normalizeStringArray(data.generatedColumns),
+        targetLevels: normalizeStringArray(data.targetLevels),
+        sourceScope: String(data.sourceScope || '').trim()
+      };
+      const appliedDirect = await applyTransformerPayloadIntoCurrentModel(
+        directPayload,
+        String(data.modelPath || '').trim(),
+        { clearPending: true }
+      );
+      if (!appliedDirect) {
+        setStatus('Transformer payload received but could not be applied to the currently loaded model.', 'warning');
+      }
+      return;
+    }
 
     const applied = await applyPendingTransformerIntoCurrentModel(String(data.modelPath || '').trim());
     if (!applied) {
@@ -1279,7 +1496,7 @@
       if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
       refreshRawEditorFromSelection();
       if (pendingTransformerResult?.message) {
-        if (pendingTransformerResult.appliedToRunNodes) {
+        if (pendingTransformerResult.appliedToTargetNodes) {
           markTransformerUnsavedChanges(pendingTransformerResult.message);
           clearPendingTransformerPayload();
         }
@@ -2826,7 +3043,7 @@
 
         const label = document.createElement('span');
         label.className = reg === '1'
-          ? 'badge text-bg-secondary modelx-chip-label'
+          ? 'badge bg-secondary modelx-chip-label'
           : 'badge bg-primary modelx-chip-label';
         label.textContent = String(reg);
         main.appendChild(label);
@@ -3348,7 +3565,7 @@
 
         const regBadge = document.createElement('span');
         regBadge.className = isLikelyNuisanceRegressor(String(reg))
-          ? 'badge text-bg-secondary modelx-chip-label'
+          ? 'badge bg-secondary modelx-chip-label'
           : 'badge bg-primary modelx-chip-label';
         regBadge.textContent = String(reg);
 
@@ -3947,214 +4164,76 @@
   function renderTransformations(node){
     friendlyEditor.innerHTML = '';
     refreshRawEditorFromSelection();
-    const instr = Array.isArray(node.Transformations?.Instructions) ? node.Transformations.Instructions : [];
-    if(!node.Transformations){
-      const addBtn = document.createElement('button');
-      addBtn.className = 'btn btn-sm btn-outline-success';
-      addBtn.textContent = 'Add Transformations';
-      addBtn.addEventListener('click', ()=>{
-        node.Transformations = {Instructions:[]};
-        renderTransformations(node);
-      });
-      friendlyEditor.appendChild(addBtn);
-      return;
+
+    const panel = document.createElement('div');
+    panel.className = 'border rounded p-3 bg-white d-flex flex-column gap-2';
+
+    const help = document.createElement('div');
+    help.className = 'small text-muted';
+    help.textContent = 'Use Transformer Builder to define operations. Applying the pipeline updates node Transformations and makes generated variables available for manual Design Matrix selection.';
+    panel.appendChild(help);
+
+    const transformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+      ? node.Transformations
+      : null;
+    const instructionCount = Array.isArray(transformations?.Instructions) ? transformations.Instructions.length : 0;
+    const generatedColumns = normalizeStringArray(transformations?.GeneratedColumns);
+
+    if (transformations) {
+      const summary = document.createElement('div');
+      summary.className = 'small';
+      summary.innerHTML = `<strong>${transformations.Transformer || 'bidspm'}</strong> with ${instructionCount} instruction${instructionCount === 1 ? '' : 's'} and ${generatedColumns.length} generated column${generatedColumns.length === 1 ? '' : 's'}.`;
+      panel.appendChild(summary);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted';
+      empty.textContent = 'No transformer pipeline is attached to this node yet.';
+      panel.appendChild(empty);
     }
-    // Render instructions
-    const list = document.createElement('div');
-    list.className = 'd-flex flex-column gap-2';
-    instr.forEach((instruction, i) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'border rounded p-2 bg-white';
-      const header = document.createElement('div');
-      header.className = 'd-flex justify-content-between align-items-center mb-2';
-      const nameInput = document.createElement('input');
-      nameInput.type='text';
-      nameInput.value = instruction.Name || '';
-      nameInput.className='form-control form-control-sm';
-      nameInput.addEventListener('change', ()=> {
-        instruction.Name = nameInput.value;
-      });
-      header.appendChild(nameInput);
 
-      const actions = document.createElement('div');
-      actions.className='d-flex gap-2';
-      const delBtn = document.createElement('button');
-      delBtn.type='button';
-      delBtn.className='btn btn-sm btn-outline-danger';
-      delBtn.innerHTML = '<i class="fas fa-trash"></i>';
-      delBtn.addEventListener('click', ()=> {
-        node.Transformations.Instructions.splice(i,1);
+    if (generatedColumns.length) {
+      const generatedWrap = document.createElement('div');
+      generatedWrap.className = 'd-flex flex-wrap gap-1';
+      generatedColumns.forEach(name => {
+        const pill = document.createElement('span');
+        pill.className = 'badge bg-secondary-subtle text-secondary-emphasis border';
+        pill.textContent = name;
+        generatedWrap.appendChild(pill);
+      });
+      panel.appendChild(generatedWrap);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'd-flex flex-wrap gap-2';
+
+    const openBuilderBtn = document.createElement('button');
+    openBuilderBtn.type = 'button';
+    openBuilderBtn.className = 'btn btn-sm btn-outline-primary';
+    openBuilderBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Open Transformer Builder';
+    openBuilderBtn.addEventListener('click', () => {
+      const nodeIdx = Array.isArray(model?.Nodes) ? model.Nodes.findIndex(item => item === node) : -1;
+      prepareTransformerLaunchContext(nodeIdx >= 0 ? nodeIdx : null);
+      window.location.href = getTransformerBuilderUrl();
+    });
+    actions.appendChild(openBuilderBtn);
+
+    if (transformations) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'btn btn-sm btn-outline-danger';
+      clearBtn.textContent = 'Remove Transformations';
+      clearBtn.addEventListener('click', () => {
+        delete node.Transformations;
+        renderModelStructure();
+        renderNodeList();
         renderTransformations(node);
+        setStatus('Transformations removed.', 'info');
       });
-      actions.appendChild(delBtn);
-      header.appendChild(actions);
-      wrap.appendChild(header);
+      actions.appendChild(clearBtn);
+    }
 
-      // For Replace instruction, show structured key/value editor for each replacement entry
-      if (instruction.Name === 'Replace' && Array.isArray(instruction.Replace)) {
-        const repWrap = document.createElement('div');
-
-        function renderReplaceEntry(rep, j) {
-          const entryCard = document.createElement('div');
-          entryCard.className = 'border rounded p-2 mb-2 bg-light';
-
-          const header = document.createElement('div');
-          header.className = 'd-flex justify-content-between align-items-start mb-2';
-          const title = document.createElement('div');
-          title.className = 'small fw-bold';
-          title.textContent = (rep && (rep.value || rep.name || rep.field)) ? (rep.value || rep.name || rep.field) : `Replace #${j+1}`;
-          header.appendChild(title);
-          const delBtn = document.createElement('button');
-          delBtn.type = 'button';
-          delBtn.className = 'btn btn-sm btn-outline-danger';
-          delBtn.innerHTML = '<i class="fas fa-trash"></i>';
-          delBtn.addEventListener('click', ()=>{ instruction.Replace.splice(j,1); renderTransformations(node); });
-          header.appendChild(delBtn);
-          entryCard.appendChild(header);
-
-          const fields = document.createElement('div');
-          fields.className = 'mb-2';
-
-          // ensure rep is an object
-          if (!rep || typeof rep !== 'object') instruction.Replace[j] = rep = {};
-
-          function addFieldRow(key, value) {
-            const row = document.createElement('div');
-            row.className = 'mb-2';
-            const label = document.createElement('label');
-            label.className = 'form-label small mb-1';
-            label.textContent = key;
-
-            // primitive types get inline controls, arrays/objects get a textarea
-            if (value === null || ['string','number','boolean'].includes(typeof value)) {
-              const input = document.createElement('input');
-              input.className = 'form-control form-control-sm';
-              if (typeof value === 'boolean') {
-                input.type = 'checkbox';
-                input.checked = !!value;
-              } else if (typeof value === 'number') {
-                input.type = 'number';
-                input.value = value;
-              } else {
-                input.type = 'text';
-                input.value = value ?? '';
-              }
-              input.addEventListener('change', ()=>{
-                if (input.type === 'checkbox') instruction.Replace[j][key] = input.checked;
-                else if (input.type === 'number') instruction.Replace[j][key] = parseFloat(input.value);
-                else instruction.Replace[j][key] = input.value;
-                validateEntry();
-              });
-              row.appendChild(label);
-              row.appendChild(input);
-            } else {
-              const ta = document.createElement('textarea');
-              ta.className = 'form-control font-monospace';
-              ta.style.minHeight = '72px';
-              try{ ta.value = JSON.stringify(value, null, 2); }catch(e){ ta.value = String(value); }
-              ta.addEventListener('change', ()=>{
-                try{ instruction.Replace[j][key] = JSON.parse(ta.value); }catch(e){}
-                validateEntry();
-              });
-              row.appendChild(label);
-              row.appendChild(ta);
-            }
-
-            fields.appendChild(row);
-          }
-
-          // render existing keys
-          Object.keys(rep).forEach(k => addFieldRow(k, rep[k]));
-
-          // control to add new key
-          const addKeyRow = document.createElement('div');
-          addKeyRow.className = 'd-flex gap-2';
-          const newKeyInput = document.createElement('input');
-          newKeyInput.type = 'text';
-          newKeyInput.className = 'form-control form-control-sm';
-          newKeyInput.placeholder = 'new key (e.g. value, from, to)';
-          const addKeyBtn = document.createElement('button');
-          addKeyBtn.type = 'button';
-          addKeyBtn.className = 'btn btn-sm btn-outline-secondary';
-          addKeyBtn.textContent = 'Add Field';
-          addKeyBtn.addEventListener('click', ()=>{
-            const k = newKeyInput.value.trim(); if(!k) return; instruction.Replace[j][k] = '';
-            renderTransformations(node);
-          });
-          addKeyRow.appendChild(newKeyInput); addKeyRow.appendChild(addKeyBtn);
-
-          // validation indicator
-          const validationDiv = document.createElement('div');
-          validationDiv.className = 'small text-muted mt-1';
-          function validateEntry(){
-            const item = instruction.Replace[j];
-            const hasValue = item && typeof item.value === 'string' && item.value.trim();
-            if(!hasValue) validationDiv.innerHTML = '<span class="text-warning">Missing required field "value"</span>';
-            else validationDiv.innerHTML = '<span class="text-success">OK</span>';
-          }
-          validateEntry();
-
-          entryCard.appendChild(fields);
-          entryCard.appendChild(addKeyRow);
-          entryCard.appendChild(validationDiv);
-          return entryCard;
-        }
-
-        instruction.Replace.forEach((rep, j) => {
-          repWrap.appendChild(renderReplaceEntry(rep, j));
-        });
-
-        const addRep = document.createElement('button');
-        addRep.type='button';
-        addRep.className='btn btn-sm btn-outline-success';
-        addRep.textContent='Add Replace Entry';
-        addRep.addEventListener('click', ()=>{
-          instruction.Replace.push({value: ''});
-          renderTransformations(node);
-        });
-        repWrap.appendChild(addRep);
-        wrap.appendChild(repWrap);
-      } else {
-        // Generic JSON editor for other instruction types
-        const ta = document.createElement('textarea');
-        ta.className='form-control font-monospace';
-        ta.style.minHeight='120px';
-        ta.value = JSON.stringify(instruction, null, 2);
-        ta.addEventListener('change', ()=> {
-          try{
-            const parsed = JSON.parse(ta.value);
-            node.Transformations.Instructions[i] = parsed;
-          }catch(e){}
-        });
-        wrap.appendChild(ta);
-      }
-
-      list.appendChild(wrap);
-    });
-
-    // Controls to add instruction
-    const controls = document.createElement('div');
-    controls.className = 'd-flex gap-2 mt-2';
-    const sel = document.createElement('select');
-    sel.className='form-select form-select-sm';
-    ['Replace','Rename','Filter','Custom'].forEach(v=>{
-      const opt = document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt);
-    });
-    controls.appendChild(sel);
-    const addInstrBtn = document.createElement('button');
-    addInstrBtn.type='button';
-    addInstrBtn.className='btn btn-sm btn-outline-success';
-    addInstrBtn.textContent='Add Instruction';
-    addInstrBtn.addEventListener('click', ()=>{
-      const name = sel.value || 'Custom';
-      const inst = name === 'Replace' ? {Name:'Replace', Replace: []} : {Name: name};
-      node.Transformations.Instructions.push(inst);
-      renderTransformations(node);
-    });
-    controls.appendChild(addInstrBtn);
-
-    friendlyEditor.appendChild(list);
-    friendlyEditor.appendChild(controls);
+    panel.appendChild(actions);
+    friendlyEditor.appendChild(panel);
   }
 
   document.getElementById('btn-load-model').addEventListener('click', ()=>{
@@ -4372,6 +4451,20 @@
   ];
 
   function isReadonlyModelPath(path) { return READONLY_MODEL_PATHS.some(rx => rx.test(path)); }
+
+  function getModelEditorParticipantsInfo() {
+    if (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object') {
+      return window.modelEditorParticipantsInfo;
+    }
+    return {
+      columns: [],
+      categorical_columns: [],
+      numeric_columns: [],
+      sample_values: {},
+      numeric_stats: {},
+      sample_status: 'missing-dir'
+    };
+  }
 
   function appendModelMetaPill(container, text, tone = 'neutral'){
     const pill = document.createElement('span'); pill.className = `model-meta-pill model-meta-pill-${tone}`; pill.textContent = text; container.appendChild(pill);
@@ -5858,770 +5951,70 @@
   }
 
   function renderNodeTransformationsPanel(container, node, idx) {
-    const panel = createWorkspacePanel('Transformations', 'Define transformer operations for this node directly in Model Editor.');
-    const path = `Nodes[${idx}].Transformations`;
-    const transformations = ensureNodeTransformationsObject(node);
+    const panel = createWorkspacePanel('Transformations', 'Use Transformer Builder to create and apply pipelines. Applying a pipeline does not auto-modify the Design Matrix; generated variables become selectable for Model.X.');
+    const transformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+      ? node.Transformations
+      : null;
 
-    panel.body.appendChild(createTransformationsSchemaHint(transformations));
-
-    const suggestionListId = `transformer-col-suggestions-${idx}`;
-    const columnSuggestions = getInlineTransformerColumnSuggestions(node);
-
-    function rerender(message = '') {
-      refreshNodeGeneratedColumnsFromInstructions(node);
-      renderModelAccordionEditor();
-      if (message) setModelEditorStatus(message, 'info');
-    }
-
-    function addTextField(parent, options) {
-      const group = document.createElement('div');
-      group.className = 'd-flex flex-column gap-1';
-      const label = document.createElement('label');
-      label.className = 'form-label small mb-0';
-      label.textContent = options.label;
-      const input = document.createElement('input');
-      input.type = options.type || 'text';
-      input.className = 'form-control form-control-sm';
-      input.placeholder = options.placeholder || '';
-      input.value = options.value || '';
-      if (options.useSuggestions) input.setAttribute('list', suggestionListId);
-      input.addEventListener('change', () => {
-        options.onChange(input.value);
-      });
-      group.appendChild(label);
-      group.appendChild(input);
-      if (options.hint) {
-        const hint = document.createElement('div');
-        hint.className = 'small text-muted';
-        hint.textContent = options.hint;
-        group.appendChild(hint);
-      }
-      parent.appendChild(group);
-    }
-
-    function addCheckboxField(parent, options) {
-      const wrap = document.createElement('div');
-      wrap.className = 'form-check';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.className = 'form-check-input';
-      input.checked = Boolean(options.value);
-      const id = `transformer-${idx}-${options.key}-${Math.random().toString(36).slice(2, 7)}`;
-      input.id = id;
-      const label = document.createElement('label');
-      label.className = 'form-check-label small';
-      label.htmlFor = id;
-      label.textContent = options.label;
-      input.addEventListener('change', () => options.onChange(input.checked));
-      wrap.appendChild(input);
-      wrap.appendChild(label);
-      parent.appendChild(wrap);
-    }
-
-    function renderReplaceRows(parent, instruction, instIdx) {
-      if (!Array.isArray(instruction.Replace)) instruction.Replace = [];
-      if (!instruction.Replace.length) instruction.Replace.push({ key: '', value: '' });
-
-      const table = document.createElement('table');
-      table.className = 'table table-sm table-bordered mb-1';
-      const thead = document.createElement('thead');
-      thead.innerHTML = '<tr><th>Old value</th><th>New value</th><th style="width:50px;"></th></tr>';
-      table.appendChild(thead);
-      const tbody = document.createElement('tbody');
-
-      instruction.Replace.forEach((row, rowIdx) => {
-        const tr = document.createElement('tr');
-
-        const keyTd = document.createElement('td');
-        const keyInput = document.createElement('input');
-        keyInput.type = 'text';
-        keyInput.className = 'form-control form-control-sm';
-        keyInput.value = String(row?.key || '');
-        keyInput.addEventListener('change', () => {
-          instruction.Replace[rowIdx].key = keyInput.value;
-          rerender();
-        });
-        keyTd.appendChild(keyInput);
-
-        const valueTd = document.createElement('td');
-        const valueInput = document.createElement('input');
-        valueInput.type = 'text';
-        valueInput.className = 'form-control form-control-sm';
-        valueInput.value = String(row?.value || '');
-        valueInput.addEventListener('change', () => {
-          instruction.Replace[rowIdx].value = valueInput.value;
-          rerender();
-        });
-        valueTd.appendChild(valueInput);
-
-        const removeTd = document.createElement('td');
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'btn btn-sm btn-outline-danger';
-        removeBtn.textContent = 'x';
-        removeBtn.addEventListener('click', () => {
-          instruction.Replace.splice(rowIdx, 1);
-          rerender('Replacement row removed.');
-        });
-        removeTd.appendChild(removeBtn);
-
-        tr.appendChild(keyTd);
-        tr.appendChild(valueTd);
-        tr.appendChild(removeTd);
-        tbody.appendChild(tr);
-      });
-
-      table.appendChild(tbody);
-      parent.appendChild(table);
-
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'btn btn-sm btn-outline-secondary';
-      addBtn.textContent = '+ Add replacement row';
-      addBtn.addEventListener('click', () => {
-        instruction.Replace.push({ key: '', value: '' });
-        rerender('Replacement row added.');
-      });
-      parent.appendChild(addBtn);
-    }
-
-    function renderInstructionCard(opName, instruction, instIdx) {
-      const card = document.createElement('div');
-      card.className = 'me-transformer-op-card';
-
-      const header = document.createElement('div');
-      header.className = 'me-transformer-op-header';
-
-      const title = document.createElement('div');
-      title.className = 'small fw-bold';
-      title.textContent = `${instIdx + 1}. ${opName}`;
-      header.appendChild(title);
-
-      const controls = document.createElement('div');
-      controls.className = 'd-flex gap-1';
-
-      const upBtn = document.createElement('button');
-      upBtn.type = 'button';
-      upBtn.className = 'btn btn-sm btn-outline-secondary';
-      upBtn.textContent = 'Up';
-      upBtn.disabled = instIdx === 0;
-      upBtn.addEventListener('click', () => {
-        const instructions = transformations.Instructions;
-        [instructions[instIdx - 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx - 1]];
-        rerender('Instruction moved.');
-      });
-
-      const downBtn = document.createElement('button');
-      downBtn.type = 'button';
-      downBtn.className = 'btn btn-sm btn-outline-secondary';
-      downBtn.textContent = 'Down';
-      downBtn.disabled = instIdx === transformations.Instructions.length - 1;
-      downBtn.addEventListener('click', () => {
-        const instructions = transformations.Instructions;
-        [instructions[instIdx + 1], instructions[instIdx]] = [instructions[instIdx], instructions[instIdx + 1]];
-        rerender('Instruction moved.');
-      });
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'btn btn-sm btn-outline-danger';
-      removeBtn.textContent = 'Remove';
-      removeBtn.addEventListener('click', () => {
-        transformations.Instructions.splice(instIdx, 1);
-        rerender('Instruction removed.');
-      });
-
-      controls.appendChild(upBtn);
-      controls.appendChild(downBtn);
-      controls.appendChild(removeBtn);
-      header.appendChild(controls);
-      card.appendChild(header);
-
-      const body = document.createElement('div');
-      body.className = 'me-transformer-op-body';
-
-      const setSingle = (field, rawValue) => {
-        instruction[field] = parseCsvValues(rawValue)[0] || '';
-        rerender();
-      };
-      const setMulti = (field, rawValue) => {
-        instruction[field] = parseCsvValues(rawValue);
-        rerender();
-      };
-      const setNumericArray = (field, rawValue) => {
-        instruction[field] = parseCsvValues(rawValue)
-          .map(value => Number(value))
-          .filter(value => Number.isFinite(value));
-        rerender();
-      };
-      const setOutput = (rawValue) => {
-        if (['Copy', 'Assign', 'DropNA', 'Split', 'LabelIdenticalRows', 'Label_identical_rows'].includes(opName)) {
-          instruction.Output = parseCsvValues(rawValue);
-        } else {
-          instruction.Output = parseCsvValues(rawValue)[0] || '';
-        }
-        rerender();
-      };
-
-      if (opName === 'Assign') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time, trial_type',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'Target columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Target).join(', '),
-          placeholder: 'duration, condition',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Target', value)
-        });
-        addTextField(body, {
-          label: 'InputAttr (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.InputAttr).join(', '),
-          placeholder: 'value',
-          onChange: (value) => {
-            instruction.InputAttr = parseCsvValues(value);
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'TargetAttr (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.TargetAttr).join(', '),
-          placeholder: 'value',
-          onChange: (value) => {
-            instruction.TargetAttr = parseCsvValues(value);
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output names (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.Output).join(', '),
-          placeholder: 'face_modulated_by_RT',
-          useSuggestions: true,
-          onChange: setOutput
-        });
-      } else if (opName === 'Filter') {
-        addTextField(body, {
-          label: 'Input column',
-          value: String(instruction.Input || ''),
-          placeholder: 'trial_type',
-          useSuggestions: true,
-          onChange: (value) => setSingle('Input', value)
-        });
-        addTextField(body, {
-          label: 'Query',
-          value: String(instruction.Query || ''),
-          placeholder: "trial_type == 'go'",
-          onChange: (value) => {
-            instruction.Query = String(value || '').trim();
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'filtered_col',
-          useSuggestions: true,
-          onChange: setOutput
-        });
-      } else if (opName === 'Concatenate') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type, condition',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'Output',
-          value: String(instruction.Output || ''),
-          placeholder: 'trial_combined',
-          onChange: setOutput
-        });
-      } else if (opName === 'Factor') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-      } else if (opName === 'Replace') {
-        addTextField(body, {
-          label: 'Input column',
-          value: String(instruction.Input || ''),
-          placeholder: 'trial_type',
-          useSuggestions: true,
-          onChange: (value) => setSingle('Input', value)
-        });
-        renderReplaceRows(body, instruction, instIdx);
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'trial_type_clean',
-          onChange: setOutput
-        });
-      } else if (opName === 'Copy') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type, condition',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'Output names (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Output).join(', '),
-          placeholder: 'trial_type_copy, condition_copy',
-          onChange: setOutput
-        });
-      } else if (opName === 'DropNA' || opName === 'Drop_na') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time, duration',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'Output names (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.Output).join(', '),
-          placeholder: 'response_time_clean, duration_clean',
-          useSuggestions: true,
-          onChange: setOutput
-        });
-      } else if (opName === 'Split') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'condition',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'By columns (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.By).join(', '),
-          placeholder: 'session, run',
-          useSuggestions: true,
-          onChange: (value) => setMulti('By', value)
-        });
-        addTextField(body, {
-          label: 'Output names (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.Output).join(', '),
-          placeholder: 'condition_A, condition_B',
-          onChange: setOutput
-        });
-      } else if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addCheckboxField(body, {
-          key: 'Cumulative',
-          label: 'Cumulative labels',
-          value: Boolean(instruction.Cumulative),
-          onChange: (checked) => {
-            instruction.Cumulative = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output names (optional, comma-separated)',
-          value: normalizeEditorStringArray(instruction.Output).join(', '),
-          placeholder: 'trial_type_label',
-          onChange: setOutput
-        });
-      } else if (opName === 'MergeIdenticalRows' || opName === 'Merge_identical_rows') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-      } else if (opName === 'Select' || opName === 'Delete') {
-        addTextField(body, {
-          label: `${opName === 'Select' ? 'Columns to keep' : 'Columns to delete'} (comma-separated)`,
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'trial_type, duration',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-      } else if (opName === 'Constant') {
-        addTextField(body, {
-          label: 'Output column',
-          value: String(instruction.Output || ''),
-          placeholder: 'constant_col',
-          useSuggestions: true,
-          onChange: setOutput
-        });
-        addTextField(body, {
-          label: 'Value',
-          value: String(instruction.Value ?? '1'),
-          placeholder: '1',
-          onChange: (value) => {
-            const trimmed = String(value || '').trim();
-            const parsed = Number(trimmed);
-            if (trimmed === '') {
-              instruction.Value = 1;
-            } else if (Number.isFinite(parsed) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(trimmed)) {
-              instruction.Value = parsed;
-            } else {
-              instruction.Value = trimmed;
-            }
-            rerender();
-          }
-        });
-      } else if (opName === 'Product') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time, gain',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addCheckboxField(body, {
-          key: 'OmitNan',
-          label: 'Omit NaN',
-          value: Boolean(instruction.OmitNan),
-          onChange: (checked) => {
-            instruction.OmitNan = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output',
-          value: String(instruction.Output || ''),
-          placeholder: 'product_col',
-          onChange: setOutput
-        });
-      } else if (opName === 'Scale') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addCheckboxField(body, {
-          key: 'Demean',
-          label: 'Demean',
-          value: instruction.Demean !== false,
-          onChange: (checked) => {
-            instruction.Demean = checked;
-            rerender();
-          }
-        });
-        addCheckboxField(body, {
-          key: 'Rescale',
-          label: 'Rescale (divide by SD)',
-          value: instruction.Rescale !== false,
-          onChange: (checked) => {
-            instruction.Rescale = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'scaled_col',
-          onChange: setOutput
-        });
-      } else if (opName === 'Mean') {
-        addTextField(body, {
-          label: 'Input column',
-          value: String(instruction.Input || ''),
-          placeholder: 'response_time',
-          useSuggestions: true,
-          onChange: (value) => setSingle('Input', value)
-        });
-        addCheckboxField(body, {
-          key: 'OmitNan',
-          label: 'Omit NaN',
-          value: Boolean(instruction.OmitNan),
-          onChange: (checked) => {
-            instruction.OmitNan = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'mean_col',
-          onChange: setOutput
-        });
-      } else if (opName === 'Std') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addCheckboxField(body, {
-          key: 'OmitNan',
-          label: 'Omit NaN',
-          value: Boolean(instruction.OmitNan),
-          onChange: (checked) => {
-            instruction.OmitNan = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'std_col',
-          onChange: setOutput
-        });
-      } else if (opName === 'Sum') {
-        addTextField(body, {
-          label: 'Input columns (comma-separated)',
-          value: normalizeEditorStringArray(instruction.Input).join(', '),
-          placeholder: 'response_time, gain, loss',
-          useSuggestions: true,
-          onChange: (value) => setMulti('Input', value)
-        });
-        addTextField(body, {
-          label: 'Weights (optional, comma-separated)',
-          value: Array.isArray(instruction.Weights) ? instruction.Weights.join(', ') : '',
-          placeholder: '1, 0.5, -1',
-          onChange: (value) => setNumericArray('Weights', value)
-        });
-        addCheckboxField(body, {
-          key: 'OmitNan',
-          label: 'Omit NaN',
-          value: Boolean(instruction.OmitNan),
-          onChange: (checked) => {
-            instruction.OmitNan = checked;
-            rerender();
-          }
-        });
-        addTextField(body, {
-          label: 'Output',
-          value: String(instruction.Output || ''),
-          placeholder: 'sum_col',
-          onChange: setOutput
-        });
-      } else if (opName === 'Threshold') {
-        addTextField(body, {
-          label: 'Input column',
-          value: String(instruction.Input || ''),
-          placeholder: 'response_time',
-          useSuggestions: true,
-          onChange: (value) => setSingle('Input', value)
-        });
-        const thresholdValue = Number(instruction.Threshold);
-        const hasThreshold = Number.isFinite(thresholdValue);
-        const minDefault = (instruction.Above !== false && hasThreshold) ? String(thresholdValue) : '';
-        const maxDefault = (instruction.Above === false && hasThreshold) ? String(thresholdValue) : '';
-        addTextField(body, {
-          label: 'Min threshold (keep values >= min)',
-          type: 'number',
-          value: minDefault,
-          placeholder: '0.2',
-          onChange: () => {}
-        });
-        addTextField(body, {
-          label: 'Max threshold (keep values <= max)',
-          type: 'number',
-          value: maxDefault,
-          placeholder: '5',
-          onChange: () => {}
-        });
-        addCheckboxField(body, {
-          key: 'Binarize',
-          label: 'Binarize',
-          value: Boolean(instruction.Binarize),
-          onChange: (checked) => {
-            instruction.Binarize = checked;
-            rerender();
-          }
-        });
-        addCheckboxField(body, {
-          key: 'Signed',
-          label: 'Signed threshold',
-          value: instruction.Signed !== false,
-          onChange: (checked) => {
-            instruction.Signed = checked;
-            rerender();
-          }
-        });
-        const applyRangeBtn = document.createElement('button');
-        applyRangeBtn.type = 'button';
-        applyRangeBtn.className = 'btn btn-sm btn-outline-primary';
-        applyRangeBtn.textContent = 'Apply min/max as range';
-        applyRangeBtn.addEventListener('click', () => {
-          const inputs = Array.from(body.querySelectorAll('input[type="number"]'));
-          const minRaw = inputs[0]?.value;
-          const maxRaw = inputs[1]?.value;
-          const minValue = Number(minRaw);
-          const maxValue = Number(maxRaw);
-          const hasMin = String(minRaw || '').trim() !== '' && Number.isFinite(minValue);
-          const hasMax = String(maxRaw || '').trim() !== '' && Number.isFinite(maxValue);
-
-          if (!instruction.Input || String(instruction.Input).trim() === '') {
-            setModelEditorStatus('Set Input before applying threshold range.', 'warning');
-            return;
-          }
-          if (!hasMin && !hasMax) {
-            setModelEditorStatus('Provide a min and/or max threshold value.', 'warning');
-            return;
-          }
-
-          const outputValue = String(instruction.Output || '').trim();
-          const inputValue = String(instruction.Input || '').trim();
-          const signedValue = instruction.Signed !== false;
-          const binarizeValue = Boolean(instruction.Binarize);
-
-          if (hasMin && hasMax) {
-            instruction.Threshold = minValue;
-            instruction.Above = true;
-            instruction.Signed = signedValue;
-            instruction.Binarize = false;
-            if (outputValue) {
-              instruction.Output = outputValue;
-            } else {
-              delete instruction.Output;
-            }
-
-            const upperInstruction = {
-              Name: 'Threshold',
-              Input: outputValue || inputValue,
-              Threshold: maxValue,
-              Above: false,
-              Signed: signedValue,
-              Binarize: binarizeValue
-            };
-            if (outputValue) upperInstruction.Output = outputValue;
-            transformations.Instructions.splice(instIdx + 1, 0, upperInstruction);
-            rerender('Created min/max range as two Threshold instructions.');
-            return;
-          }
-
-          if (hasMin) {
-            instruction.Threshold = minValue;
-            instruction.Above = true;
-            instruction.Signed = signedValue;
-            rerender('Applied minimum threshold.');
-            return;
-          }
-
-          instruction.Threshold = maxValue;
-          instruction.Above = false;
-          instruction.Signed = signedValue;
-          rerender('Applied maximum threshold.');
-        });
-        body.appendChild(applyRangeBtn);
-        body.appendChild(createInlineNote('Use min+max together for RT windows (e.g., 0.2 to 5 seconds).'));
-        addTextField(body, {
-          label: 'Output (optional)',
-          value: String(instruction.Output || ''),
-          placeholder: 'thresholded_col',
-          onChange: setOutput
-        });
-      }
-
-      card.appendChild(body);
-      return card;
-    }
-
-    const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
-    refreshNodeGeneratedColumnsFromInstructions(node);
-    const generatedCount = Array.isArray(transformations.GeneratedColumns) ? transformations.GeneratedColumns.length : 0;
-    const summary = document.createElement('div');
-    summary.className = 'd-flex flex-wrap gap-2';
-    appendModelMetaPill(summary, transformations.Transformer || 'bidspm', 'success');
-    appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
-    appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
-    panel.body.appendChild(summary);
-
-    const builder = document.createElement('div');
-    builder.className = 'me-transformer-builder';
-    builder.appendChild(createInlineNote('Add and edit operations directly here. Changes are applied to this node immediately.'));
-
-    const datalist = document.createElement('datalist');
-    datalist.id = suggestionListId;
-    columnSuggestions.forEach(name => {
-      const option = document.createElement('option');
-      option.value = name;
-      datalist.appendChild(option);
-    });
-    builder.appendChild(datalist);
-
-    const opButtonRow = document.createElement('div');
-    opButtonRow.className = 'd-flex flex-wrap gap-1';
-    [
-      'Assign', 'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'DropNA', 'Split',
-      'LabelIdenticalRows', 'MergeIdenticalRows', 'Select', 'Delete',
-      'Constant', 'Product', 'Scale', 'Mean', 'Std', 'Sum', 'Threshold'
-    ].forEach(opName => {
-      const addOpBtn = document.createElement('button');
-      addOpBtn.type = 'button';
-      addOpBtn.className = 'btn btn-sm btn-outline-primary';
-      addOpBtn.textContent = `+ ${opName}`;
-      addOpBtn.addEventListener('click', () => {
-        transformations.Instructions.push(createTransformerInstructionTemplate(opName));
-        rerender(`Added ${opName} instruction.`);
-      });
-      opButtonRow.appendChild(addOpBtn);
-    });
-    builder.appendChild(opButtonRow);
-
-    const opList = document.createElement('div');
-    opList.className = 'me-transformer-op-list';
-    if (!transformations.Instructions.length) {
-      opList.appendChild(createInlineNote('No instructions yet. Add operations above.'));
+    if (!transformations) {
+      panel.body.appendChild(createInlineNote('No transformer pipeline is attached to this node yet.'));
     } else {
-      transformations.Instructions.forEach((instruction, instIdx) => {
-        const opName = String(instruction?.Name || '').trim();
-        if (!opName) {
-          transformations.Instructions[instIdx] = createTransformerInstructionTemplate('Filter');
-        }
-        opList.appendChild(renderInstructionCard(String(transformations.Instructions[instIdx].Name || 'Filter'), transformations.Instructions[instIdx], instIdx));
-      });
+      panel.body.appendChild(createTransformationsSchemaHint(transformations));
+
+      const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
+      const explicitGenerated = normalizeEditorStringArray(transformations.GeneratedColumns);
+      const inferredGenerated = Array.isArray(transformations.Instructions)
+        ? Array.from(new Set(transformations.Instructions.flatMap(instruction => inferGeneratedColumnsFromInstruction(instruction))))
+        : [];
+      const generatedColumns = explicitGenerated.length ? explicitGenerated : inferredGenerated;
+
+      const summary = document.createElement('div');
+      summary.className = 'd-flex flex-wrap gap-2';
+      appendModelMetaPill(summary, transformations.Transformer || 'bidspm', 'success');
+      appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
+      appendModelMetaPill(summary, `${generatedColumns.length} generated`, generatedColumns.length ? 'warning' : 'neutral');
+      panel.body.appendChild(summary);
+
+      if (generatedColumns.length) {
+        const generatedWrap = document.createElement('div');
+        generatedWrap.className = 'd-flex flex-wrap gap-1';
+        generatedColumns.forEach(name => {
+          const pill = document.createElement('span');
+          pill.className = 'badge bg-secondary-subtle text-secondary-emphasis border';
+          pill.textContent = name;
+          generatedWrap.appendChild(pill);
+        });
+        panel.body.appendChild(generatedWrap);
+      }
     }
-    builder.appendChild(opList);
 
-    const generatedLabel = document.createElement('div');
-    generatedLabel.className = 'small fw-bold';
-    generatedLabel.textContent = 'Generated JSON Preview';
-    builder.appendChild(generatedLabel);
-
-    const jsonPreview = document.createElement('pre');
-    jsonPreview.className = 'me-transformer-json';
-    jsonPreview.textContent = JSON.stringify(transformations, null, 2);
-    builder.appendChild(jsonPreview);
-
-    panel.body.appendChild(builder);
-
-    const advanced = document.createElement('details');
-    advanced.className = 'mt-1';
-    const advSummary = document.createElement('summary');
-    advSummary.className = 'small fw-bold';
-    advSummary.textContent = 'Advanced Transformations JSON';
-    advanced.appendChild(advSummary);
-    const advWrap = document.createElement('div');
-    advWrap.className = 'mt-2';
-    renderJsonEditor(advWrap, node.Transformations, path, false, 0);
-    advanced.appendChild(advWrap);
-    panel.body.appendChild(advanced);
-
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'btn btn-sm btn-outline-danger';
-    clearBtn.textContent = 'Remove Transformations';
-    clearBtn.addEventListener('click', () => {
-      delete node.Transformations;
-      renderModelAccordionEditor();
-      setModelEditorStatus('Transformations removed.', 'info');
+    const openBuilderBtn = document.createElement('button');
+    openBuilderBtn.type = 'button';
+    openBuilderBtn.className = 'btn btn-sm btn-outline-primary';
+    openBuilderBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Open Transformer Builder';
+    openBuilderBtn.addEventListener('click', () => {
+      if (typeof window.prepareModelEditorTransformerLaunchContext === 'function') {
+        window.prepareModelEditorTransformerLaunchContext(idx);
+      }
+      const builderUrl = (typeof window.getModelEditorTransformerBuilderUrl === 'function')
+        ? window.getModelEditorTransformerBuilderUrl()
+        : '/transformer-builder';
+      window.location.href = builderUrl;
     });
-    panel.actions.appendChild(clearBtn);
+    panel.actions.appendChild(openBuilderBtn);
+
+    if (transformations) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'btn btn-sm btn-outline-danger';
+      clearBtn.textContent = 'Remove Transformations';
+      clearBtn.addEventListener('click', () => {
+        delete node.Transformations;
+        renderModelAccordionEditor();
+        setModelEditorStatus('Transformations removed.', 'info');
+      });
+      panel.actions.appendChild(clearBtn);
+    }
 
     container.appendChild(panel.panel);
   }
@@ -7806,7 +7199,7 @@
 
             const label = document.createElement('span');
             label.className = isNuisanceRegressor(reg)
-              ? 'badge text-bg-secondary modelx-chip-label'
+              ? 'badge bg-secondary modelx-chip-label'
               : 'badge bg-primary modelx-chip-label';
             label.textContent = reg;
 

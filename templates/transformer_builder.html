@@ -146,6 +146,10 @@
   .op-card { border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; overflow: hidden; }
   .op-card.munge-card  { border-left: 3px solid #1890ff; }
   .op-card.compute-card { border-left: 3px solid #52c41a; }
+  .op-card.op-missing-output {
+    border-color: #dc3545;
+    box-shadow: 0 0 0 1px rgba(220, 53, 69, 0.18);
+  }
 
   .op-card-header {
     display: flex; align-items: center; gap: 8px;
@@ -382,6 +386,31 @@
         </button>
       </div>
     </div>
+    <div class="row g-2 align-items-end mt-1">
+      <div class="col-md-4">
+        <label class="form-label form-label-sm fw-bold mb-1">Target node level</label>
+        <select id="select-target-level" class="form-select form-select-sm">
+          <option value="Run">Run (first-level)</option>
+          <option value="Session">Session</option>
+          <option value="Subject">Subject</option>
+          <option value="Dataset">Dataset (second-level)</option>
+          <option value="All">All levels</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label form-label-sm fw-bold mb-1">Variable source scope</label>
+        <select id="select-source-scope" class="form-select form-select-sm">
+          <option value="auto">Auto (from target level)</option>
+          <option value="events">events.tsv columns</option>
+          <option value="participants">participants.tsv columns</option>
+          <option value="combined">Combined (events + participants)</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <div id="scope-hint" class="small text-muted">Run-level defaults to events.tsv. Higher levels default to participants.tsv.</div>
+        <div id="launch-context-hint" class="small text-primary d-none mt-1"></div>
+      </div>
+    </div>
     <div class="row g-2 align-items-end">
       <div class="col-md-5">
         <label class="form-label form-label-sm fw-bold mb-1">BIDS Folder</label>
@@ -592,7 +621,21 @@
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
   const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
-  const EMBEDDED_MODE = new URLSearchParams(window.location.search).get('embedded') === '1' || window.self !== window.top;
+  const EMBEDDED_MODE = window.self !== window.top;
+  const NODE_LEVEL_OPTIONS = ['Run', 'Session', 'Subject', 'Dataset'];
+  const REQUIRED_OUTPUT_OPS = new Set([
+    'Assign',
+    'Filter',
+    'Concatenate',
+    'Replace',
+    'DropNA',
+    'Split',
+    'LabelIdenticalRows',
+    'Scale',
+    'Mean',
+    'Std',
+    'Threshold'
+  ]);
 
   // ---- State ----
   let availableColumns = [];
@@ -614,6 +657,16 @@
   if (!document.getElementById('input-bids-dir').value.trim() && launchContext?.bidsDir) {
     document.getElementById('input-bids-dir').value = launchContext.bidsDir;
   }
+  const launchNodeLevel = normalizeNodeLevel(launchContext?.nodeLevel);
+  if (launchNodeLevel) {
+    document.getElementById('select-target-level').value = launchNodeLevel;
+  }
+  const launchSourceScope = String(launchContext?.sourceScope || '').trim().toLowerCase();
+  if (['auto', 'events', 'participants', 'combined'].includes(launchSourceScope)) {
+    document.getElementById('select-source-scope').value = launchSourceScope;
+  }
+  updateScopeHint();
+  updateLaunchContextHint();
 
   // ---- Bind top-bar controls ----
   document.getElementById('btn-scan-events').addEventListener('click', () => scanEvents(false));
@@ -626,6 +679,19 @@
     scheduleLiveModelValidation();
   });
   document.getElementById('select-target-model').addEventListener('change', () => {
+    scheduleLiveModelValidation();
+  });
+  document.getElementById('select-target-level').addEventListener('change', () => {
+    updateScopeHint();
+    updateLaunchContextHint();
+    currentPreviewFile = null;
+    scanEvents(false);
+    scheduleLiveModelValidation();
+  });
+  document.getElementById('select-source-scope').addEventListener('change', () => {
+    updateScopeHint();
+    currentPreviewFile = null;
+    scanEvents(false);
     scheduleLiveModelValidation();
   });
   document.getElementById('btn-clear-events-file').addEventListener('click', () => {
@@ -711,10 +777,42 @@
     };
   }
 
+  function persistPendingTransformerPayload(payload) {
+    const value = (payload && typeof payload === 'object' && !Array.isArray(payload))
+      ? payload
+      : {};
+    try {
+      sessionStorage.setItem(PENDING_TRANSFORMER_KEY, JSON.stringify(value));
+      return { ok: true, usedFallback: false };
+    } catch (withSnapshotError) {
+      const fallback = { ...value };
+      delete fallback.modelSnapshot;
+      try {
+        sessionStorage.setItem(PENDING_TRANSFORMER_KEY, JSON.stringify(fallback));
+        return { ok: true, usedFallback: true };
+      } catch (fallbackError) {
+        try {
+          sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
+        } catch (cleanupError) {
+          // Ignore storage cleanup failures.
+        }
+        return { ok: false, usedFallback: false };
+      }
+    }
+  }
+
   function applyToModel() {
     const targetModelPath = getSelectedModelPath();
     if (!targetModelPath) {
       setStatus('No target model selected. Choose a model in Target model file first.', 'warning');
+      return;
+    }
+
+    const outputIssues = collectRequiredOutputIssues();
+    if (outputIssues.length) {
+      const preview = outputIssues.slice(0, 2).join(' ');
+      const suffix = outputIssues.length > 2 ? ` (+${outputIssues.length - 2} more)` : '';
+      setStatus(`Set Output name(s) for generated columns before applying. ${preview}${suffix}`, 'warning');
       return;
     }
 
@@ -725,32 +823,48 @@
     }
 
     const generatedColumns = getGeneratedColumns().map(col => col.name);
+    const launchId = String(launchContext?.launchId || '').trim();
     const targetProjectId = String(launchContext?.projectId || CURRENT_PROJECT_ID || '').trim();
-
-    try {
-      sessionStorage.setItem(PENDING_TRANSFORMER_KEY, JSON.stringify({
-        projectId: targetProjectId,
-        modelPath: targetModelPath,
-        transformations,
-        generatedColumns
-      }));
-    } catch (e) {
-      setStatus('Could not store transformer payload for model handoff.', 'danger');
-      return;
-    }
+    const targetLevels = getTargetLevels();
+    const sourceScope = getEffectiveSourceScope();
 
     if (EMBEDDED_MODE) {
       try {
+        try {
+          sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
+        } catch (cleanupError) {
+          // Ignore stale payload cleanup failures.
+        }
         window.parent.postMessage({
           type: TRANSFORMER_APPLIED_EVENT,
+          launchId,
           projectId: targetProjectId,
-          modelPath: targetModelPath
+          modelPath: targetModelPath,
+          transformations,
+          generatedColumns,
+          targetLevels,
+          sourceScope
         }, window.location.origin);
       } catch (e) {
         setStatus('Transformer payload prepared, but parent editor could not be notified.', 'warning');
         return;
       }
-      setStatus('Transformer applied to current model editor context.', 'success');
+      setStatus(`Transformer applied for ${targetLevels.join(', ')} node level(s). Design Matrix is unchanged; generated outputs are available for manual Model.X selection.`, 'success');
+      return;
+    }
+
+    const stored = persistPendingTransformerPayload({
+      launchId,
+      projectId: targetProjectId,
+      modelPath: targetModelPath,
+      transformations,
+      generatedColumns,
+      targetLevels,
+      sourceScope,
+      appliedAt: Date.now()
+    });
+    if (!stored.ok) {
+      setStatus('Could not store transformer payload for model handoff.', 'danger');
       return;
     }
 
@@ -839,9 +953,12 @@
     }).join('');
 
     const selectedPath = normalizeFsPath(select.value);
-    const nextSelected = selectedPath && deduped.includes(selectedPath)
-      ? selectedPath
-      : deduped[0];
+    const preferredSelected = normalizedPreferred
+      ? deduped.find(path => areModelPathsEquivalent(path, normalizedPreferred)) || ''
+      : '';
+    const nextSelected = preferredSelected
+      || (selectedPath && deduped.includes(selectedPath) ? selectedPath : '')
+      || deduped[0];
     select.value = nextSelected;
   }
 
@@ -851,7 +968,60 @@
   }
 
   function normalizeFsPath(path) {
-    return String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
+    const raw = String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
+    if (!raw) return '';
+    const unified = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
+    const absolute = unified.startsWith('/');
+    const parts = [];
+    unified.split('/').forEach(part => {
+      if (!part || part === '.') return;
+      if (part === '..') {
+        if (parts.length && parts[parts.length - 1] !== '..') {
+          parts.pop();
+        } else if (!absolute) {
+          parts.push(part);
+        }
+        return;
+      }
+      parts.push(part);
+    });
+    const normalized = parts.join('/');
+    return absolute ? `/${normalized}` : normalized;
+  }
+
+  function stripPathQueryAndHash(path) {
+    const normalized = normalizeFsPath(path);
+    if (!normalized) return '';
+    const hashIdx = normalized.indexOf('#');
+    const noHash = hashIdx >= 0 ? normalized.slice(0, hashIdx) : normalized;
+    const queryIdx = noHash.indexOf('?');
+    return queryIdx >= 0 ? noHash.slice(0, queryIdx) : noHash;
+  }
+
+  function safeDecodePath(path) {
+    try {
+      return decodeURIComponent(path);
+    } catch (e) {
+      return path;
+    }
+  }
+
+  function areModelPathsEquivalent(pathA, pathB) {
+    const leftRaw = stripPathQueryAndHash(pathA);
+    const rightRaw = stripPathQueryAndHash(pathB);
+    if (!leftRaw || !rightRaw) return false;
+
+    const left = normalizeFsPath(safeDecodePath(leftRaw));
+    const right = normalizeFsPath(safeDecodePath(rightRaw));
+    if (!left || !right) return false;
+    if (left === right) return true;
+
+    const leftAbs = left.startsWith('/');
+    const rightAbs = right.startsWith('/');
+    if (!leftAbs && rightAbs && right.endsWith(`/${left}`)) return true;
+    if (!rightAbs && leftAbs && left.endsWith(`/${right}`)) return true;
+
+    return false;
   }
 
   function getParentPath(path) {
@@ -877,6 +1047,86 @@
       return value.split(',').map(item => item.trim()).filter(Boolean);
     }
     return [];
+  }
+
+  function normalizeNodeLevel(level) {
+    const raw = String(level || '').trim().toLowerCase();
+    if (!raw) return '';
+    return NODE_LEVEL_OPTIONS.find(option => option.toLowerCase() === raw) || '';
+  }
+
+  function getSelectedTargetLevel() {
+    const raw = String(document.getElementById('select-target-level')?.value || 'Run').trim();
+    if (raw === 'All') return 'All';
+    return normalizeNodeLevel(raw) || 'Run';
+  }
+
+  function getTargetLevels() {
+    const selected = getSelectedTargetLevel();
+    return selected === 'All' ? [...NODE_LEVEL_OPTIONS] : [selected];
+  }
+
+  function getSelectedSourceScope() {
+    const raw = String(document.getElementById('select-source-scope')?.value || 'auto').trim().toLowerCase();
+    if (['auto', 'events', 'participants', 'combined'].includes(raw)) return raw;
+    return 'auto';
+  }
+
+  function getEffectiveSourceScope() {
+    const selected = getSelectedSourceScope();
+    if (selected !== 'auto') return selected;
+    const targetLevel = getSelectedTargetLevel();
+    if (targetLevel === 'All') return 'combined';
+    return targetLevel === 'Run' ? 'events' : 'participants';
+  }
+
+  function updateScopeHint() {
+    const hint = document.getElementById('scope-hint');
+    if (!hint) return;
+    const targetLevels = getTargetLevels();
+    const sourceScope = getEffectiveSourceScope();
+    const targetText = targetLevels.length === NODE_LEVEL_OPTIONS.length
+      ? 'all levels'
+      : targetLevels.join(', ');
+    const sourceText = sourceScope === 'events'
+      ? 'events.tsv'
+      : sourceScope === 'participants'
+        ? 'participants.tsv'
+        : 'events.tsv + participants.tsv';
+    hint.textContent = `Target: ${targetText}. Active variable source: ${sourceText}.`;
+  }
+
+  function updateLaunchContextHint() {
+    const hint = document.getElementById('launch-context-hint');
+    if (!hint) return;
+
+    if (!launchNodeLevel) {
+      hint.textContent = '';
+      hint.classList.add('d-none');
+      return;
+    }
+
+    const selectedLevel = getSelectedTargetLevel();
+    if (selectedLevel !== launchNodeLevel) {
+      hint.textContent = '';
+      hint.classList.add('d-none');
+      return;
+    }
+
+    hint.textContent = `Preselected from active node: target level ${launchNodeLevel}.`;
+    hint.classList.remove('d-none');
+  }
+
+  function mergeColumnValueMaps(left, right) {
+    const merged = {};
+    Object.entries(left || {}).forEach(([key, values]) => {
+      merged[key] = normalizeStringArray(values);
+    });
+    Object.entries(right || {}).forEach(([key, values]) => {
+      const prior = merged[key] || [];
+      merged[key] = Array.from(new Set([...prior, ...normalizeStringArray(values)]));
+    });
+    return merged;
   }
 
   // ================================================================
@@ -938,16 +1188,25 @@
     const model = structuredClone(baseModel || {});
     const transformations = getTransformerPayload();
     const generatedColumns = normalizeStringArray(getGeneratedColumns().map(col => col.name));
-    const runNodes = Array.isArray(model.Nodes)
-      ? model.Nodes.filter(node => node && typeof node === 'object' && String(node.Level || '').trim() === 'Run')
+    const targetLevels = getTargetLevels();
+    const targetNodes = Array.isArray(model.Nodes)
+      ? model.Nodes.filter(node => {
+          if (!node || typeof node !== 'object') return false;
+          const level = normalizeNodeLevel(node.Level);
+          return targetLevels.includes(level);
+        })
       : [];
 
-    if (!runNodes.length) {
+    if (!targetNodes.length) {
+      const targetText = targetLevels.length === NODE_LEVEL_OPTIONS.length
+        ? 'selected'
+        : targetLevels.join('/');
       return {
         model,
-        runNodeCount: 0,
+        targetNodeCount: 0,
+        targetLevels,
         generatedColumns,
-        warning: 'Model has no Run-level nodes. Transformer output has nowhere to attach.'
+        warning: `Model has no ${targetText} node(s). Transformer output has nowhere to attach.`
       };
     }
 
@@ -955,7 +1214,7 @@
       ? structuredClone(transformations.Instructions)
       : [];
 
-    runNodes.forEach(node => {
+    targetNodes.forEach(node => {
       const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
         ? node.Transformations
         : {};
@@ -970,7 +1229,8 @@
 
     return {
       model,
-      runNodeCount: runNodes.length,
+      targetNodeCount: targetNodes.length,
+      targetLevels,
       generatedColumns,
       warning: ''
     };
@@ -1000,7 +1260,8 @@
       if (runId !== liveValidationRunId) return;
 
       const details = [];
-      details.push(`Run-level nodes affected: ${preview.runNodeCount}`);
+      details.push(`Target levels: ${preview.targetLevels.join(', ')}`);
+      details.push(`Nodes affected: ${preview.targetNodeCount}`);
       details.push(`Generated columns: ${preview.generatedColumns.length}`);
       if (preview.warning) details.push(preview.warning);
 
@@ -1020,58 +1281,225 @@
   // ================================================================
   // SCAN EVENTS
   // ================================================================
-  async function scanEvents(forceNewPreview = false) {
+  function setPreviewScopeMode(scope) {
+    const isEventsPreview = scope === 'events' || scope === 'combined';
+    const rowsLabel = document.querySelector('label[for="preview-row-limit"]');
+    const rowsSelect = document.getElementById('preview-row-limit');
+    const hideNa = document.getElementById('preview-hide-na-cols');
+    const hideNaLabel = hideNa ? hideNa.closest('label') : null;
+    const resampleBtn = document.getElementById('btn-resample');
+
+    if (rowsSelect) rowsSelect.disabled = !isEventsPreview;
+    if (hideNa) hideNa.disabled = !isEventsPreview;
+    if (resampleBtn) resampleBtn.disabled = !isEventsPreview;
+    if (rowsLabel) rowsLabel.classList.toggle('text-muted', !isEventsPreview);
+    if (hideNaLabel) hideNaLabel.classList.toggle('text-muted', !isEventsPreview);
+    if (resampleBtn) {
+      resampleBtn.title = isEventsPreview
+        ? 'Load a different events file'
+        : 'Participants source has no file-level resampling';
+    }
+  }
+
+  function buildParticipantsColumnResult(participantsInfo) {
+    const info = (participantsInfo && typeof participantsInfo === 'object')
+      ? participantsInfo
+      : {};
+    const columns = normalizeStringArray(info.columns);
+    const sampleValues = (info.sample_values && typeof info.sample_values === 'object')
+      ? info.sample_values
+      : {};
+    const valuesMap = {};
+    columns.forEach(column => {
+      valuesMap[column] = normalizeStringArray(sampleValues[column]);
+    });
+    return {
+      columns,
+      valuesMap,
+      sampleStatus: String(info.sample_status || 'missing-file').trim() || 'missing-file'
+    };
+  }
+
+  function applyEventsScanResult(data, selectedTask = '') {
+    const taskSel = document.getElementById('select-task');
+    const eventsFile = document.getElementById('input-events-file').value.trim();
+
+    availableColumns = data.columns || [];
+    columnValues = data.columns_by_type || {};
+    refreshPipelineColumnValues();
+    lastScanData = data;
+    currentPreviewFile = eventsFile || data.sample_file || null;
+    renderColumnsPool();
+    renderEventsPreview(data);
+
+    taskSel.innerHTML = '<option value="">All tasks</option>';
+    (data.tasks || []).forEach(t => {
+      const o = document.createElement('option');
+      o.value = t;
+      o.textContent = t;
+      taskSel.appendChild(o);
+    });
+    const effectiveTask = String(data.selected_task || selectedTask || '').trim();
+    if (effectiveTask && (data.tasks || []).includes(effectiveTask)) {
+      taskSel.value = effectiveTask;
+    }
+
+    return effectiveTask;
+  }
+
+  async function scanEventsColumns(forceNewPreview = false) {
     const bidsDir = document.getElementById('input-bids-dir').value.trim();
     const eventsFile = document.getElementById('input-events-file').value.trim();
     const taskSel = document.getElementById('select-task');
     const selectedTask = taskSel.value.trim();
-    if (!bidsDir && !eventsFile) { setStatus('Enter a BIDS directory or select a single events.tsv file.', 'warning'); return; }
-    setStatus('Scanning events files…', 'info');
-    try {
-      const payload = {
-        preview_max_rows: getPreviewMaxRows()
-      };
-      if (bidsDir) payload.bids_dir = bidsDir;
-      if (selectedTask) payload.task_filter = selectedTask;
-      if (eventsFile) {
-        payload.events_file = eventsFile;
-        // A selected single file must dominate preview selection.
-        payload.preview_file = eventsFile;
-      } else if (!forceNewPreview && currentPreviewFile) {
-        payload.preview_file = currentPreviewFile;
-      }
 
-      const res = await fetch('/api/scan_events_columns', {
+    if (!bidsDir && !eventsFile) {
+      setStatus('Enter a BIDS directory or select a single events.tsv file.', 'warning');
+      return;
+    }
+
+    setStatus('Scanning events files…', 'info');
+    setPreviewScopeMode('events');
+
+    const payload = {
+      preview_max_rows: getPreviewMaxRows()
+    };
+    if (bidsDir) payload.bids_dir = bidsDir;
+    if (selectedTask) payload.task_filter = selectedTask;
+    if (eventsFile) {
+      payload.events_file = eventsFile;
+      payload.preview_file = eventsFile;
+    } else if (!forceNewPreview && currentPreviewFile) {
+      payload.preview_file = currentPreviewFile;
+    }
+
+    const res = await fetch('/api/scan_events_columns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    const effectiveTask = applyEventsScanResult(data, selectedTask);
+    const scopeText = effectiveTask
+      ? `for task "${effectiveTask}"`
+      : `across ${(data.tasks || []).length} task(s)`;
+    setStatus(`Found ${availableColumns.length} columns ${scopeText} — ${data.events_files} events file(s).`, 'success');
+    scheduleLiveModelValidation();
+  }
+
+  async function scanParticipantsColumns() {
+    const bidsDir = document.getElementById('input-bids-dir').value.trim();
+    if (!bidsDir) {
+      setStatus('Set BIDS Folder first to load participants.tsv columns.', 'warning');
+      return;
+    }
+
+    setStatus('Scanning participants.tsv columns…', 'info');
+    setPreviewScopeMode('participants');
+
+    const res = await fetch(`/api/bids_entities?path=${encodeURIComponent(bidsDir)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Could not scan BIDS entities.');
+    }
+
+    const participantsResult = buildParticipantsColumnResult(data.participants || {});
+    availableColumns = participantsResult.columns;
+    columnValues = participantsResult.valuesMap;
+    refreshPipelineColumnValues();
+    lastScanData = null;
+    currentPreviewFile = null;
+    renderColumnsPool();
+    renderParticipantsPreview(data.participants || {}, bidsDir);
+
+    const taskSel = document.getElementById('select-task');
+    taskSel.innerHTML = '<option value="">— not used for participants scope —</option>';
+
+    if (participantsResult.sampleStatus === 'present') {
+      setStatus(`Found ${availableColumns.length} participants.tsv column(s).`, 'success');
+    } else {
+      setStatus(`participants.tsv status: ${participantsResult.sampleStatus}. Found ${availableColumns.length} usable column(s).`, 'warning');
+    }
+    scheduleLiveModelValidation();
+  }
+
+  async function scanCombinedColumns(forceNewPreview = false) {
+    const bidsDir = document.getElementById('input-bids-dir').value.trim();
+    if (!bidsDir) {
+      setStatus('Combined scope requires BIDS Folder for participants.tsv. Falling back to events scope.', 'warning');
+      await scanEventsColumns(forceNewPreview);
+      return;
+    }
+
+    setStatus('Scanning events + participants columns…', 'info');
+    setPreviewScopeMode('combined');
+
+    const taskSel = document.getElementById('select-task');
+    const selectedTask = taskSel.value.trim();
+    const eventsFile = document.getElementById('input-events-file').value.trim();
+    const payload = {
+      preview_max_rows: getPreviewMaxRows(),
+      bids_dir: bidsDir
+    };
+    if (selectedTask) payload.task_filter = selectedTask;
+    if (eventsFile) {
+      payload.events_file = eventsFile;
+      payload.preview_file = eventsFile;
+    } else if (!forceNewPreview && currentPreviewFile) {
+      payload.preview_file = currentPreviewFile;
+    }
+
+    const [eventsRes, participantsRes] = await Promise.all([
+      fetch('/api/scan_events_columns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.error) { setStatus(data.error, 'danger'); return; }
+      }),
+      fetch(`/api/bids_entities?path=${encodeURIComponent(bidsDir)}`)
+    ]);
+    const eventsData = await eventsRes.json();
+    const participantsData = await participantsRes.json();
 
-      availableColumns = data.columns || [];
-      columnValues = data.columns_by_type || {};
-      refreshPipelineColumnValues();
-      lastScanData = data;
-      currentPreviewFile = eventsFile || data.sample_file || null;
-      renderColumnsPool();
-      renderEventsPreview(data);
+    if (!eventsRes.ok || eventsData.error) {
+      throw new Error(eventsData.error || 'Could not scan events columns.');
+    }
+    if (!participantsRes.ok || participantsData.error) {
+      throw new Error(participantsData.error || 'Could not scan participants columns.');
+    }
 
-      taskSel.innerHTML = '<option value="">All tasks</option>';
-      (data.tasks || []).forEach(t => {
-        const o = document.createElement('option');
-        o.value = t; o.textContent = t;
-        taskSel.appendChild(o);
-      });
-      const effectiveTask = String(data.selected_task || selectedTask || '').trim();
-      if (effectiveTask && (data.tasks || []).includes(effectiveTask)) {
-        taskSel.value = effectiveTask;
+    const effectiveTask = applyEventsScanResult(eventsData, selectedTask);
+    const eventColumns = [...availableColumns];
+    const eventValuesMap = { ...columnValues };
+    const participantsResult = buildParticipantsColumnResult(participantsData.participants || {});
+
+    availableColumns = Array.from(new Set([...eventColumns, ...participantsResult.columns]));
+    columnValues = mergeColumnValueMaps(eventValuesMap, participantsResult.valuesMap);
+    refreshPipelineColumnValues();
+    renderColumnsPool();
+
+    const scopeText = effectiveTask
+      ? `for task "${effectiveTask}"`
+      : `across ${(eventsData.tasks || []).length} task(s)`;
+    setStatus(
+      `Found ${availableColumns.length} combined columns (${eventColumns.length} events + ${participantsResult.columns.length} participants) ${scopeText}.`,
+      'success'
+    );
+    scheduleLiveModelValidation();
+  }
+
+  async function scanEvents(forceNewPreview = false) {
+    const sourceScope = getEffectiveSourceScope();
+    updateScopeHint();
+    try {
+      if (sourceScope === 'participants') {
+        await scanParticipantsColumns();
+      } else if (sourceScope === 'combined') {
+        await scanCombinedColumns(forceNewPreview);
+      } else {
+        await scanEventsColumns(forceNewPreview);
       }
-
-      const scopeText = effectiveTask
-        ? `for task "${effectiveTask}"`
-        : `across ${(data.tasks || []).length} task(s)`;
-      setStatus(`Found ${availableColumns.length} columns ${scopeText} — ${data.events_files} events file(s).`, 'success');
     } catch (err) {
       setStatus('Error: ' + err.message, 'danger');
     }
@@ -1159,6 +1587,48 @@
     table.innerHTML = '';
     table.appendChild(thead);
     table.appendChild(tbody);
+  }
+
+  function renderParticipantsPreview(participantsInfo, bidsDir) {
+    const card = document.getElementById('events-preview-card');
+    const label = document.getElementById('events-file-label');
+    const meta = document.getElementById('events-preview-meta');
+    const table = document.getElementById('events-preview-table');
+    const body = document.getElementById('events-preview-body');
+    const toggle = document.getElementById('events-preview-toggle');
+
+    const info = (participantsInfo && typeof participantsInfo === 'object') ? participantsInfo : {};
+    const columns = normalizeStringArray(info.columns);
+    const sampleValues = (info.sample_values && typeof info.sample_values === 'object') ? info.sample_values : {};
+    const sampleStatus = String(info.sample_status || 'missing-file').trim() || 'missing-file';
+    const fileLabel = bidsDir ? `${bidsDir.replace(/\/$/, '')}/participants.tsv` : 'participants.tsv';
+
+    card.style.display = '';
+    body.style.display = '';
+    toggle.classList.add('open');
+
+    label.textContent = fileLabel;
+    label.title = fileLabel;
+    meta.textContent = `${columns.length} column(s) • status: ${sampleStatus}`;
+
+    if (!columns.length) {
+      table.innerHTML = `
+        <thead><tr><th>participants.tsv</th></tr></thead>
+        <tbody><tr><td class="na-cell">No participants columns detected. Check participants.tsv in the selected BIDS folder.</td></tr></tbody>
+      `;
+      return;
+    }
+
+    const rows = columns.map(column => {
+      const values = normalizeStringArray(sampleValues[column]);
+      const renderedValues = values.length ? values.slice(0, 12).join(', ') : 'n/a';
+      return `<tr><td>${escHtml(column)}</td><td>${escHtml(renderedValues)}</td></tr>`;
+    }).join('');
+
+    table.innerHTML = `
+      <thead><tr><th>Column</th><th>Sample values</th></tr></thead>
+      <tbody>${rows}</tbody>
+    `;
   }
 
   async function resamplePreview() {
@@ -1813,7 +2283,7 @@
           </div>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="assigned_col1, assigned_col2">
         </div>`;
 
@@ -1830,7 +2300,7 @@
           <input type="text" class="form-control form-control-sm" data-field="Query" placeholder="trial_type == 'value'">
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional — default: in-place)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="filtered_col">
         </div>`;
 
@@ -1841,7 +2311,7 @@
           <div class="op-field-hint">Drop multiple columns — they will be concatenated with <code>_</code>.</div>
         </div>
         <div>
-          <div class="op-field-label">Output Name</div>
+          <div class="op-field-label">Output Name <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="e.g. trial_combined">
         </div>`;
 
@@ -1874,7 +2344,7 @@
           <button class="btn-add-row">+ Add row</button>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="replaced_col">
         </div>`;
 
@@ -1896,7 +2366,7 @@
           <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="clean_col1, clean_col2">
         </div>`;
 
@@ -1910,7 +2380,7 @@
           <div class="col-drop-zone" data-field="By" data-mode="multi"></div>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="split_col1, split_col2">
         </div>`;
 
@@ -1925,7 +2395,7 @@
           <label class="form-check-label small" for="${id}-cumulative">Cumulative labels</label>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="trial_type_label">
         </div>`;
 
@@ -1989,7 +2459,7 @@
           </div>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="scaled_col">
         </div>`;
 
@@ -2003,7 +2473,7 @@
           <label class="form-check-label small" for="${id}-omitnan">Omit NaN</label>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="mean_col">
         </div>`;
 
@@ -2017,7 +2487,7 @@
           <label class="form-check-label small" for="${id}-std-omitnan">Omit NaN</label>
         </div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="std_col">
         </div>`;
 
@@ -2066,7 +2536,7 @@
         </div>
         <div class="op-field-hint">Tip: set both min and max for ranges like response_time between 0.2 and 5 seconds.</div>
         <div>
-          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="thresholded_col">
         </div>`;
 
@@ -2100,6 +2570,7 @@
   // JSON GENERATION
   // ================================================================
   function updateGeneratedJSON() {
+    clearRequiredOutputMarkers();
     const json = getTransformerPayload();
     const instructions = json.Instructions;
     refreshPipelineColumnValues();
@@ -2219,6 +2690,28 @@
       .split(',')
       .map(token => token.trim())
       .filter(Boolean);
+  }
+
+  function clearRequiredOutputMarkers() {
+    document.querySelectorAll('#op-pipeline .op-card').forEach(card => card.classList.remove('op-missing-output'));
+    document.querySelectorAll('#op-pipeline .op-card input[data-field="Output"]').forEach(input => input.classList.remove('is-invalid'));
+  }
+
+  function collectRequiredOutputIssues() {
+    clearRequiredOutputMarkers();
+    const issues = [];
+    document.querySelectorAll('#op-pipeline .op-card').forEach((card, index) => {
+      const opType = String(card.dataset.opType || '').trim();
+      if (!REQUIRED_OUTPUT_OPS.has(opType)) return;
+      const outputInput = card.querySelector('input[data-field="Output"]');
+      const outputTokens = parseCsvTokens(outputInput?.value || '');
+      if (outputTokens.length) return;
+
+      card.classList.add('op-missing-output');
+      if (outputInput) outputInput.classList.add('is-invalid');
+      issues.push(`Op ${index + 1} (${opType}) is missing Output.`);
+    });
+    return issues;
   }
 
   function parseNumericCsv(value) {
