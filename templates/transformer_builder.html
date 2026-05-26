@@ -521,11 +521,16 @@
       <!-- Munge buttons -->
       <div class="add-ops-label">Munge</div>
       <div class="add-ops-grid">
+        <button class="btn-add-op munge" data-op="Assign"      data-cat="munge">+ Assign</button>
         <button class="btn-add-op munge" data-op="Filter"      data-cat="munge">+ Filter</button>
         <button class="btn-add-op munge" data-op="Concatenate" data-cat="munge">+ Concatenate</button>
         <button class="btn-add-op munge" data-op="Factor"      data-cat="munge">+ Factor</button>
         <button class="btn-add-op munge" data-op="Replace"     data-cat="munge">+ Replace</button>
         <button class="btn-add-op munge" data-op="Copy"        data-cat="munge">+ Copy</button>
+        <button class="btn-add-op munge" data-op="DropNA"      data-cat="munge">+ DropNA</button>
+        <button class="btn-add-op munge" data-op="Split"       data-cat="munge">+ Split</button>
+        <button class="btn-add-op munge" data-op="LabelIdenticalRows" data-cat="munge">+ Label Rows</button>
+        <button class="btn-add-op munge" data-op="MergeIdenticalRows" data-cat="munge">+ Merge Rows</button>
         <button class="btn-add-op munge" data-op="Select"      data-cat="munge">+ Select</button>
         <button class="btn-add-op munge" data-op="Delete"      data-cat="munge">+ Delete</button>
       </div>
@@ -533,8 +538,12 @@
       <!-- Compute buttons -->
       <div class="add-ops-label">Compute</div>
       <div class="add-ops-grid">
+        <button class="btn-add-op compute" data-op="Constant"  data-cat="compute">+ Constant</button>
+        <button class="btn-add-op compute" data-op="Product"   data-cat="compute">+ Product</button>
         <button class="btn-add-op compute" data-op="Scale"     data-cat="compute">+ Scale</button>
         <button class="btn-add-op compute" data-op="Mean"      data-cat="compute">+ Mean</button>
+        <button class="btn-add-op compute" data-op="Std"       data-cat="compute">+ Std</button>
+        <button class="btn-add-op compute" data-op="Sum"       data-cat="compute">+ Sum</button>
         <button class="btn-add-op compute" data-op="Threshold" data-cat="compute">+ Threshold</button>
       </div>
 
@@ -563,8 +572,8 @@
         <div class="text-muted small">Add operations to see regressors…</div>
       </div>
       <div class="preview-label">Generated JSON</div>
-      <div class="json-output" id="json-output">{
-  "Transformer": "pybids-transforms-v1",
+        <div class="json-output" id="json-output">{
+      "Transformer": "bidspm",
   "Instructions": []
 }</div>
     </div>
@@ -693,11 +702,11 @@
   function getTransformerPayload() {
     const instructions = [];
     document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const op = extractOp(card);
-      if (op) instructions.push(op);
+      const ops = extractOpsFromCard(card);
+      if (ops.length) instructions.push(...ops);
     });
     return {
-      Transformer: 'pybids-transforms-v1',
+      Transformer: 'bidspm',
       Instructions: instructions
     };
   }
@@ -953,7 +962,7 @@
       const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
       node.Transformations = {
         ...existingTransformations,
-        Transformer: transformations.Transformer || 'pybids-transforms-v1',
+        Transformer: transformations.Transformer || 'bidspm',
         Instructions: instructions,
         GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
       };
@@ -1337,9 +1346,8 @@
     });
 
     document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const op = extractOp(card);
-      if (!op) return;
-      applyOperationValueDomains(valuesMap, op);
+      const ops = extractOpsFromCard(card);
+      ops.forEach(op => applyOperationValueDomains(valuesMap, op));
     });
 
     return valuesMap;
@@ -1393,6 +1401,76 @@
           if (!outputName || !sourceName) return;
           valuesMap[outputName] = [...getDomainFromMap(valuesMap, sourceName)];
         });
+        return;
+      }
+      case 'Assign': {
+        const targetColumns = normalizeColumnList(op.Target);
+        if (!inputColumns.length || !targetColumns.length) return;
+        const assigned = targetColumns.map((targetName, index) => {
+          const sourceName = inputColumns[index] || inputColumns[inputColumns.length - 1];
+          return { targetName, sourceName };
+        });
+
+        if (outputColumns.length) {
+          assigned.forEach(({ sourceName }, index) => {
+            const outputName = outputColumns[index] || outputColumns[outputColumns.length - 1];
+            if (!outputName || !sourceName) return;
+            valuesMap[outputName] = [...getDomainFromMap(valuesMap, sourceName)];
+          });
+          return;
+        }
+
+        assigned.forEach(({ targetName, sourceName }) => {
+          if (!targetName || !sourceName) return;
+          valuesMap[targetName] = [...getDomainFromMap(valuesMap, sourceName)];
+        });
+        return;
+      }
+      case 'DropNA': {
+        if (!targetColumn) return;
+        valuesMap[targetColumn] = [...getDomainFromMap(valuesMap, inputColumn)];
+        return;
+      }
+      case 'Split': {
+        if (!inputColumns.length || !outputColumns.length) return;
+        outputColumns.forEach(outputName => {
+          if (!outputName) return;
+          valuesMap[outputName] = [...getDomainFromMap(valuesMap, inputColumn)];
+        });
+        return;
+      }
+      case 'LabelIdenticalRows': {
+        if (!inputColumns.length) return;
+        if (outputColumns.length) {
+          outputColumns.forEach(outputName => {
+            if (!outputName) return;
+            valuesMap[outputName] = [];
+          });
+          return;
+        }
+        inputColumns.forEach(col => {
+          valuesMap[`${col}_label`] = [];
+        });
+        return;
+      }
+      case 'MergeIdenticalRows': {
+        return;
+      }
+      case 'Constant': {
+        const outputName = outputColumns[0];
+        if (!outputName) return;
+        const rawValue = op.Value;
+        const constantValue = rawValue === undefined || rawValue === null || rawValue === ''
+          ? '1'
+          : String(rawValue);
+        valuesMap[outputName] = [constantValue];
+        return;
+      }
+      case 'Product':
+      case 'Std':
+      case 'Sum': {
+        if (!targetColumn) return;
+        valuesMap[targetColumn] = [...getDomainFromMap(valuesMap, inputColumn)];
         return;
       }
       case 'Scale':
@@ -1714,6 +1792,31 @@
   function getOpFieldsHTML(opType, id) {
     switch (opType) {
 
+      case 'Assign': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div>
+          <div class="op-field-label">Target Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Target" data-mode="multi"></div>
+          <div class="op-field-hint">Input and Target are mapped 1-to-1 in order.</div>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <div class="op-field-label">InputAttr <span class="text-muted fw-normal">(optional)</span></div>
+            <input type="text" class="form-control form-control-sm" data-field="InputAttr" placeholder="value">
+          </div>
+          <div class="col-md-6">
+            <div class="op-field-label">TargetAttr <span class="text-muted fw-normal">(optional)</span></div>
+            <input type="text" class="form-control form-control-sm" data-field="TargetAttr" placeholder="value">
+          </div>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="assigned_col1, assigned_col2">
+        </div>`;
+
       case 'Filter': return `
         <div>
           <div class="op-field-label">Input <span class="text-danger">*</span></div>
@@ -1787,6 +1890,76 @@
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="new_col1, new_col2">
         </div>`;
 
+      case 'DropNA': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="clean_col1, clean_col2">
+        </div>`;
+
+      case 'Split': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div>
+          <div class="op-field-label">By Column(s) <span class="text-muted fw-normal">(optional)</span></div>
+          <div class="col-drop-zone" data-field="By" data-mode="multi"></div>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="split_col1, split_col2">
+        </div>`;
+
+      case 'LabelIdenticalRows': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+          <div class="op-field-hint">Default generated labels use the suffix <code>_label</code>.</div>
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" data-field="Cumulative" id="${id}-cumulative">
+          <label class="form-check-label small" for="${id}-cumulative">Cumulative labels</label>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="trial_type_label">
+        </div>`;
+
+      case 'MergeIdenticalRows': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+          <div class="op-field-hint">Merges consecutive identical rows for the selected column(s).</div>
+        </div>`;
+
+      case 'Constant': return `
+        <div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="constant_col">
+        </div>
+        <div>
+          <div class="op-field-label">Value <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Value" placeholder="1">
+        </div>`;
+
+      case 'Product': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-product-omitnan">
+          <label class="form-check-label small" for="${id}-product-omitnan">Omit NaN</label>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="product_col">
+        </div>`;
+
       case 'Select': return `
         <div>
           <div class="op-field-label">Columns to Keep <span class="text-danger">*</span></div>
@@ -1834,14 +2007,52 @@
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="mean_col">
         </div>`;
 
+      case 'Std': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-std-omitnan">
+          <label class="form-check-label small" for="${id}-std-omitnan">Omit NaN</label>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="std_col">
+        </div>`;
+
+      case 'Sum': return `
+        <div>
+          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
+          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
+        </div>
+        <div>
+          <div class="op-field-label">Weights <span class="text-muted fw-normal">(optional comma-separated)</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Weights" placeholder="1, 0.5, -1">
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-sum-omitnan">
+          <label class="form-check-label small" for="${id}-sum-omitnan">Omit NaN</label>
+        </div>
+        <div>
+          <div class="op-field-label">Output <span class="text-danger">*</span></div>
+          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="sum_col">
+        </div>`;
+
       case 'Threshold': return `
         <div>
           <div class="op-field-label">Input <span class="text-danger">*</span></div>
           <div class="col-drop-zone" data-field="Input" data-mode="single"></div>
         </div>
-        <div>
-          <div class="op-field-label">Threshold value</div>
-          <input type="number" class="form-control form-control-sm" data-field="Threshold" value="0" step="any">
+        <div class="row g-2">
+          <div class="col-md-6">
+            <div class="op-field-label">Min threshold <span class="text-muted fw-normal">(keep values >= min)</span></div>
+            <input type="number" class="form-control form-control-sm" data-field="MinThreshold" step="any" placeholder="0.2">
+          </div>
+          <div class="col-md-6">
+            <div class="op-field-label">Max threshold <span class="text-muted fw-normal">(keep values <= max)</span></div>
+            <input type="number" class="form-control form-control-sm" data-field="MaxThreshold" step="any" placeholder="5">
+          </div>
         </div>
         <div class="d-flex gap-3 mt-1">
           <div class="form-check">
@@ -1849,10 +2060,11 @@
             <label class="form-check-label small" for="${id}-bin">Binarize</label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" data-field="Above" id="${id}-above" checked>
-            <label class="form-check-label small" for="${id}-above">Keep above</label>
+            <input class="form-check-input" type="checkbox" data-field="Signed" id="${id}-signed" checked>
+            <label class="form-check-label small" for="${id}-signed">Signed threshold</label>
           </div>
         </div>
+        <div class="op-field-hint">Tip: set both min and max for ranges like response_time between 0.2 and 5 seconds.</div>
         <div>
           <div class="op-field-label">Output <span class="text-muted fw-normal">(optional)</span></div>
           <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="thresholded_col">
@@ -2002,7 +2214,75 @@
     });
   }
 
-  function extractOp(card) {
+  function parseCsvTokens(value) {
+    return String(value || '')
+      .split(',')
+      .map(token => token.trim())
+      .filter(Boolean);
+  }
+
+  function parseNumericCsv(value) {
+    return parseCsvTokens(value)
+      .map(token => Number(token))
+      .filter(num => Number.isFinite(num));
+  }
+
+  function normalizeThresholdBound(value) {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function createThresholdInstruction(input, threshold, above, output = '', options = {}) {
+    const { signed = true, binarize = false } = options;
+    const op = {
+      Name: 'Threshold',
+      Input: input,
+      Threshold: threshold,
+      Above: above
+    };
+
+    if (!signed) op.Signed = false;
+    if (binarize) op.Binarize = true;
+
+    const out = String(output || '').trim();
+    if (out) op.Output = out;
+
+    return op;
+  }
+
+  function buildThresholdOps(op, card) {
+    const input = typeof op.Input === 'string' ? op.Input.trim() : '';
+    if (!input) return [];
+
+    const minBound = normalizeThresholdBound(op.MinThreshold);
+    const maxBound = normalizeThresholdBound(op.MaxThreshold);
+    if (minBound === null && maxBound === null) return [];
+
+    const output = String(op.Output || '').trim();
+    const signed = op.Signed !== false;
+    const binarize = op.Binarize === true;
+
+    if (minBound !== null && maxBound !== null) {
+      if (output) {
+        const tempOutput = `${output}__min_${card.id || 'tmp'}`;
+        return [
+          createThresholdInstruction(input, minBound, true, tempOutput, { signed, binarize: false }),
+          createThresholdInstruction(tempOutput, maxBound, false, output, { signed, binarize })
+        ];
+      }
+      return [
+        createThresholdInstruction(input, minBound, true, '', { signed, binarize: false }),
+        createThresholdInstruction(input, maxBound, false, '', { signed, binarize })
+      ];
+    }
+
+    if (minBound !== null) {
+      return [createThresholdInstruction(input, minBound, true, output, { signed, binarize })];
+    }
+
+    return [createThresholdInstruction(input, maxBound, false, output, { signed, binarize })];
+  }
+
+  function extractOpsFromCard(card) {
     const name = card.dataset.opType;
     const op = { Name: name };
 
@@ -2021,7 +2301,6 @@
       if (el.type === 'number') {
         op[field] = parseFloat(val);
       } else if (field === 'Output' && val.includes(',')) {
-        // Comma-separated output for Copy
         op[field] = val.split(',').map(s => s.trim()).filter(Boolean);
       } else {
         op[field] = val;
@@ -2044,7 +2323,42 @@
       if (rows.length) op['Replace'] = rows;
     }
 
-    return Object.keys(op).length > 1 ? op : null;
+    if (name === 'Assign') {
+      if (typeof op.Output === 'string' && op.Output.includes(',')) op.Output = parseCsvTokens(op.Output);
+      if (typeof op.InputAttr === 'string' && op.InputAttr.includes(',')) op.InputAttr = parseCsvTokens(op.InputAttr);
+      if (typeof op.TargetAttr === 'string' && op.TargetAttr.includes(',')) op.TargetAttr = parseCsvTokens(op.TargetAttr);
+    }
+
+    if (name === 'DropNA' || name === 'Std') {
+      if (typeof op.Output === 'string' && op.Output.includes(',')) op.Output = parseCsvTokens(op.Output);
+    }
+
+    if (name === 'Sum' && typeof op.Weights === 'string') {
+      const weights = parseNumericCsv(op.Weights);
+      if (weights.length) {
+        op.Weights = weights;
+      } else {
+        delete op.Weights;
+      }
+    }
+
+    if (name === 'Constant' && typeof op.Value === 'string') {
+      const maybeNumber = Number(op.Value);
+      if (Number.isFinite(maybeNumber) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(op.Value.trim())) {
+        op.Value = maybeNumber;
+      }
+    }
+
+    if (name === 'Threshold') {
+      return buildThresholdOps(op, card);
+    }
+
+    return Object.keys(op).length > 1 ? [op] : [];
+  }
+
+  function extractOp(card) {
+    const ops = extractOpsFromCard(card);
+    return ops.length ? ops[0] : null;
   }
 
   function updateRegressorPreview(instructions) {

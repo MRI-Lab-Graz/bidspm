@@ -393,12 +393,136 @@
   .model-meta-pill-warning { background: #fff7e6; color: #ad6800; }
   .model-meta-pill-neutral { background: #edf5ff; color: #1d4d8f; }
   .model-section-card {
+    --section-border: #d7e7f7;
+    --section-accent: #6fa4e6;
+    --section-header: #eef7ff;
+    --section-header-soft: #f8fbff;
+    --section-header-open: #e5f2ff;
+    --section-header-open-soft: #f1f8ff;
+    --section-icon-bg: #e6f7ff;
+    --section-icon-border: #bae7ff;
+    --section-icon-color: #096dd9;
+    --section-text: #1f4e7a;
+    --section-text-strong: #163f66;
+    --section-label: #18456f;
+    --section-subtitle: #4f6f8d;
+    --section-body-bg: #f7fbff;
+    --section-body-border: #e3eff9;
+    --section-nested-item-bg: #f6f9fd;
+    --section-nested-item-border: #cddceb;
+    --section-nested-head: #eef4fb;
+    --section-nested-head-open: #dfe9f6;
+    --section-nested-head-text: #203d5a;
+    --section-nested-head-open-text: #153a5d;
+    --section-nested-body: #ffffff;
+    --section-nested-body-border: #d8e3ef;
     background: #ffffff;
-    border: 1px solid #d7e7f7;
+    border: 1px solid var(--section-border);
+    border-left: 4px solid var(--section-accent);
     border-radius: 1rem;
     box-shadow: 0 10px 24px rgba(17, 77, 143, 0.08);
     margin-bottom: 0.9rem;
     overflow: visible;
+  }
+  .model-section-card.section-overview {
+    --section-border: #8fb7ec;
+    --section-accent: #3d74c5;
+    --section-header: #d9e8ff;
+    --section-header-soft: #edf4ff;
+    --section-header-open: #c8dcff;
+    --section-header-open-soft: #e0ecff;
+    --section-icon-bg: #cfe1ff;
+    --section-icon-border: #97bbe9;
+    --section-icon-color: #1e4ea5;
+    --section-text: #214f8c;
+    --section-text-strong: #183d73;
+    --section-label: #1d467f;
+    --section-subtitle: #46658f;
+    --section-body-bg: #eef4ff;
+    --section-body-border: #c7dbf4;
+    --section-nested-item-bg: #f8fbff;
+    --section-nested-item-border: #b8cdea;
+    --section-nested-head: #e6efff;
+    --section-nested-head-open: #d3e2ff;
+    --section-nested-head-text: #274e86;
+    --section-nested-head-open-text: #173962;
+    --section-nested-body: #ffffff;
+    --section-nested-body-border: #cbdaf0;
+  }
+  .model-section-card.section-input {
+    --section-border: #89d2c7;
+    --section-accent: #1b8b7d;
+    --section-header: #d8f1ed;
+    --section-header-soft: #eaf9f6;
+    --section-header-open: #c5e8e2;
+    --section-header-open-soft: #ddf3ee;
+    --section-icon-bg: #c6ebe4;
+    --section-icon-border: #8ecfc3;
+    --section-icon-color: #11695f;
+    --section-text: #1c655f;
+    --section-text-strong: #0f534d;
+    --section-label: #145a54;
+    --section-subtitle: #3e7772;
+    --section-body-bg: #edf8f6;
+    --section-body-border: #c3e4de;
+    --section-nested-item-bg: #f5fcfa;
+    --section-nested-item-border: #b7ddd6;
+    --section-nested-head: #def2ee;
+    --section-nested-head-open: #c8e8e2;
+    --section-nested-head-text: #1e5c57;
+    --section-nested-head-open-text: #0f4b46;
+    --section-nested-body: #ffffff;
+    --section-nested-body-border: #cbe7e1;
+  }
+  .model-section-card.section-nodes {
+    --section-border: #9ed0aa;
+    --section-accent: #2f8f44;
+    --section-header: #dbf1df;
+    --section-header-soft: #ecf8ef;
+    --section-header-open: #cce8d3;
+    --section-header-open-soft: #def1e3;
+    --section-icon-bg: #cde9d4;
+    --section-icon-border: #99cbaa;
+    --section-icon-color: #20773a;
+    --section-text: #27653a;
+    --section-text-strong: #1b522c;
+    --section-label: #215b33;
+    --section-subtitle: #467356;
+    --section-body-bg: #eff9f1;
+    --section-body-border: #cce5d2;
+    --section-nested-item-bg: #f6fcf7;
+    --section-nested-item-border: #c0dfc9;
+    --section-nested-head: #e2f2e6;
+    --section-nested-head-open: #cfe8d6;
+    --section-nested-head-text: #2a6038;
+    --section-nested-head-open-text: #1c4c2a;
+    --section-nested-body: #ffffff;
+    --section-nested-body-border: #d1e7d6;
+  }
+  .model-section-card.section-edges {
+    --section-border: #e9c489;
+    --section-accent: #b87408;
+    --section-header: #ffefd7;
+    --section-header-soft: #fff7e8;
+    --section-header-open: #ffe1ba;
+    --section-header-open-soft: #ffedd1;
+    --section-icon-bg: #ffe3bb;
+    --section-icon-border: #e9bf79;
+    --section-icon-color: #9a6204;
+    --section-text: #7c5610;
+    --section-text-strong: #5f410a;
+    --section-label: #6e4d0d;
+    --section-subtitle: #7f6840;
+    --section-body-bg: #fff6e8;
+    --section-body-border: #f0dbb8;
+    --section-nested-item-bg: #fffcf7;
+    --section-nested-item-border: #efd8b0;
+    --section-nested-head: #ffeacc;
+    --section-nested-head-open: #ffdfb1;
+    --section-nested-head-text: #7a5310;
+    --section-nested-head-open-text: #5f3f09;
+    --section-nested-body: #ffffff;
+    --section-nested-body-border: #f0ddb9;
   }
   .model-section-card .dropdown-menu {
     z-index: 1085;
@@ -406,17 +530,17 @@
   .model-section-card .accordion-header { margin: 0; }
   .model-section-toggle {
     align-items: flex-start;
-    background: linear-gradient(90deg, #eef7ff 0%, #f8fbff 100%);
+    background: linear-gradient(90deg, var(--section-header) 0%, var(--section-header-soft) 100%);
     border: 0;
     box-shadow: none;
-    color: #1f4e7a;
+    color: var(--section-text);
     display: flex;
     gap: 0.7rem;
     padding: 0.9rem 1rem;
   }
   .model-section-toggle:not(.collapsed) {
-    background: linear-gradient(90deg, #e5f2ff 0%, #f1f8ff 100%);
-    color: #163f66;
+    background: linear-gradient(90deg, var(--section-header-open) 0%, var(--section-header-open-soft) 100%);
+    color: var(--section-text-strong);
   }
   .model-section-title {
     align-items: flex-start;
@@ -427,10 +551,10 @@
   }
   .model-section-icon {
     align-items: center;
-    background: #e6f7ff;
-    border: 1px solid #bae7ff;
+    background: var(--section-icon-bg);
+    border: 1px solid var(--section-icon-border);
     border-radius: 0.7rem;
-    color: #096dd9;
+    color: var(--section-icon-color);
     display: inline-flex;
     flex-shrink: 0;
     height: 2rem;
@@ -445,14 +569,14 @@
     min-width: 0;
   }
   .model-section-label {
-    color: #18456f;
+    color: var(--section-label);
     display: block;
     font-size: 0.98rem;
     font-weight: 700;
     line-height: 1.2;
   }
   .model-section-subtitle {
-    color: #4f6f8d;
+    color: var(--section-subtitle);
     display: block;
     font-size: 0.76rem;
     line-height: 1.35;
@@ -469,8 +593,8 @@
     min-width: 0;
   }
   .model-section-body {
-    background: #f7fbff;
-    border-top: 1px solid #e3eff9;
+    background: var(--section-body-bg);
+    border-top: 1px solid var(--section-body-border);
     padding: 1rem;
   }
   .model-inline-note {
@@ -524,35 +648,35 @@
   .json-inline-value { flex: 1; min-width: 240px; }
   .json-add-btn { white-space: nowrap; }
   .json-row-actions { min-width: 84px; display: flex; justify-content: flex-end; gap: 0.3rem; }
-  #model-editor-accordion .accordion {
+  .model-section-body .accordion {
     display: flex;
     flex-direction: column;
     gap: 0.7rem;
   }
-  #model-editor-accordion .accordion-item {
-    background: #ffffff;
-    border: 1px solid #dce8f4;
+  .model-section-body .accordion-item {
+    background: var(--section-nested-item-bg);
+    border: 1px solid var(--section-nested-item-border);
     border-radius: 0.9rem;
-    box-shadow: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
     overflow: hidden;
   }
-  #model-editor-accordion .accordion-button {
-    background: #ffffff;
+  .model-section-body .accordion-button {
+    background: var(--section-nested-head);
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    color: #2d4660;
+    color: var(--section-nested-head-text);
     gap: 0.75rem;
     padding: 0.8rem 0.95rem;
   }
-  #model-editor-accordion .accordion-button:not(.collapsed) {
-    background: #f2f8ff;
-    color: #194b7a;
+  .model-section-body .accordion-button:not(.collapsed) {
+    background: var(--section-nested-head-open);
+    color: var(--section-nested-head-open-text);
     box-shadow: none;
   }
-  #model-editor-accordion .accordion-body {
-    background: #fbfdff;
-    border-top: 1px solid #e8f1fa;
+  .model-section-body .accordion-body {
+    background: var(--section-nested-body);
+    border-top: 1px solid var(--section-nested-body-border);
     padding: 0.9rem;
   }
   .json-row-depth-0 { border-left: 4px solid #d8e6f5; }
@@ -595,6 +719,26 @@
 {% endblock %}
 
 {% block content %}
+  .transformer-unsaved-banner {
+    position: sticky;
+    top: 0.5rem;
+    z-index: 1010;
+    border: 1px solid #f3d188;
+    background: linear-gradient(180deg, #fff9ec 0%, #fff4d9 100%);
+    color: #6f4c09;
+    box-shadow: 0 6px 14px rgba(128, 86, 7, 0.12);
+  }
+  .transformer-unsaved-banner .btn {
+    white-space: nowrap;
+  }
+  .transformer-unsaved-banner-title {
+    font-weight: 700;
+  }
+  .transformer-unsaved-banner-detail {
+    font-size: 0.78rem;
+    color: #8a6110;
+    margin-top: 0.35rem;
+  }
 <div class="row mb-3">
   <div class="col-12 d-flex justify-content-between align-items-center">
     <h4 class="mb-0"><i class="fas fa-edit me-2"></i>Model Editor</h4>
@@ -666,6 +810,14 @@
             <button id="btn-toggle-raw" class="btn btn-outline-secondary btn-sm">Raw JSON</button>
             <button id="btn-open-full-editor" class="btn btn-outline-info btn-sm">Field View</button>
           </div>
+        </div>
+
+        <div id="transformer-unsaved-banner" class="alert transformer-unsaved-banner d-none mb-3" role="alert" aria-live="polite">
+          <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+            <span class="transformer-unsaved-banner-title"><i class="fas fa-floppy-disk me-2"></i>Transformer changes are applied but not saved yet.</span>
+            <button id="btn-save-transformer-reminder" type="button" class="btn btn-sm btn-outline-warning">Save now</button>
+          </div>
+          <div id="transformer-unsaved-banner-detail" class="transformer-unsaved-banner-detail d-none"></div>
         </div>
 
         <!-- Friendly transformations editor (secondary) -->
@@ -790,6 +942,38 @@
   let editorMode = 'full'; // 'full' or 'friendly'
   let rawMode = false;
   let rawModeReturnEditor = 'full';
+  let hasUnsavedTransformerChanges = false;
+
+  function clearPendingTransformerPayload(){
+    try {
+      sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
+    } catch (e) {
+      // Ignore storage cleanup failures.
+    }
+  }
+
+  function setTransformerUnsavedBanner(active, detail = '') {
+    hasUnsavedTransformerChanges = Boolean(active);
+    const banner = document.getElementById('transformer-unsaved-banner');
+    if (!banner) return;
+    banner.classList.toggle('d-none', !hasUnsavedTransformerChanges);
+    const detailEl = document.getElementById('transformer-unsaved-banner-detail');
+    if (!detailEl) return;
+    const detailText = String(detail || '').trim();
+    detailEl.textContent = detailText;
+    detailEl.classList.toggle('d-none', detailText === '');
+  }
+
+  function markTransformerUnsavedChanges(detail = '') {
+    setTransformerUnsavedBanner(true, detail);
+  }
+
+  function clearTransformerUnsavedChanges() {
+    setTransformerUnsavedBanner(false, '');
+  }
+
+  window.modelEditorMarkUnsavedTransformerChanges = markTransformerUnsavedChanges;
+  window.modelEditorClearUnsavedTransformerChanges = clearTransformerUnsavedChanges;
 
   function readPendingTransformerPayload() {
     try {
@@ -826,8 +1010,6 @@
       return null;
     }
 
-    sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
-
     const generatedColumns = normalizeStringArray(payload.generatedColumns);
     const instructions = Array.isArray(payload.transformations?.Instructions)
       ? structuredClone(payload.transformations.Instructions)
@@ -838,6 +1020,7 @@
 
     if (!runNodes.length) {
       return {
+        appliedToRunNodes: false,
         tone: 'warning',
         message: 'Pending transformer output found, but the model has no Run-level nodes to apply it to.'
       };
@@ -850,7 +1033,7 @@
       const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
       node.Transformations = {
         ...existingTransformations,
-        Transformer: payload.transformations?.Transformer || 'pybids-transforms-v1',
+        Transformer: payload.transformations?.Transformer || 'bidspm',
         Instructions: instructions,
         GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
       };
@@ -859,6 +1042,7 @@
     extendInterestRegressorPool(generatedColumns);
 
     return {
+      appliedToRunNodes: true,
       tone: 'success',
       message: `Applied transformer pipeline to ${runNodes.length} Run-level node(s) with ${generatedColumns.length} generated variable(s). Save Model to persist it.`
     };
@@ -908,6 +1092,10 @@
     selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
     if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
     refreshRawEditorFromSelection();
+    if (result.appliedToRunNodes) {
+      markTransformerUnsavedChanges(result.message);
+      clearPendingTransformerPayload();
+    }
     setStatus(result.message, result.tone || 'success');
     return true;
   }
@@ -953,7 +1141,6 @@
     { key: 'Edges', required: false }
   ];
   const NODE_FIELD_SPEC = ['Level', 'Name', 'GroupBy', 'Transformations', 'Model', 'Contrasts', 'DummyContrasts'];
-  const NODE_LEVEL_OPTIONS = ['Run', 'Session', 'Subject', 'Dataset'];
   const GROUPBY_RESERVED_OPTIONS = ['run', 'session', 'subject', 'contrast'];
   const DATASET_DRIVEN_INPUT_KEYS = new Set(['task', 'run', 'session', 'subject', 'space']);
   const nodeListEl = document.getElementById('node-list');
@@ -964,6 +1151,14 @@
   const statusEl = document.getElementById('editor-status');
   const rawToggleBtn = document.getElementById('btn-toggle-raw');
   let currentNodeIndex = null;
+
+  function getNodeLevelOptions(){
+    const fallback = ['Run', 'Session', 'Subject', 'Dataset'];
+    if (Array.isArray(window.NODE_LEVEL_OPTIONS) && window.NODE_LEVEL_OPTIONS.length) {
+      return window.NODE_LEVEL_OPTIONS.map(value => String(value || '').trim()).filter(Boolean);
+    }
+    return fallback;
+  }
 
   function setStatus(html, tone='info'){
     statusEl.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${html}</div>`;
@@ -1069,6 +1264,7 @@
       // mirror into full-editor draft
       modelEditorDraft = model;
       const pendingTransformerResult = consumePendingTransformerPayload(path);
+      clearTransformerUnsavedChanges();
       const pathLabel = document.getElementById('model-editor-path');
       if(pathLabel) pathLabel.textContent = path;
       await refreshInputEntityOptions(false);
@@ -1083,6 +1279,10 @@
       if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
       refreshRawEditorFromSelection();
       if (pendingTransformerResult?.message) {
+        if (pendingTransformerResult.appliedToRunNodes) {
+          markTransformerUnsavedChanges(pendingTransformerResult.message);
+          clearPendingTransformerPayload();
+        }
         setStatus(pendingTransformerResult.message, pendingTransformerResult.tone || 'success');
       } else {
         setStatus('Model loaded.', 'success');
@@ -1925,7 +2125,7 @@
     if (field === 'Level') return 'Run';
     if (field === 'Name') return `node_${idx+1}`;
     if (field === 'GroupBy') return ['run', 'subject'];
-    if (field === 'Transformations') return { Transformer: 'pybids-transforms-v1', Instructions: [] };
+    if (field === 'Transformations') return { Transformer: 'bidspm', Instructions: [] };
     if (field === 'Model') return { Type: 'glm', X: [1] };
     if (field === 'Contrasts') return [];
     if (field === 'DummyContrasts') return { Test: 't' };
@@ -3622,16 +3822,17 @@
     }
 
     if (field === 'Level') {
+      const nodeLevelOptions = getNodeLevelOptions();
       const sel = document.createElement('select');
       sel.className = 'form-select';
-      NODE_LEVEL_OPTIONS.forEach(level => {
+      nodeLevelOptions.forEach(level => {
         const opt = document.createElement('option');
         opt.value = level;
         opt.textContent = level;
         sel.appendChild(opt);
       });
       const rawLevel = node.Level ? String(node.Level) : 'Run';
-      const normalizedLevel = NODE_LEVEL_OPTIONS.find(level => level.toLowerCase() === rawLevel.toLowerCase()) || 'Run';
+      const normalizedLevel = nodeLevelOptions.find(level => level.toLowerCase() === rawLevel.toLowerCase()) || 'Run';
       sel.value = normalizedLevel;
       sel.addEventListener('change', ()=>{
         node.Level = sel.value;
@@ -4085,6 +4286,7 @@
         const result = await resp.json();
         if(result.success){
           setStatus('Model saved.', 'success');
+          clearTransformerUnsavedChanges();
         } else {
           setStatus('Save failed: ' + (result.error || 'unknown'), 'danger');
         }
@@ -4133,6 +4335,10 @@
     trans.style.display = 'block';
     if (btn) btn.textContent = 'Workflow View';
     rerenderCurrentSelection();
+  });
+
+  document.getElementById('btn-save-transformer-reminder')?.addEventListener('click', ()=>{
+    document.getElementById('btn-save-model')?.click();
   });
 
   // Auto-load if model_path provided from server-side
@@ -4260,8 +4466,11 @@
   }
 
   function getNodeSchemaChecks(nodeValue) {
+    const nodeLevelOptions = (Array.isArray(window.NODE_LEVEL_OPTIONS) && window.NODE_LEVEL_OPTIONS.length)
+      ? window.NODE_LEVEL_OPTIONS.map(value => String(value || '').trim()).filter(Boolean)
+      : ['Run', 'Session', 'Subject', 'Dataset'];
     const levelValue = typeof nodeValue?.Level === 'string' ? nodeValue.Level.trim() : '';
-    const levelValid = NODE_LEVEL_OPTIONS.includes(levelValue);
+    const levelValid = nodeLevelOptions.includes(levelValue);
     const nameValid = typeof nodeValue?.Name === 'string' && nodeValue.Name.trim() !== '';
     const groupByValid = Array.isArray(nodeValue?.GroupBy)
       && nodeValue.GroupBy.length > 0
@@ -4809,7 +5018,9 @@
     const transformerValue = typeof transformationsValue?.Transformer === 'string'
       ? transformationsValue.Transformer.trim()
       : '';
-    const transformerValid = transformerValue === 'pybids-transforms-v1';
+    const allowedTransformers = ['bidspm', 'pybids-transforms-v1'];
+    const transformerValid = allowedTransformers.includes(transformerValue);
+    const transformerPreferred = transformerValue === 'bidspm';
 
     const instructionsArray = Array.isArray(transformationsValue?.Instructions);
     const instructionsEntriesValid = instructionsArray && transformationsValue.Instructions.every(
@@ -4825,6 +5036,7 @@
       unknownKeys,
       transformerValue,
       transformerValid,
+      transformerPreferred,
       instructionsArray,
       instructionsEntriesValid,
       instructionCount: instructionsArray ? transformationsValue.Instructions.length : 0,
@@ -4839,7 +5051,7 @@
     const checks = getTransformationsSchemaChecks(transformationsValue);
     const issues = [];
     if (checks.unknownKeys.length) issues.push(`Unknown Transformations field(s): ${checks.unknownKeys.join(', ')}.`);
-    if (!checks.transformerValid) issues.push('Transformer is required and must be pybids-transforms-v1.');
+    if (!checks.transformerValid) issues.push('Transformer is required and should be bidspm (legacy pybids-transforms-v1 is also accepted).');
     if (!checks.instructionsArray) issues.push('Instructions is required and must be an array.');
     if (checks.instructionsArray && !checks.instructionsEntriesValid) issues.push('Each instruction should be an object with a non-empty Name.');
     if (!checks.generatedColumnsValid) issues.push('GeneratedColumns must be an array of non-empty strings when provided.');
@@ -4872,7 +5084,9 @@
     optional.className = 'mt-1';
     optional.textContent = checks.generatedColumnsCount
       ? 'GeneratedColumns is an editor convenience field; ensure strict schema output if you target external validators.'
-      : 'Instruction argument schema is transformer-specific (pybids-transforms-v1).';
+      : (!checks.transformerPreferred && checks.transformerValid)
+          ? 'Using legacy transformer id pybids-transforms-v1; bidspm is recommended for bidspm workflows.'
+          : 'Instruction argument schema is transformer-specific (bidspm).';
     hint.appendChild(optional);
 
     return hint;
@@ -5497,11 +5711,11 @@
 
   function ensureNodeTransformationsObject(node) {
     if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
-      node.Transformations = { Transformer: 'pybids-transforms-v1', Instructions: [], GeneratedColumns: [] };
+      node.Transformations = { Transformer: 'bidspm', Instructions: [], GeneratedColumns: [] };
     }
     if (!Array.isArray(node.Transformations.Instructions)) node.Transformations.Instructions = [];
     if (!Array.isArray(node.Transformations.GeneratedColumns)) node.Transformations.GeneratedColumns = [];
-    if (!node.Transformations.Transformer) node.Transformations.Transformer = 'pybids-transforms-v1';
+    if (!node.Transformations.Transformer) node.Transformations.Transformer = 'bidspm';
     return node.Transformations;
   }
 
@@ -5539,6 +5753,8 @@
 
   function createTransformerInstructionTemplate(opName) {
     switch (opName) {
+      case 'Assign':
+        return { Name: 'Assign', Input: [], Target: [], InputAttr: '', TargetAttr: '', Output: [] };
       case 'Filter':
         return { Name: 'Filter', Input: '', Query: '', Output: '' };
       case 'Concatenate':
@@ -5549,16 +5765,32 @@
         return { Name: 'Replace', Input: '', Replace: [{ key: '', value: '' }], Output: '' };
       case 'Copy':
         return { Name: 'Copy', Input: [], Output: [] };
+      case 'DropNA':
+        return { Name: 'DropNA', Input: [], Output: [] };
+      case 'Split':
+        return { Name: 'Split', Input: [], By: [], Output: [] };
+      case 'LabelIdenticalRows':
+        return { Name: 'LabelIdenticalRows', Input: [], Cumulative: false, Output: [] };
+      case 'MergeIdenticalRows':
+        return { Name: 'MergeIdenticalRows', Input: [] };
       case 'Select':
         return { Name: 'Select', Input: [] };
       case 'Delete':
         return { Name: 'Delete', Input: [] };
+      case 'Constant':
+        return { Name: 'Constant', Output: '', Value: 1 };
+      case 'Product':
+        return { Name: 'Product', Input: [], OmitNan: false, Output: '' };
       case 'Scale':
         return { Name: 'Scale', Input: [], Demean: true, Rescale: true, Output: '' };
       case 'Mean':
         return { Name: 'Mean', Input: '', OmitNan: false, Output: '' };
+      case 'Std':
+        return { Name: 'Std', Input: [], OmitNan: false, Output: '' };
+      case 'Sum':
+        return { Name: 'Sum', Input: [], Weights: [], OmitNan: false, Output: '' };
       case 'Threshold':
-        return { Name: 'Threshold', Input: '', Threshold: 0, Binarize: false, Above: true, Output: '' };
+        return { Name: 'Threshold', Input: '', Threshold: 0, Binarize: false, Above: true, Signed: true, Output: '' };
       default:
         return { Name: opName };
     }
@@ -5605,6 +5837,11 @@
 
     if (opName === 'Factor') {
       return inferFactorGeneratedColumns(instruction.Input);
+    }
+
+    if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
+      if (outputValues.length) return outputValues;
+      return normalizeEditorStringArray(instruction.Input).map(name => `${name}_label`);
     }
 
     if (outputValues.length) return outputValues;
@@ -5811,8 +6048,14 @@
         instruction[field] = parseCsvValues(rawValue);
         rerender();
       };
+      const setNumericArray = (field, rawValue) => {
+        instruction[field] = parseCsvValues(rawValue)
+          .map(value => Number(value))
+          .filter(value => Number.isFinite(value));
+        rerender();
+      };
       const setOutput = (rawValue) => {
-        if (opName === 'Copy') {
+        if (['Copy', 'Assign', 'DropNA', 'Split', 'LabelIdenticalRows', 'Label_identical_rows'].includes(opName)) {
           instruction.Output = parseCsvValues(rawValue);
         } else {
           instruction.Output = parseCsvValues(rawValue)[0] || '';
@@ -5820,7 +6063,47 @@
         rerender();
       };
 
-      if (opName === 'Filter') {
+      if (opName === 'Assign') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time, trial_type',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Target columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Target).join(', '),
+          placeholder: 'duration, condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Target', value)
+        });
+        addTextField(body, {
+          label: 'InputAttr (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.InputAttr).join(', '),
+          placeholder: 'value',
+          onChange: (value) => {
+            instruction.InputAttr = parseCsvValues(value);
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'TargetAttr (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.TargetAttr).join(', '),
+          placeholder: 'value',
+          onChange: (value) => {
+            instruction.TargetAttr = parseCsvValues(value);
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output names (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'face_modulated_by_RT',
+          useSuggestions: true,
+          onChange: setOutput
+        });
+      } else if (opName === 'Filter') {
         addTextField(body, {
           label: 'Input column',
           value: String(instruction.Input || ''),
@@ -5895,6 +6178,73 @@
           placeholder: 'trial_type_copy, condition_copy',
           onChange: setOutput
         });
+      } else if (opName === 'DropNA' || opName === 'Drop_na') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time, duration',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Output names (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'response_time_clean, duration_clean',
+          useSuggestions: true,
+          onChange: setOutput
+        });
+      } else if (opName === 'Split') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'condition',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'By columns (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.By).join(', '),
+          placeholder: 'session, run',
+          useSuggestions: true,
+          onChange: (value) => setMulti('By', value)
+        });
+        addTextField(body, {
+          label: 'Output names (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'condition_A, condition_B',
+          onChange: setOutput
+        });
+      } else if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'Cumulative',
+          label: 'Cumulative labels',
+          value: Boolean(instruction.Cumulative),
+          onChange: (checked) => {
+            instruction.Cumulative = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output names (optional, comma-separated)',
+          value: normalizeEditorStringArray(instruction.Output).join(', '),
+          placeholder: 'trial_type_label',
+          onChange: setOutput
+        });
+      } else if (opName === 'MergeIdenticalRows' || opName === 'Merge_identical_rows') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'trial_type',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
       } else if (opName === 'Select' || opName === 'Delete') {
         addTextField(body, {
           label: `${opName === 'Select' ? 'Columns to keep' : 'Columns to delete'} (comma-separated)`,
@@ -5902,6 +6252,54 @@
           placeholder: 'trial_type, duration',
           useSuggestions: true,
           onChange: (value) => setMulti('Input', value)
+        });
+      } else if (opName === 'Constant') {
+        addTextField(body, {
+          label: 'Output column',
+          value: String(instruction.Output || ''),
+          placeholder: 'constant_col',
+          useSuggestions: true,
+          onChange: setOutput
+        });
+        addTextField(body, {
+          label: 'Value',
+          value: String(instruction.Value ?? '1'),
+          placeholder: '1',
+          onChange: (value) => {
+            const trimmed = String(value || '').trim();
+            const parsed = Number(trimmed);
+            if (trimmed === '') {
+              instruction.Value = 1;
+            } else if (Number.isFinite(parsed) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(trimmed)) {
+              instruction.Value = parsed;
+            } else {
+              instruction.Value = trimmed;
+            }
+            rerender();
+          }
+        });
+      } else if (opName === 'Product') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time, gain',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'OmitNan',
+          label: 'Omit NaN',
+          value: Boolean(instruction.OmitNan),
+          onChange: (checked) => {
+            instruction.OmitNan = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output',
+          value: String(instruction.Output || ''),
+          placeholder: 'product_col',
+          onChange: setOutput
         });
       } else if (opName === 'Scale') {
         addTextField(body, {
@@ -5958,6 +6356,58 @@
           placeholder: 'mean_col',
           onChange: setOutput
         });
+      } else if (opName === 'Std') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addCheckboxField(body, {
+          key: 'OmitNan',
+          label: 'Omit NaN',
+          value: Boolean(instruction.OmitNan),
+          onChange: (checked) => {
+            instruction.OmitNan = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output (optional)',
+          value: String(instruction.Output || ''),
+          placeholder: 'std_col',
+          onChange: setOutput
+        });
+      } else if (opName === 'Sum') {
+        addTextField(body, {
+          label: 'Input columns (comma-separated)',
+          value: normalizeEditorStringArray(instruction.Input).join(', '),
+          placeholder: 'response_time, gain, loss',
+          useSuggestions: true,
+          onChange: (value) => setMulti('Input', value)
+        });
+        addTextField(body, {
+          label: 'Weights (optional, comma-separated)',
+          value: Array.isArray(instruction.Weights) ? instruction.Weights.join(', ') : '',
+          placeholder: '1, 0.5, -1',
+          onChange: (value) => setNumericArray('Weights', value)
+        });
+        addCheckboxField(body, {
+          key: 'OmitNan',
+          label: 'Omit NaN',
+          value: Boolean(instruction.OmitNan),
+          onChange: (checked) => {
+            instruction.OmitNan = checked;
+            rerender();
+          }
+        });
+        addTextField(body, {
+          label: 'Output',
+          value: String(instruction.Output || ''),
+          placeholder: 'sum_col',
+          onChange: setOutput
+        });
       } else if (opName === 'Threshold') {
         addTextField(body, {
           label: 'Input column',
@@ -5966,15 +6416,23 @@
           useSuggestions: true,
           onChange: (value) => setSingle('Input', value)
         });
+        const thresholdValue = Number(instruction.Threshold);
+        const hasThreshold = Number.isFinite(thresholdValue);
+        const minDefault = (instruction.Above !== false && hasThreshold) ? String(thresholdValue) : '';
+        const maxDefault = (instruction.Above === false && hasThreshold) ? String(thresholdValue) : '';
         addTextField(body, {
-          label: 'Threshold value',
+          label: 'Min threshold (keep values >= min)',
           type: 'number',
-          value: String(instruction.Threshold ?? 0),
-          onChange: (value) => {
-            const parsed = Number(value);
-            instruction.Threshold = Number.isFinite(parsed) ? parsed : 0;
-            rerender();
-          }
+          value: minDefault,
+          placeholder: '0.2',
+          onChange: () => {}
+        });
+        addTextField(body, {
+          label: 'Max threshold (keep values <= max)',
+          type: 'number',
+          value: maxDefault,
+          placeholder: '5',
+          onChange: () => {}
         });
         addCheckboxField(body, {
           key: 'Binarize',
@@ -5986,14 +6444,81 @@
           }
         });
         addCheckboxField(body, {
-          key: 'Above',
-          label: 'Keep above threshold',
-          value: instruction.Above !== false,
+          key: 'Signed',
+          label: 'Signed threshold',
+          value: instruction.Signed !== false,
           onChange: (checked) => {
-            instruction.Above = checked;
+            instruction.Signed = checked;
             rerender();
           }
         });
+        const applyRangeBtn = document.createElement('button');
+        applyRangeBtn.type = 'button';
+        applyRangeBtn.className = 'btn btn-sm btn-outline-primary';
+        applyRangeBtn.textContent = 'Apply min/max as range';
+        applyRangeBtn.addEventListener('click', () => {
+          const inputs = Array.from(body.querySelectorAll('input[type="number"]'));
+          const minRaw = inputs[0]?.value;
+          const maxRaw = inputs[1]?.value;
+          const minValue = Number(minRaw);
+          const maxValue = Number(maxRaw);
+          const hasMin = String(minRaw || '').trim() !== '' && Number.isFinite(minValue);
+          const hasMax = String(maxRaw || '').trim() !== '' && Number.isFinite(maxValue);
+
+          if (!instruction.Input || String(instruction.Input).trim() === '') {
+            setModelEditorStatus('Set Input before applying threshold range.', 'warning');
+            return;
+          }
+          if (!hasMin && !hasMax) {
+            setModelEditorStatus('Provide a min and/or max threshold value.', 'warning');
+            return;
+          }
+
+          const outputValue = String(instruction.Output || '').trim();
+          const inputValue = String(instruction.Input || '').trim();
+          const signedValue = instruction.Signed !== false;
+          const binarizeValue = Boolean(instruction.Binarize);
+
+          if (hasMin && hasMax) {
+            instruction.Threshold = minValue;
+            instruction.Above = true;
+            instruction.Signed = signedValue;
+            instruction.Binarize = false;
+            if (outputValue) {
+              instruction.Output = outputValue;
+            } else {
+              delete instruction.Output;
+            }
+
+            const upperInstruction = {
+              Name: 'Threshold',
+              Input: outputValue || inputValue,
+              Threshold: maxValue,
+              Above: false,
+              Signed: signedValue,
+              Binarize: binarizeValue
+            };
+            if (outputValue) upperInstruction.Output = outputValue;
+            transformations.Instructions.splice(instIdx + 1, 0, upperInstruction);
+            rerender('Created min/max range as two Threshold instructions.');
+            return;
+          }
+
+          if (hasMin) {
+            instruction.Threshold = minValue;
+            instruction.Above = true;
+            instruction.Signed = signedValue;
+            rerender('Applied minimum threshold.');
+            return;
+          }
+
+          instruction.Threshold = maxValue;
+          instruction.Above = false;
+          instruction.Signed = signedValue;
+          rerender('Applied maximum threshold.');
+        });
+        body.appendChild(applyRangeBtn);
+        body.appendChild(createInlineNote('Use min+max together for RT windows (e.g., 0.2 to 5 seconds).'));
         addTextField(body, {
           label: 'Output (optional)',
           value: String(instruction.Output || ''),
@@ -6011,7 +6536,7 @@
     const generatedCount = Array.isArray(transformations.GeneratedColumns) ? transformations.GeneratedColumns.length : 0;
     const summary = document.createElement('div');
     summary.className = 'd-flex flex-wrap gap-2';
-    appendModelMetaPill(summary, transformations.Transformer || 'pybids-transforms-v1', 'success');
+    appendModelMetaPill(summary, transformations.Transformer || 'bidspm', 'success');
     appendModelMetaPill(summary, `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`, instructionCount ? 'success' : 'neutral');
     appendModelMetaPill(summary, `${generatedCount} generated`, generatedCount ? 'warning' : 'neutral');
     panel.body.appendChild(summary);
@@ -6032,8 +6557,9 @@
     const opButtonRow = document.createElement('div');
     opButtonRow.className = 'd-flex flex-wrap gap-1';
     [
-      'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'Select', 'Delete',
-      'Scale', 'Mean', 'Threshold'
+      'Assign', 'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'DropNA', 'Split',
+      'LabelIdenticalRows', 'MergeIdenticalRows', 'Select', 'Delete',
+      'Constant', 'Product', 'Scale', 'Mean', 'Std', 'Sum', 'Threshold'
     ].forEach(opName => {
       const addOpBtn = document.createElement('button');
       addOpBtn.type = 'button';
@@ -6707,7 +7233,14 @@
 
   function createModelSectionCard(container, section) {
     const card = document.createElement('div');
-    card.className = 'model-section-card';
+    const sectionThemeMap = {
+      '__section_overview': 'section-overview',
+      'Input': 'section-input',
+      'Nodes': 'section-nodes',
+      'Edges': 'section-edges'
+    };
+    const sectionThemeClass = sectionThemeMap[section.statePath] || 'section-generic';
+    card.className = `model-section-card ${sectionThemeClass}`;
 
     const idBase = `model-section-${section.statePath.replace(/[^a-zA-Z0-9]/g, '-')}`;
     const headerId = `${idBase}-h`;
@@ -6721,7 +7254,7 @@
     headerWrap.className = 'd-flex align-items-center gap-2';
 
     const button = document.createElement('button');
-    button.className = 'accordion-button model-section-toggle';
+    button.className = `accordion-button model-section-toggle ${sectionThemeClass}`;
     button.type = 'button';
     button.setAttribute('data-bs-toggle', 'collapse');
     button.setAttribute('data-bs-target', `#${collapseId}`);
@@ -6880,7 +7413,7 @@
     collapse.dataset.jsonPath = section.statePath;
     const wasOpen = modelEditorOpenPaths.has(section.statePath) || (!modelEditorOpenPaths.size && ['overview', 'input', 'nodes', 'edges'].includes(section.kind));
     collapse.className = `accordion-collapse collapse ${wasOpen ? 'show' : ''}`;
-    button.className = `accordion-button model-section-toggle ${wasOpen ? '' : 'collapsed'}`;
+    button.className = `accordion-button model-section-toggle ${sectionThemeClass} ${wasOpen ? '' : 'collapsed'}`;
     button.setAttribute('aria-expanded', wasOpen ? 'true' : 'false');
     collapse.setAttribute('aria-labelledby', headerId);
 
@@ -7763,6 +8296,9 @@
       const result = await res.json();
       if (!result.success) { if (status) status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${result.error}</div>`; return; }
       if (status) status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model saved.</div>';
+      if (typeof window.modelEditorClearUnsavedTransformerChanges === 'function') {
+        window.modelEditorClearUnsavedTransformerChanges();
+      }
     } catch (e) { if (status) status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${e.message}</div>`; }
   }
 
