@@ -313,6 +313,9 @@
 <script src="{{ url_for('static', filename='js/transformer_builder_path_utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/transformer_builder_model_selection.js') }}"></script>
 <script src="{{ url_for('static', filename='js/transformer_builder_browser.js') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_scan_preview.js') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_columns.js') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_pipeline.js') }}"></script>
 <script>
 (function () {
   'use strict';
@@ -327,6 +330,9 @@
   const transformerPathUtils = window.BIDSPMTransformerBuilderPathUtils;
   const modelSelectionFactory = window.BIDSPMTransformerBuilderModelSelection;
   const browserFactory = window.BIDSPMTransformerBuilderBrowser;
+  const scanPreviewFactory = window.BIDSPMTransformerBuilderScanPreview;
+  const columnsFactory = window.BIDSPMTransformerBuilderColumns;
+  const pipelineFactory = window.BIDSPMTransformerBuilderPipeline;
   const REQUIRED_OUTPUT_OPS = new Set([
     'Assign',
     'Filter',
@@ -357,6 +363,15 @@
   if (!browserFactory) {
     throw new Error('Transformer Builder browser helpers failed to load.');
   }
+  if (!scanPreviewFactory) {
+    throw new Error('Transformer Builder scan/preview helpers failed to load.');
+  }
+  if (!columnsFactory) {
+    throw new Error('Transformer Builder columns helpers failed to load.');
+  }
+  if (!pipelineFactory) {
+    throw new Error('Transformer Builder pipeline helpers failed to load.');
+  }
 
   const {
     normalizeFsPath,
@@ -372,20 +387,49 @@
   let pipelineColumnValues = {}; // raw + derived/generated column value domains
   let lastScanData = null; // full API response for resample
   let currentPreviewFile = null;
-  let opCounter = 0;
   const launchContext = readTransformerLaunchContext();
-  const modelSelectionController = modelSelectionFactory({
+  let modelSelectionController;
+  let pipelineController;
+  const columnsController = columnsFactory({
+    getAvailableColumns: () => availableColumns,
+    getColumnValues: () => columnValues,
+    getPipelineColumnValues: () => pipelineColumnValues,
+    setPipelineColumnValues: value => {
+      pipelineColumnValues = value;
+    },
+    extractOpsFromCard: card => pipelineController.extractOpsFromCard(card),
+    escHtml,
+    escAttr,
+  });
+  pipelineController = pipelineFactory({
+    getSelectableColumns: () => columnsController.getSelectableColumns(),
+    getColumnDomain: name => columnsController.getColumnDomain(name),
+    normalizeColumnList: value => columnsController.normalizeColumnList(value),
+    renderColumnsPool: () => columnsController.renderColumnsPool(),
+    refreshPipelineColumnValues: () => columnsController.refreshPipelineColumnValues(),
+    scheduleLiveModelValidation,
+    setStatus,
+    escHtml,
+    escAttr,
+    getTargetLevels,
+    normalizeNodeLevel,
+    getOperationCategory,
+    loadModelForValidation: (...args) => modelSelectionController.loadModelForValidation(...args),
+    getSelectedModelPath: () => modelSelectionController.getSelectedModelPath(),
+    requiredOutputOps: REQUIRED_OUTPUT_OPS,
+  });
+  modelSelectionController = modelSelectionFactory({
     projectModelsFile: PROJECT_MODELS_FILE,
     launchContext,
     nodeLevelOptions: NODE_LEVEL_OPTIONS,
-    maybeBootstrapPipelineFromModel,
+    maybeBootstrapPipelineFromModel: force => pipelineController.maybeBootstrapPipelineFromModel(force, launchContext),
     setStatus,
     escHtml,
     escAttr,
     normalizeNodeLevel,
     getTargetLevels,
-    getTransformerPayload,
-    getGeneratedColumns,
+    getTransformerPayload: () => pipelineController.getTransformerPayload(),
+    getGeneratedColumns: () => columnsController.getGeneratedColumns(),
   });
   const browserController = browserFactory({
     setStatus,
@@ -394,6 +438,33 @@
     clearCurrentPreviewFile: () => {
       currentPreviewFile = null;
     },
+  });
+  const scanPreviewController = scanPreviewFactory({
+    getAvailableColumns: () => availableColumns,
+    setAvailableColumns: value => {
+      availableColumns = value;
+    },
+    getColumnValues: () => columnValues,
+    setColumnValues: value => {
+      columnValues = value;
+    },
+    getCurrentPreviewFile: () => currentPreviewFile,
+    setCurrentPreviewFile: value => {
+      currentPreviewFile = value;
+    },
+    setLastScanData: value => {
+      lastScanData = value;
+    },
+    getEffectiveSourceScope,
+    updateScopeHint,
+    getRequestedTaskFilter,
+    mergeColumnValueMaps,
+    normalizeStringArray,
+    setStatus,
+    escHtml,
+    renderColumnsPool: () => columnsController.renderColumnsPool(),
+    refreshPipelineColumnValues: () => columnsController.refreshPipelineColumnValues(),
+    scheduleLiveModelValidation,
   });
 
   if (!document.getElementById('input-bids-dir').value.trim() && launchContext?.bidsDir) {
@@ -460,7 +531,7 @@
   document.getElementById('btn-copy-json').addEventListener('click', copyJSON);
   document.getElementById('preview-row-limit').addEventListener('change', () => scanEvents(false));
   document.getElementById('preview-hide-na-cols').addEventListener('change', () => {
-    if (lastScanData) renderEventsPreview(lastScanData);
+    if (lastScanData) scanPreviewController.renderEventsPreview(lastScanData);
   });
   document.getElementById('btn-tb-browse-select').addEventListener('click', () => {
     browserController.applySelectedBidsPath();
@@ -499,15 +570,7 @@
   }
 
   function getTransformerPayload() {
-    const instructions = [];
-    document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const ops = extractOpsFromCard(card);
-      if (ops.length) instructions.push(...ops);
-    });
-    return {
-      Transformer: 'bidspm',
-      Instructions: instructions
-    };
+    return pipelineController.getTransformerPayload();
   }
 
   function persistPendingTransformerPayload(payload) {
@@ -744,1010 +807,47 @@
     modelSelectionController.scheduleLiveModelValidation();
   }
 
-  // ================================================================
-  // SCAN EVENTS
-  // ================================================================
-  function setPreviewScopeMode(scope) {
-    const isEventsPreview = scope === 'events' || scope === 'combined';
-    const rowsLabel = document.querySelector('label[for="preview-row-limit"]');
-    const rowsSelect = document.getElementById('preview-row-limit');
-    const hideNa = document.getElementById('preview-hide-na-cols');
-    const hideNaLabel = hideNa ? hideNa.closest('label') : null;
-    const resampleBtn = document.getElementById('btn-resample');
-
-    if (rowsSelect) rowsSelect.disabled = !isEventsPreview;
-    if (hideNa) hideNa.disabled = !isEventsPreview;
-    if (resampleBtn) resampleBtn.disabled = !isEventsPreview;
-    if (rowsLabel) rowsLabel.classList.toggle('text-muted', !isEventsPreview);
-    if (hideNaLabel) hideNaLabel.classList.toggle('text-muted', !isEventsPreview);
-    if (resampleBtn) {
-      resampleBtn.title = isEventsPreview
-        ? 'Load a different events file'
-        : 'Participants source has no file-level resampling';
-    }
-  }
-
-  function buildParticipantsColumnResult(participantsInfo) {
-    const info = (participantsInfo && typeof participantsInfo === 'object')
-      ? participantsInfo
-      : {};
-    const columns = normalizeStringArray(info.columns);
-    const sampleValues = (info.sample_values && typeof info.sample_values === 'object')
-      ? info.sample_values
-      : {};
-    const valuesMap = {};
-    columns.forEach(column => {
-      valuesMap[column] = normalizeStringArray(sampleValues[column]);
-    });
-    return {
-      columns,
-      valuesMap,
-      sampleStatus: String(info.sample_status || 'missing-file').trim() || 'missing-file'
-    };
-  }
-
-  function applyEventsScanResult(data, selectedTask = '') {
-    const taskSel = document.getElementById('select-task');
-    const eventsFile = document.getElementById('input-events-file').value.trim();
-
-    availableColumns = data.columns || [];
-    columnValues = data.columns_by_type || {};
-    refreshPipelineColumnValues();
-    lastScanData = data;
-    currentPreviewFile = eventsFile || data.sample_file || null;
-    renderColumnsPool();
-    renderEventsPreview(data);
-
-    taskSel.innerHTML = '<option value="">All tasks</option>';
-    (data.tasks || []).forEach(t => {
-      const o = document.createElement('option');
-      o.value = t;
-      o.textContent = t;
-      taskSel.appendChild(o);
-    });
-    const effectiveTask = String(data.selected_task || selectedTask || '').trim();
-    if (effectiveTask && (data.tasks || []).includes(effectiveTask)) {
-      taskSel.value = effectiveTask;
-    }
-
-    return effectiveTask;
-  }
-
-  async function scanEventsColumns(forceNewPreview = false) {
-    const bidsDir = document.getElementById('input-bids-dir').value.trim();
-    const eventsFile = document.getElementById('input-events-file').value.trim();
-    const selectedTask = getRequestedTaskFilter();
-
-    if (!bidsDir && !eventsFile) {
-      setStatus('Enter a BIDS directory or select a single events.tsv file.', 'warning');
-      return;
-    }
-
-    setStatus('Scanning events files…', 'info');
-    setPreviewScopeMode('events');
-
-    const payload = {
-      preview_max_rows: getPreviewMaxRows()
-    };
-    if (bidsDir) payload.bids_dir = bidsDir;
-    if (selectedTask) payload.task_filter = selectedTask;
-    if (eventsFile) {
-      payload.events_file = eventsFile;
-      payload.preview_file = eventsFile;
-    } else if (!forceNewPreview && currentPreviewFile) {
-      payload.preview_file = currentPreviewFile;
-    }
-
-    const res = await fetch('/api/scan_events_columns', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-
-    const effectiveTask = applyEventsScanResult(data, selectedTask);
-    const scopeText = effectiveTask
-      ? `for task "${effectiveTask}"`
-      : `across ${(data.tasks || []).length} task(s)`;
-    setStatus(`Found ${availableColumns.length} columns ${scopeText} — ${data.events_files} events file(s).`, 'success');
-    scheduleLiveModelValidation();
-  }
-
-  async function scanParticipantsColumns() {
-    const bidsDir = document.getElementById('input-bids-dir').value.trim();
-    if (!bidsDir) {
-      setStatus('Set BIDS Folder first to load participants.tsv columns.', 'warning');
-      return;
-    }
-
-    setStatus('Scanning participants.tsv columns…', 'info');
-    setPreviewScopeMode('participants');
-
-    const res = await fetch(`/api/bids_entities?path=${encodeURIComponent(bidsDir)}`);
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      throw new Error(data.error || 'Could not scan BIDS entities.');
-    }
-
-    const participantsResult = buildParticipantsColumnResult(data.participants || {});
-    availableColumns = participantsResult.columns;
-    columnValues = participantsResult.valuesMap;
-    refreshPipelineColumnValues();
-    lastScanData = null;
-    currentPreviewFile = null;
-    renderColumnsPool();
-    renderParticipantsPreview(data.participants || {}, bidsDir);
-
-    const taskSel = document.getElementById('select-task');
-    taskSel.innerHTML = '<option value="">— not used for participants scope —</option>';
-
-    if (participantsResult.sampleStatus === 'present') {
-      setStatus(`Found ${availableColumns.length} participants.tsv column(s).`, 'success');
-    } else {
-      setStatus(`participants.tsv status: ${participantsResult.sampleStatus}. Found ${availableColumns.length} usable column(s).`, 'warning');
-    }
-    scheduleLiveModelValidation();
-  }
-
-  async function scanCombinedColumns(forceNewPreview = false) {
-    const bidsDir = document.getElementById('input-bids-dir').value.trim();
-    if (!bidsDir) {
-      setStatus('Combined scope requires BIDS Folder for participants.tsv. Falling back to events scope.', 'warning');
-      await scanEventsColumns(forceNewPreview);
-      return;
-    }
-
-    setStatus('Scanning events + participants columns…', 'info');
-    setPreviewScopeMode('combined');
-
-    const selectedTask = getRequestedTaskFilter();
-    const eventsFile = document.getElementById('input-events-file').value.trim();
-    const payload = {
-      preview_max_rows: getPreviewMaxRows(),
-      bids_dir: bidsDir
-    };
-    if (selectedTask) payload.task_filter = selectedTask;
-    if (eventsFile) {
-      payload.events_file = eventsFile;
-      payload.preview_file = eventsFile;
-    } else if (!forceNewPreview && currentPreviewFile) {
-      payload.preview_file = currentPreviewFile;
-    }
-
-    const [eventsRes, participantsRes] = await Promise.all([
-      fetch('/api/scan_events_columns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }),
-      fetch(`/api/bids_entities?path=${encodeURIComponent(bidsDir)}`)
-    ]);
-    const eventsData = await eventsRes.json();
-    const participantsData = await participantsRes.json();
-
-    if (!eventsRes.ok || eventsData.error) {
-      throw new Error(eventsData.error || 'Could not scan events columns.');
-    }
-    if (!participantsRes.ok || participantsData.error) {
-      throw new Error(participantsData.error || 'Could not scan participants columns.');
-    }
-
-    const effectiveTask = applyEventsScanResult(eventsData, selectedTask);
-    const eventColumns = [...availableColumns];
-    const eventValuesMap = { ...columnValues };
-    const participantsResult = buildParticipantsColumnResult(participantsData.participants || {});
-
-    availableColumns = Array.from(new Set([...eventColumns, ...participantsResult.columns]));
-    columnValues = mergeColumnValueMaps(eventValuesMap, participantsResult.valuesMap);
-    refreshPipelineColumnValues();
-    renderColumnsPool();
-
-    const scopeText = effectiveTask
-      ? `for task "${effectiveTask}"`
-      : `across ${(eventsData.tasks || []).length} task(s)`;
-    setStatus(
-      `Found ${availableColumns.length} combined columns (${eventColumns.length} events + ${participantsResult.columns.length} participants) ${scopeText}.`,
-      'success'
-    );
-    scheduleLiveModelValidation();
-  }
-
   async function scanEvents(forceNewPreview = false) {
-    const sourceScope = getEffectiveSourceScope();
-    updateScopeHint();
-    try {
-      if (sourceScope === 'participants') {
-        await scanParticipantsColumns();
-      } else if (sourceScope === 'combined') {
-        await scanCombinedColumns(forceNewPreview);
-      } else {
-        await scanEventsColumns(forceNewPreview);
-      }
-    } catch (err) {
-      setStatus('Error: ' + err.message, 'danger');
-    }
-  }
-
-  function getPreviewMaxRows() {
-    const sel = document.getElementById('preview-row-limit');
-    const n = parseInt(sel?.value || '200', 10);
-    return Number.isNaN(n) ? 200 : n;
-  }
-
-  // ================================================================
-  // EVENTS FILE PREVIEW
-  // ================================================================
-  function renderEventsPreview(data) {
-    const card    = document.getElementById('events-preview-card');
-    const label   = document.getElementById('events-file-label');
-    const meta    = document.getElementById('events-preview-meta');
-    const table   = document.getElementById('events-preview-table');
-    const body    = document.getElementById('events-preview-body');
-    const toggle  = document.getElementById('events-preview-toggle');
-    const hideNaOnlyCols = document.getElementById('preview-hide-na-cols').checked;
-
-    card.style.display = '';
-    body.style.display = '';
-    toggle.classList.add('open');
-
-    const headers = data.sample_headers || [];
-    const rows = data.sample_rows || [];
-
-    if (!headers.length) {
-      label.textContent = data.sample_file || 'No preview file found';
-      label.title = label.textContent;
-      meta.textContent = '';
-      table.innerHTML = `
-        <thead><tr><th>Preview</th></tr></thead>
-        <tbody><tr><td class="na-cell">No readable events preview available for this dataset.</td></tr></tbody>
-      `;
-      return;
-    }
-
-    label.textContent = data.sample_file || '';
-    label.title = data.sample_file || '';
-
-    const totalRows = data.sample_total_rows || rows.length;
-    const shownRows = rows.length;
-    meta.textContent = data.sample_truncated
-      ? `showing ${shownRows} / ${totalRows} rows (change Rows to load more)`
-      : `${shownRows} rows`;
-
-    let visibleIdx = headers.map((_, i) => i);
-    if (hideNaOnlyCols && rows.length) {
-      visibleIdx = headers
-        .map((_, i) => i)
-        .filter(i => rows.some(r => {
-          const cell = String(r[i] || '').trim().toLowerCase();
-          return cell !== '' && cell !== 'n/a' && cell !== 'nan';
-        }));
-      if (!visibleIdx.length) {
-        visibleIdx = headers.map((_, i) => i);
-      }
-    }
-
-    // Build table
-    const thead = document.createElement('thead');
-    thead.innerHTML = '<tr>' + visibleIdx.map(i => `<th>${escHtml(headers[i])}</th>`).join('') + '</tr>';
-    const tbody = document.createElement('tbody');
-
-    if (!rows.length) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td class="na-cell" colspan="${visibleIdx.length}">File has headers but no rows.</td>`;
-      tbody.appendChild(tr);
-    } else {
-      rows.forEach(row => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = visibleIdx.map(i => {
-          const cell = row[i];
-          const isNa = !cell || cell === 'n/a';
-          return `<td class="${isNa ? 'na-cell' : ''}">${escHtml(cell || 'n/a')}</td>`;
-        }).join('');
-        tbody.appendChild(tr);
-      });
-    }
-
-    table.innerHTML = '';
-    table.appendChild(thead);
-    table.appendChild(tbody);
-  }
-
-  function renderParticipantsPreview(participantsInfo, bidsDir) {
-    const card = document.getElementById('events-preview-card');
-    const label = document.getElementById('events-file-label');
-    const meta = document.getElementById('events-preview-meta');
-    const table = document.getElementById('events-preview-table');
-    const body = document.getElementById('events-preview-body');
-    const toggle = document.getElementById('events-preview-toggle');
-
-    const info = (participantsInfo && typeof participantsInfo === 'object') ? participantsInfo : {};
-    const columns = normalizeStringArray(info.columns);
-    const sampleValues = (info.sample_values && typeof info.sample_values === 'object') ? info.sample_values : {};
-    const sampleStatus = String(info.sample_status || 'missing-file').trim() || 'missing-file';
-    const fileLabel = bidsDir ? `${bidsDir.replace(/\/$/, '')}/participants.tsv` : 'participants.tsv';
-
-    card.style.display = '';
-    body.style.display = '';
-    toggle.classList.add('open');
-
-    label.textContent = fileLabel;
-    label.title = fileLabel;
-    meta.textContent = `${columns.length} column(s) • status: ${sampleStatus}`;
-
-    if (!columns.length) {
-      table.innerHTML = `
-        <thead><tr><th>participants.tsv</th></tr></thead>
-        <tbody><tr><td class="na-cell">No participants columns detected. Check participants.tsv in the selected BIDS folder.</td></tr></tbody>
-      `;
-      return;
-    }
-
-    const rows = columns.map(column => {
-      const values = normalizeStringArray(sampleValues[column]);
-      const renderedValues = values.length ? values.slice(0, 12).join(', ') : 'n/a';
-      return `<tr><td>${escHtml(column)}</td><td>${escHtml(renderedValues)}</td></tr>`;
-    }).join('');
-
-    table.innerHTML = `
-      <thead><tr><th>Column</th><th>Sample values</th></tr></thead>
-      <tbody>${rows}</tbody>
-    `;
+    await scanPreviewController.scanEvents(forceNewPreview);
   }
 
   async function resamplePreview() {
-    const btn = document.getElementById('btn-resample');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Loading…';
-    try {
-      currentPreviewFile = null;
-      await scanEvents(true);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fas fa-random me-1"></i>Different file';
-    }
+    await scanPreviewController.resamplePreview();
   }
 
   // ================================================================
   // COLUMNS POOL
   // ================================================================
   function renderColumnsPool() {
-    const sourcePool = document.getElementById('columns-pool');
-    const generatedPool = document.getElementById('generated-columns-pool');
-    const sourceColumns = availableColumns.map(col => ({ name: col, generated: false, sourceKind: 'source' }));
-    const generatedColumns = getGeneratedColumns();
-
-    document.getElementById('source-columns-count').textContent = sourceColumns.length ? `${sourceColumns.length}` : '';
-    document.getElementById('generated-columns-count').textContent = generatedColumns.length ? `${generatedColumns.length}` : '';
-
-    renderColumnList(sourcePool, sourceColumns, {
-      emptyHtml: '<div class="text-muted small text-center py-4"><i class="fas fa-search d-block mb-2" style="font-size:1.8rem; opacity:.25;"></i>Scan a BIDS folder<br>to see columns</div>'
-    });
-    renderColumnList(generatedPool, generatedColumns, {
-      emptyHtml: '<div class="columns-empty-note">Generated outputs from the pipeline will appear here.</div>'
-    });
-  }
-
-  function renderColumnList(container, columnInfos, options = {}) {
-    if (!columnInfos.length) {
-      container.innerHTML = options.emptyHtml || '<div class="text-muted small text-center">No columns found.</div>';
-      return;
-    }
-
-    container.innerHTML = columnInfos.map(colInfo => {
-      const col = colInfo.name;
-      const vals = getColumnDomain(col);
-      const shown = vals.slice(0, 8);
-      const extra = vals.length - shown.length;
-      const valHtml = shown.length ? `
-        <div class="col-vals">
-          ${shown.map(v => `<span class="col-val-tag">${escHtml(v)}</span>`).join('')}
-          ${extra > 0 ? `<span class="col-val-more">+${extra} more</span>` : ''}
-        </div>` : '';
-      return `
-        <div class="col-badge ${colInfo.generated ? 'generated' : ''}" draggable="true" data-col="${escAttr(col)}">
-          <i class="fas fa-columns"></i>
-          <span>${escHtml(col)}</span>
-          ${colInfo.generated ? '<span class="col-badge-note">generated</span>' : ''}
-        </div>
-        ${valHtml}`;
-    }).join('');
-
-    container.querySelectorAll('.col-badge').forEach(badge => {
-      badge.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', badge.dataset.col);
-        e.dataTransfer.effectAllowed = 'copy';
-        badge.classList.add('dragging');
-        // Highlight all drop zones to signal they are valid targets
-        document.querySelectorAll('.col-drop-zone').forEach(z => z.classList.add('ready'));
-      });
-      badge.addEventListener('dragend', () => {
-        badge.classList.remove('dragging');
-        document.querySelectorAll('.col-drop-zone').forEach(z => z.classList.remove('ready', 'drag-over'));
-      });
-    });
+    return columnsController.renderColumnsPool();
   }
 
   function getSelectableColumns() {
-    const seen = new Set();
-    const combined = [];
-
-    availableColumns.forEach(col => {
-      const normalized = String(col || '').trim();
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized);
-      combined.push({ name: normalized, generated: false });
-    });
-
-    getGeneratedColumns().forEach(col => {
-      const normalized = String(col?.name || '').trim();
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized);
-      combined.push({ name: normalized, generated: true });
-    });
-
-    return combined;
+    return columnsController.getSelectableColumns();
   }
 
   function getGeneratedColumns() {
-    const generated = [];
-    const seen = new Set();
-
-    document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const opType = card.dataset.opType;
-      const inferred = inferGeneratedColumnsForCard(card, opType);
-      inferred.forEach(colInfo => {
-        const normalized = String(colInfo?.name || '').trim();
-        if (!normalized || seen.has(normalized)) return;
-        seen.add(normalized);
-        generated.push({
-          name: normalized,
-          generated: true,
-          sourceKind: colInfo.sourceKind || 'generated',
-          derivedFrom: colInfo.derivedFrom || opType
-        });
-      });
-    });
-
-    return generated;
+    return columnsController.getGeneratedColumns();
   }
 
   function getGeneratedModelXRegressorSuggestions() {
-    const suggestions = [];
-    const seen = new Set();
-
-    const addSuggestion = (value) => {
-      const normalized = String(value || '').trim();
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized);
-      suggestions.push(normalized);
-    };
-
-    getGeneratedColumns().forEach(colInfo => {
-      const columnName = String(colInfo?.name || '').trim();
-      if (!columnName) return;
-
-      addSuggestion(columnName);
-
-      if (String(colInfo?.derivedFrom || '').trim() === 'Concatenate') {
-        getColumnDomain(columnName).forEach(level => {
-          const normalizedLevel = String(level || '').trim();
-          if (!normalizedLevel) return;
-          addSuggestion(`${columnName}.${normalizedLevel}`);
-        });
-      }
-    });
-
-    return suggestions;
-  }
-
-  function inferGeneratedColumnsForCard(card, opType) {
-    if (opType === 'Factor') {
-      return inferFactorGeneratedColumns(card);
-    }
-
-    const generated = [];
-    card.querySelectorAll('input[data-field="Output"]').forEach(input => {
-      const raw = input.value.trim();
-      if (!raw) return;
-      raw.split(',').map(v => v.trim()).filter(Boolean).forEach(name => {
-        generated.push({ name, sourceKind: 'explicit-output', derivedFrom: opType });
-      });
-    });
-    return generated;
-  }
-
-  function inferFactorGeneratedColumns(card) {
-    const inputZone = card.querySelector('.col-drop-zone[data-field="Input"]');
-    if (!inputZone) return [];
-
-    const inputColumns = getZoneValue(inputZone);
-    if (!inputColumns.length) return [];
-
-    const levelSets = inputColumns.map(col => {
-      const values = getColumnDomain(col).map(v => String(v || '').trim()).filter(Boolean);
-      return [...new Set(values)].sort((a, b) => a.localeCompare(b));
-    });
-
-    if (levelSets.some(levels => !levels.length)) return [];
-
-    const combinations = buildFactorCombinations(inputColumns, levelSets, 0, [], []);
-    return combinations.map(name => ({
-      name,
-      sourceKind: 'factor-derived',
-      derivedFrom: `Factor(${inputColumns.join(', ')})`
-    }));
-  }
-
-  function buildFactorCombinations(columns, levelSets, index, parts, names) {
-    if (index >= columns.length) {
-      if (parts.length) names.push(parts.join('_'));
-      return names;
-    }
-
-    const col = columns[index];
-    levelSets[index].forEach(level => {
-      buildFactorCombinations(columns, levelSets, index + 1, [...parts, col, level], names);
-    });
-    return names;
+    return columnsController.getGeneratedModelXRegressorSuggestions();
   }
 
   function getColumnDomain(name) {
-    return pipelineColumnValues[name] || columnValues[name] || [];
+    return columnsController.getColumnDomain(name);
   }
 
   function refreshPipelineColumnValues() {
-    pipelineColumnValues = buildPipelineColumnValues();
-    return pipelineColumnValues;
-  }
-
-  function buildPipelineColumnValues() {
-    const valuesMap = {};
-
-    Object.entries(columnValues || {}).forEach(([name, values]) => {
-      valuesMap[name] = normalizeValueList(values);
-    });
-
-    document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const ops = extractOpsFromCard(card);
-      ops.forEach(op => applyOperationValueDomains(valuesMap, op));
-    });
-
-    return valuesMap;
-  }
-
-  function applyOperationValueDomains(valuesMap, op) {
-    const opName = String(op?.Name || '').trim();
-    if (!opName) return;
-
-    const inputColumns = normalizeColumnList(op.Input);
-    const outputColumns = normalizeColumnList(op.Output);
-    const inputColumn = inputColumns[0] || '';
-    const targetColumn = outputColumns[0] || inputColumn;
-
-    switch (opName) {
-      case 'Filter': {
-        if (!targetColumn) return;
-        const inputValues = getDomainFromMap(valuesMap, inputColumn);
-        valuesMap[targetColumn] = inferFilterDomain(op.Query, inputColumn, inputValues);
-        return;
-      }
-      case 'Concatenate': {
-        const outputName = outputColumns[0];
-        if (!outputName || !inputColumns.length) return;
-        const levelSets = inputColumns.map(col => getDomainFromMap(valuesMap, col));
-        if (levelSets.some(levels => !levels.length)) return;
-        valuesMap[outputName] = normalizeValueList(buildDomainCombinations(levelSets));
-        return;
-      }
-      case 'Factor': {
-        if (!inputColumns.length) return;
-        const levelSets = inputColumns.map(col => getDomainFromMap(valuesMap, col));
-        if (levelSets.some(levels => !levels.length)) return;
-        const factorColumns = buildFactorCombinations(inputColumns, levelSets, 0, [], []);
-        factorColumns.forEach(name => {
-          valuesMap[name] = ['0', '1'];
-        });
-        return;
-      }
-      case 'Replace': {
-        if (!targetColumn) return;
-        const inputValues = getDomainFromMap(valuesMap, inputColumn);
-        const replacements = Array.isArray(op.Replace) ? op.Replace : [];
-        valuesMap[targetColumn] = normalizeValueList(inputValues.map(value => applyReplacementRules(value, replacements)));
-        return;
-      }
-      case 'Copy': {
-        if (!inputColumns.length || !outputColumns.length) return;
-        outputColumns.forEach((outputName, index) => {
-          const sourceName = inputColumns[index] || inputColumns[inputColumns.length - 1];
-          if (!outputName || !sourceName) return;
-          valuesMap[outputName] = [...getDomainFromMap(valuesMap, sourceName)];
-        });
-        return;
-      }
-      case 'Assign': {
-        const targetColumns = normalizeColumnList(op.Target);
-        if (!inputColumns.length || !targetColumns.length) return;
-        const assigned = targetColumns.map((targetName, index) => {
-          const sourceName = inputColumns[index] || inputColumns[inputColumns.length - 1];
-          return { targetName, sourceName };
-        });
-
-        if (outputColumns.length) {
-          assigned.forEach(({ sourceName }, index) => {
-            const outputName = outputColumns[index] || outputColumns[outputColumns.length - 1];
-            if (!outputName || !sourceName) return;
-            valuesMap[outputName] = [...getDomainFromMap(valuesMap, sourceName)];
-          });
-          return;
-        }
-
-        assigned.forEach(({ targetName, sourceName }) => {
-          if (!targetName || !sourceName) return;
-          valuesMap[targetName] = [...getDomainFromMap(valuesMap, sourceName)];
-        });
-        return;
-      }
-      case 'DropNA': {
-        if (!targetColumn) return;
-        valuesMap[targetColumn] = [...getDomainFromMap(valuesMap, inputColumn)];
-        return;
-      }
-      case 'Split': {
-        if (!inputColumns.length || !outputColumns.length) return;
-        outputColumns.forEach(outputName => {
-          if (!outputName) return;
-          valuesMap[outputName] = [...getDomainFromMap(valuesMap, inputColumn)];
-        });
-        return;
-      }
-      case 'LabelIdenticalRows': {
-        if (!inputColumns.length) return;
-        if (outputColumns.length) {
-          outputColumns.forEach(outputName => {
-            if (!outputName) return;
-            valuesMap[outputName] = [];
-          });
-          return;
-        }
-        inputColumns.forEach(col => {
-          valuesMap[`${col}_label`] = [];
-        });
-        return;
-      }
-      case 'MergeIdenticalRows': {
-        return;
-      }
-      case 'Constant': {
-        const outputName = outputColumns[0];
-        if (!outputName) return;
-        const rawValue = op.Value;
-        const constantValue = rawValue === undefined || rawValue === null || rawValue === ''
-          ? '1'
-          : String(rawValue);
-        valuesMap[outputName] = [constantValue];
-        return;
-      }
-      case 'Product':
-      case 'Std':
-      case 'Sum': {
-        if (!targetColumn) return;
-        valuesMap[targetColumn] = [...getDomainFromMap(valuesMap, inputColumn)];
-        return;
-      }
-      case 'Scale':
-      case 'Mean': {
-        if (!targetColumn) return;
-        valuesMap[targetColumn] = [...getDomainFromMap(valuesMap, inputColumn)];
-        return;
-      }
-      case 'Threshold': {
-        if (!targetColumn) return;
-        valuesMap[targetColumn] = op.Binarize
-          ? ['0', '1']
-          : [...getDomainFromMap(valuesMap, inputColumn)];
-        return;
-      }
-      case 'Select': {
-        if (!inputColumns.length) return;
-        const keep = new Set(inputColumns);
-        Object.keys(valuesMap).forEach(name => {
-          if (!keep.has(name)) delete valuesMap[name];
-        });
-        return;
-      }
-      case 'Delete': {
-        inputColumns.forEach(name => {
-          delete valuesMap[name];
-        });
-        return;
-      }
-      default:
-        return;
-    }
+    return columnsController.refreshPipelineColumnValues();
   }
 
   function normalizeColumnList(value) {
-    const items = Array.isArray(value) ? value : (value ? [value] : []);
-    return items.map(item => String(item || '').trim()).filter(Boolean);
+    return columnsController.normalizeColumnList(value);
   }
 
-  function normalizeValueList(values) {
-    return Array.from(new Set((Array.isArray(values) ? values : [])
-      .map(value => String(value ?? '').trim())
-      .filter(Boolean)));
-  }
-
-  function getDomainFromMap(valuesMap, name) {
-    return normalizeValueList(valuesMap[name] || []);
-  }
-
-  function buildDomainCombinations(levelSets, index = 0, parts = [], names = []) {
-    if (index >= levelSets.length) {
-      if (parts.length) names.push(parts.join('_'));
-      return names;
-    }
-
-    levelSets[index].forEach(level => {
-      buildDomainCombinations(levelSets, index + 1, [...parts, level], names);
-    });
-    return names;
-  }
-
-  function inferFilterDomain(query, inputColumn, inputValues) {
-    const normalizedInput = String(inputColumn || '').trim();
-    const domain = normalizeValueList(inputValues);
-    const normalizedQuery = String(query || '').trim();
-    if (!normalizedInput || !normalizedQuery || !domain.length) return domain;
-
-    const matched = new Set();
-    let sawInputEquality = false;
-
-    normalizedQuery.split('|').map(part => part.trim()).filter(Boolean).forEach(part => {
-      const clause = part.replace(/^\(+|\)+$/g, '').trim();
-      const match = clause.match(/^(.+?)\s*==\s*(.+)$/);
-      if (!match) return;
-
-      const left = String(match[1] || '').trim();
-      if (left !== normalizedInput) return;
-
-      sawInputEquality = true;
-      const literal = normalizeQueryLiteral(match[2]);
-      if (literal) matched.add(literal);
-    });
-
-    if (!sawInputEquality) return domain;
-    const filtered = domain.filter(value => matched.has(String(value)));
-    return filtered.length ? filtered : Array.from(matched);
-  }
-
-  function normalizeQueryLiteral(value) {
-    const literal = String(value || '').trim();
-    if (!literal) return '';
-    if ((literal.startsWith("'") && literal.endsWith("'")) || (literal.startsWith('"') && literal.endsWith('"'))) {
-      return literal.slice(1, -1).trim();
-    }
-    return literal.replace(/^\(+|\)+$/g, '').trim();
-  }
-
-  function applyReplacementRules(value, replacements) {
-    let nextValue = String(value ?? '').trim();
-    replacements.forEach(rule => {
-      const key = String(rule?.key || '').trim();
-      if (!key) return;
-
-      const replacement = String(rule?.value ?? '').trim();
-      if (nextValue === key) {
-        nextValue = replacement;
-        return;
-      }
-
-      try {
-        const regex = new RegExp(key);
-        if (regex.test(nextValue)) nextValue = nextValue.replace(regex, replacement);
-      } catch (e) {
-        // Ignore invalid regex patterns while keeping literal replacements working.
-      }
-    });
-    return nextValue;
-  }
-
-  // ================================================================
-  // DROP ZONE SETUP  (called once per zone on card creation)
-  // ================================================================
-  function setupDropZone(zone) {
-    // Guard: only wire once
-    if (zone.dataset.dzReady) return;
-    zone.dataset.dzReady = '1';
-
-    zone.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      zone.classList.add('drag-over');
-    });
-
-    zone.addEventListener('dragleave', e => {
-      // Only remove class when truly leaving the zone (not entering a child)
-      if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over');
-    });
-
-    zone.addEventListener('drop', e => {
-      e.preventDefault();
-      zone.classList.remove('drag-over', 'ready');
-      const col = e.dataTransfer.getData('text/plain');
-      if (col) assignColToZone(zone, col);
-    });
-
-    // Click → show picker popup
-    zone.addEventListener('click', e => {
-      // Chip remove button handled by delegation below — skip
-      if (e.target.classList.contains('chip-rm') || e.target.closest('.chip-rm')) return;
-      openColPicker(zone, e);
-    });
-  }
-
-  // ================================================================
-  // COLUMN CHIPS IN DROP ZONES
-  // ================================================================
-  function assignColToZone(zone, col) {
-    const existing = getZoneValue(zone);
-    if (zone.dataset.mode === 'multi') {
-      if (!existing.includes(col)) setZoneValue(zone, [...existing, col]);
-    } else {
-      setZoneValue(zone, [col]);
-    }
-    updateGeneratedJSON();
-  }
-
-  function getZoneValue(zone) {
-    return Array.from(zone.querySelectorAll('.col-chip')).map(c => c.dataset.col);
-  }
-
-  function setZoneValue(zone, cols) {
-    // Clear existing chips and hint
-    zone.querySelectorAll('.col-chip, .drop-hint').forEach(el => el.remove());
-
-    cols.forEach(col => {
-      const chip = document.createElement('span');
-      chip.className = 'col-chip';
-      chip.dataset.col = col;
-      chip.innerHTML = `<i class="fas fa-columns" style="font-size:.6rem;"></i> ${escHtml(col)} <button class="chip-rm" title="Remove">×</button>`;
-      zone.appendChild(chip);
-    });
-
-    if (!cols.length) addDropHint(zone);
-  }
-
-  function addDropHint(zone) {
-    const hint = document.createElement('span');
-    hint.className = 'drop-hint';
-    hint.textContent = zone.dataset.mode === 'multi'
-      ? 'Drop columns here — or click to pick'
-      : 'Drop column here — or click to pick';
-    zone.appendChild(hint);
-  }
-
-  // Chip removal via event delegation on the pipeline
-  document.getElementById('op-pipeline').addEventListener('click', e => {
-    const rmBtn = e.target.closest('.chip-rm');
-    if (!rmBtn) return;
-    e.stopPropagation();
-    const chip = rmBtn.closest('.col-chip');
-    const zone = chip && chip.closest('.col-drop-zone');
-    chip && chip.remove();
-    if (zone && !zone.querySelectorAll('.col-chip').length) addDropHint(zone);
-    updateGeneratedJSON();
-  });
-
-  // ================================================================
-  // COLUMN PICKER POPUP
-  // ================================================================
-  function openColPicker(zone, e) {
-    // Close any existing popup first
-    document.querySelectorAll('.col-picker-popup').forEach(p => p.remove());
-    const selectableColumns = getSelectableColumns();
-    if (!selectableColumns.length) return;
-
-    const popup = document.createElement('div');
-    popup.className = 'col-picker-popup';
-
-    selectableColumns.forEach(colInfo => {
-      const col = colInfo.name;
-      const item = document.createElement('div');
-      item.className = 'col-picker-item';
-      item.innerHTML = colInfo.generated
-        ? `${escHtml(col)} <span class="col-badge-note">generated</span>`
-        : escHtml(col);
-      item.addEventListener('mousedown', ev => {
-        ev.preventDefault(); // prevent blur/close before click fires
-        assignColToZone(zone, col);
-        popup.remove();
-      });
-      popup.appendChild(item);
-    });
-
-    document.body.appendChild(popup);
-    // Position below the zone using getBoundingClientRect (works with scroll via fixed)
-    const rect = zone.getBoundingClientRect();
-    popup.style.top  = (rect.bottom + 4) + 'px';
-    popup.style.left = rect.left + 'px';
-    // Make sure it doesn't overflow right edge
-    const popW = popup.offsetWidth;
-    const winW = window.innerWidth;
-    if (rect.left + popW > winW - 8) popup.style.left = (winW - popW - 8) + 'px';
-
-    // Dismiss on click outside
-    const close = ev => {
-      if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener('mousedown', close); }
-    };
-    setTimeout(() => document.addEventListener('mousedown', close), 50);
-  }
-
-  // ================================================================
-  // ADD OPERATION
-  // ================================================================
   function addOperation(opType, cat) {
-    const pipeline = document.getElementById('op-pipeline');
-    const emptyHint = document.getElementById('pipeline-empty-hint');
-    if (emptyHint) emptyHint.remove();
-
-    opCounter++;
-    const id = `op-${opCounter}`;
-
-    const card = document.createElement('div');
-    card.className = `op-card ${cat}-card`;
-    card.id = id;
-    card.dataset.opType = opType;
-    card.dataset.cat = cat;
-    card.innerHTML = `
-      <div class="op-card-header">
-        <span class="op-type-badge ${cat}">${cat === 'munge' ? 'Munge' : 'Compute'}</span>
-        <span class="op-card-title">${escHtml(opType)}</span>
-        <button class="btn-op-remove" title="Remove">×</button>
-      </div>
-      <div class="op-card-body">${getOpFieldsHTML(opType, id)}</div>
-    `;
-
-    // Remove button
-    card.querySelector('.btn-op-remove').addEventListener('click', () => {
-      card.remove();
-      if (!document.querySelector('#op-pipeline .op-card')) {
-        const h = document.createElement('div');
-        h.id = 'pipeline-empty-hint';
-        h.className = 'empty-pipeline-hint';
-        h.innerHTML = '<i class="fas fa-plus-circle d-block mb-2" style="font-size:1.6rem;opacity:.4;"></i>Click an operation above to add it.<br>Drag columns from the left into the input fields.';
-        pipeline.appendChild(h);
-      }
-      updateGeneratedJSON();
-    });
-
-    pipeline.appendChild(card);
-
-    // Wire drop zones
-    card.querySelectorAll('.col-drop-zone').forEach(z => {
-      addDropHint(z);
-      setupDropZone(z);
-    });
-
-    // Wire inputs for live JSON update
-    card.querySelectorAll('input:not([type="checkbox"]), textarea').forEach(el => {
-      el.addEventListener('input', updateGeneratedJSON);
-    });
-    card.querySelectorAll('input[type="checkbox"]').forEach(el => {
-      el.addEventListener('change', updateGeneratedJSON);
-    });
-
-    // Wire Replace table "Add row" button
-    const addRowBtn = card.querySelector('.btn-add-row');
-    if (addRowBtn) {
-      addRowBtn.addEventListener('click', () => addReplaceRow(card));
-      // Wire remove on existing first row
-      card.querySelectorAll('.btn-rm-row').forEach(b => wireRmRow(b));
-    }
-
-    updateGeneratedJSON();
-    return card;
+    return pipelineController.addOperation(opType, cat);
   }
 
   function getOperationCategory(opType) {
@@ -1755,789 +855,24 @@
     if (COMPUTE_OPERATION_NAMES.has(opType)) return 'compute';
     return '';
   }
-
-  function clearPipelineCards() {
-    const pipeline = document.getElementById('op-pipeline');
-    pipeline.querySelectorAll('.op-card').forEach(card => card.remove());
-    if (!pipeline.querySelector('.op-card')) {
-      const hint = document.createElement('div');
-      hint.id = 'pipeline-empty-hint';
-      hint.className = 'empty-pipeline-hint';
-      hint.innerHTML = '<i class="fas fa-plus-circle d-block mb-2" style="font-size:1.6rem;opacity:.4;"></i>Click an operation above to add it.<br>Drag columns from the left into the input fields.';
-      pipeline.appendChild(hint);
-    }
-  }
-
-  function setCardFieldValue(card, fieldName, value) {
-    const input = card.querySelector(`input[data-field="${fieldName}"], textarea[data-field="${fieldName}"]`);
-    if (!input) return;
-    if (input.type === 'checkbox') {
-      input.checked = Boolean(value);
-      return;
-    }
-    if (Array.isArray(value)) {
-      input.value = value.map(item => String(item || '').trim()).filter(Boolean).join(', ');
-      return;
-    }
-    input.value = value === undefined || value === null ? '' : String(value);
-  }
-
-  function setCardZoneValue(card, fieldName, value) {
-    const zone = card.querySelector(`.col-drop-zone[data-field="${fieldName}"]`);
-    if (!zone) return;
-    setZoneValue(zone, normalizeColumnList(value));
-  }
-
-  function populateReplaceRows(card, replacements) {
-    const tbody = card.querySelector('.replace-table tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    (Array.isArray(replacements) ? replacements : []).forEach(rule => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="text" placeholder="old_value"></td>
-        <td><input type="text" placeholder="new_value"></td>
-        <td><button class="btn btn-sm btn-link text-danger p-0 btn-rm-row" title="Remove">×</button></td>
-      `;
-      const [keyInput, valueInput] = tr.querySelectorAll('input');
-      keyInput.value = String(rule?.key || '').trim();
-      valueInput.value = String(rule?.value || '').trim();
-      tr.querySelectorAll('input').forEach(input => input.addEventListener('input', updateGeneratedJSON));
-      wireRmRow(tr.querySelector('.btn-rm-row'));
-      tbody.appendChild(tr);
-    });
-    if (!tbody.children.length) {
-      addReplaceRow(card);
-    }
-  }
-
-  function populateCardFromInstruction(card, instruction) {
-    if (!card || !instruction || typeof instruction !== 'object') return;
-
-    setCardZoneValue(card, 'Input', instruction.Input);
-    setCardZoneValue(card, 'Target', instruction.Target);
-    setCardZoneValue(card, 'By', instruction.By);
-
-    if (card.dataset.opType === 'Threshold' && Object.prototype.hasOwnProperty.call(instruction, 'Threshold')) {
-      if (instruction.Above === false) {
-        setCardFieldValue(card, 'MaxThreshold', instruction.Threshold);
-      } else {
-        setCardFieldValue(card, 'MinThreshold', instruction.Threshold);
-      }
-    } else {
-      setCardFieldValue(card, 'Output', instruction.Output);
-    }
-
-    ['Query', 'InputAttr', 'TargetAttr', 'Value', 'Weights'].forEach(fieldName => {
-      if (Object.prototype.hasOwnProperty.call(instruction, fieldName)) {
-        setCardFieldValue(card, fieldName, instruction[fieldName]);
-      }
-    });
-
-    ['Cumulative', 'Demean', 'Rescale', 'OmitNan', 'Binarize', 'Signed'].forEach(fieldName => {
-      const checkbox = card.querySelector(`input[type="checkbox"][data-field="${fieldName}"]`);
-      if (!checkbox) return;
-      if (Object.prototype.hasOwnProperty.call(instruction, fieldName)) {
-        checkbox.checked = Boolean(instruction[fieldName]);
-      }
-    });
-
-    if (card.dataset.opType === 'Replace') {
-      populateReplaceRows(card, instruction.Replace);
-    }
-  }
-
-  function findSeedTransformations(model) {
-    const nodes = Array.isArray(model?.Nodes) ? model.Nodes : [];
-    const targetLevels = new Set(getTargetLevels().map(level => normalizeNodeLevel(level)).filter(Boolean));
-    const preferredNodes = nodes.filter(node => {
-      if (!node || typeof node !== 'object') return false;
-      const level = normalizeNodeLevel(node.Level);
-      return targetLevels.size ? targetLevels.has(level) : true;
-    });
-    const nodesToInspect = preferredNodes.length ? preferredNodes : nodes;
-
-    for (const node of nodesToInspect) {
-      const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
-        ? node.Transformations
-        : null;
-      const instructions = Array.isArray(transformations?.Instructions)
-        ? transformations.Instructions.filter(item => item && typeof item === 'object')
-        : [];
-      if (instructions.length) {
-        return {
-          nodeName: String(node?.Name || '').trim(),
-          nodeLevel: normalizeNodeLevel(node?.Level),
-          instructions
-        };
-      }
-    }
-
-    return null;
-  }
-
-  async function maybeBootstrapPipelineFromModel(force = false) {
-    if (!force && document.querySelector('#op-pipeline .op-card')) return false;
-
-    let model = null;
-    if (launchContext?.modelSnapshot && typeof launchContext.modelSnapshot === 'object' && !Array.isArray(launchContext.modelSnapshot)) {
-      model = structuredClone(launchContext.modelSnapshot);
-    } else {
-      const selectedModelPath = getSelectedModelPath();
-      if (!selectedModelPath) return false;
-      try {
-        model = await loadModelForValidation(selectedModelPath);
-      } catch (e) {
-        return false;
-      }
-    }
-
-    const seed = findSeedTransformations(model);
-    if (!seed || !seed.instructions.length) return false;
-
-    clearPipelineCards();
-
-    seed.instructions.forEach(instruction => {
-      const opType = String(instruction?.Name || '').trim();
-      const category = getOperationCategory(opType);
-      if (!category) return;
-      const card = addOperation(opType, category);
-      populateCardFromInstruction(card, instruction);
-    });
-
-    updateGeneratedJSON();
-
-    const nodeLabel = seed.nodeName
-      ? `${seed.nodeLevel || 'node'} ${seed.nodeName}`
-      : (seed.nodeLevel || 'selected node');
-    setStatus(`Loaded ${seed.instructions.length} existing transformer instruction(s) from ${nodeLabel}.`, 'success');
-    return true;
-  }
-
-  // ================================================================
-  // OP FIELD HTML
-  // ================================================================
-  function getOpFieldsHTML(opType, id) {
-    switch (opType) {
-
-      case 'Assign': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Target Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Target" data-mode="multi"></div>
-          <div class="op-field-hint">Input and Target are mapped 1-to-1 in order.</div>
-        </div>
-        <div class="row g-2">
-          <div class="col-md-6">
-            <div class="op-field-label">InputAttr <span class="text-muted fw-normal">(optional)</span></div>
-            <input type="text" class="form-control form-control-sm" data-field="InputAttr" placeholder="value">
-          </div>
-          <div class="col-md-6">
-            <div class="op-field-label">TargetAttr <span class="text-muted fw-normal">(optional)</span></div>
-            <input type="text" class="form-control form-control-sm" data-field="TargetAttr" placeholder="value">
-          </div>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="assigned_col1, assigned_col2">
-        </div>`;
-
-      case 'Filter': return `
-        <div>
-          <div class="op-field-label">Input <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="single"></div>
-          <div class="op-field-hint">Column whose rows will be filtered.</div>
-        </div>
-        <div>
-          <div class="op-field-label">Query <span class="text-danger">*</span>
-            <span class="text-muted fw-normal ms-1" style="font-size:.68rem;">e.g. <code>trial_type == 'go'</code> or <code>col == 'a' | col == 'b'</code></span>
-          </div>
-          <input type="text" class="form-control form-control-sm" data-field="Query" placeholder="trial_type == 'value'">
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="filtered_col">
-        </div>`;
-
-      case 'Concatenate': return `
-        <div>
-          <div class="op-field-label">Input Columns <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-          <div class="op-field-hint">Drop multiple columns — they will be concatenated with <code>_</code>.</div>
-        </div>
-        <div>
-          <div class="op-field-label">Output Name <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="e.g. trial_combined">
-        </div>`;
-
-      case 'Factor': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-          <div class="op-field-hint">Dummy-codes each column. Output names: <code>col_level</code>.</div>
-        </div>`;
-
-      case 'Replace': return `
-        <div>
-          <div class="op-field-label">Input <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="single"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Replacements <span class="text-danger">*</span>
-            <span class="text-muted fw-normal ms-1" style="font-size:.68rem;">(regex supported in key)</span>
-          </div>
-          <table class="replace-table">
-            <thead><tr><th>Old value (key)</th><th>New value</th><th></th></tr></thead>
-            <tbody>
-              <tr>
-                <td><input type="text" placeholder="old_value"></td>
-                <td><input type="text" placeholder="new_value"></td>
-                <td><button class="btn btn-sm btn-link text-danger p-0 btn-rm-row" title="Remove">×</button></td>
-              </tr>
-            </tbody>
-          </table>
-          <button class="btn-add-row">+ Add row</button>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="replaced_col">
-        </div>`;
-
-      case 'Copy': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Output Names <span class="text-danger">*</span>
-            <span class="text-muted fw-normal ms-1" style="font-size:.68rem;">comma-separated, 1-to-1 with input</span>
-          </div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="new_col1, new_col2">
-        </div>`;
-
-      case 'DropNA': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="clean_col1, clean_col2">
-        </div>`;
-
-      case 'Split': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">By Column(s) <span class="text-muted fw-normal">(optional)</span></div>
-          <div class="col-drop-zone" data-field="By" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="split_col1, split_col2">
-        </div>`;
-
-      case 'LabelIdenticalRows': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-          <div class="op-field-hint">Default generated labels use the suffix <code>_label</code>.</div>
-        </div>
-        <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" data-field="Cumulative" id="${id}-cumulative">
-          <label class="form-check-label small" for="${id}-cumulative">Cumulative labels</label>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="trial_type_label">
-        </div>`;
-
-      case 'MergeIdenticalRows': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-          <div class="op-field-hint">Merges consecutive identical rows for the selected column(s).</div>
-        </div>`;
-
-      case 'Constant': return `
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="constant_col">
-        </div>
-        <div>
-          <div class="op-field-label">Value <span class="text-muted fw-normal">(optional)</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Value" placeholder="1">
-        </div>`;
-
-      case 'Product': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-product-omitnan">
-          <label class="form-check-label small" for="${id}-product-omitnan">Omit NaN</label>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="product_col">
-        </div>`;
-
-      case 'Select': return `
-        <div>
-          <div class="op-field-label">Columns to Keep <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-          <div class="op-field-hint">All other columns will be dropped from further analysis.</div>
-        </div>`;
-
-      case 'Delete': return `
-        <div>
-          <div class="op-field-label">Columns to Delete <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>`;
-
-      case 'Scale': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div class="d-flex gap-3 mt-1">
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" data-field="Demean" id="${id}-demean" checked>
-            <label class="form-check-label small" for="${id}-demean">Demean</label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" data-field="Rescale" id="${id}-rescale" checked>
-            <label class="form-check-label small" for="${id}-rescale">Rescale (÷ SD)</label>
-          </div>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="scaled_col">
-        </div>`;
-
-      case 'Mean': return `
-        <div>
-          <div class="op-field-label">Input <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="single"></div>
-        </div>
-        <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-omitnan">
-          <label class="form-check-label small" for="${id}-omitnan">Omit NaN</label>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="mean_col">
-        </div>`;
-
-      case 'Std': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-std-omitnan">
-          <label class="form-check-label small" for="${id}-std-omitnan">Omit NaN</label>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="std_col">
-        </div>`;
-
-      case 'Sum': return `
-        <div>
-          <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-        </div>
-        <div>
-          <div class="op-field-label">Weights <span class="text-muted fw-normal">(optional comma-separated)</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Weights" placeholder="1, 0.5, -1">
-        </div>
-        <div class="form-check mt-1">
-          <input class="form-check-input" type="checkbox" data-field="OmitNan" id="${id}-sum-omitnan">
-          <label class="form-check-label small" for="${id}-sum-omitnan">Omit NaN</label>
-        </div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="sum_col">
-        </div>`;
-
-      case 'Threshold': return `
-        <div>
-          <div class="op-field-label">Input <span class="text-danger">*</span></div>
-          <div class="col-drop-zone" data-field="Input" data-mode="single"></div>
-        </div>
-        <div class="row g-2">
-          <div class="col-md-6">
-            <div class="op-field-label">Min threshold <span class="text-muted fw-normal">(keep values >= min)</span></div>
-            <input type="number" class="form-control form-control-sm" data-field="MinThreshold" step="any" placeholder="0.2">
-          </div>
-          <div class="col-md-6">
-            <div class="op-field-label">Max threshold <span class="text-muted fw-normal">(keep values <= max)</span></div>
-            <input type="number" class="form-control form-control-sm" data-field="MaxThreshold" step="any" placeholder="5">
-          </div>
-        </div>
-        <div class="d-flex gap-3 mt-1">
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" data-field="Binarize" id="${id}-bin">
-            <label class="form-check-label small" for="${id}-bin">Binarize</label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" data-field="Signed" id="${id}-signed" checked>
-            <label class="form-check-label small" for="${id}-signed">Signed threshold</label>
-          </div>
-        </div>
-        <div class="op-field-hint">Tip: set both min and max for ranges like response_time between 0.2 and 5 seconds.</div>
-        <div>
-          <div class="op-field-label">Output <span class="text-danger">*</span></div>
-          <input type="text" class="form-control form-control-sm" data-field="Output" placeholder="thresholded_col">
-        </div>`;
-
-      default:
-        return '<div class="text-muted small">Unknown operation.</div>';
-    }
-  }
-
-  // ================================================================
-  // REPLACE TABLE ROWS
-  // ================================================================
-  function addReplaceRow(card) {
-    const tbody = card.querySelector('.replace-table tbody');
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input type="text" placeholder="old_value"></td>
-      <td><input type="text" placeholder="new_value"></td>
-      <td><button class="btn btn-sm btn-link text-danger p-0 btn-rm-row" title="Remove">×</button></td>
-    `;
-    tr.querySelectorAll('input').forEach(i => i.addEventListener('input', updateGeneratedJSON));
-    wireRmRow(tr.querySelector('.btn-rm-row'));
-    tbody.appendChild(tr);
-    updateGeneratedJSON();
-  }
-
-  function wireRmRow(btn) {
-    btn.addEventListener('click', () => { btn.closest('tr').remove(); updateGeneratedJSON(); });
-  }
-
-  // ================================================================
-  // JSON GENERATION
-  // ================================================================
   function updateGeneratedJSON() {
-    clearRequiredOutputMarkers();
-    const json = getTransformerPayload();
-    const instructions = json.Instructions;
-    refreshPipelineColumnValues();
-    document.getElementById('json-output').textContent = JSON.stringify(json, null, 2);
-    updateRegressorPreview(instructions);
-    refreshAllValuePills();
-    renderColumnsPool();
-    scheduleLiveModelValidation();
-  }
-
-  // ================================================================
-  // VALUE PILLS (Filter query helper & Replace key helper)
-  // ================================================================
-  function refreshAllValuePills() {
-    document.querySelectorAll('#op-pipeline .op-card').forEach(card => {
-      const opType = card.dataset.opType;
-      if (opType === 'Filter') refreshFilterPills(card);
-      if (opType === 'Replace') refreshReplaceSuggestions(card);
-    });
-  }
-
-  function refreshFilterPills(card) {
-    const inputZone = card.querySelector('.col-drop-zone[data-field="Input"]');
-    const queryInput = card.querySelector('input[data-field="Query"]');
-    if (!inputZone || !queryInput) return;
-
-    const cols = getZoneValue(inputZone);
-    const col  = cols[0];
-    const vals = col ? getColumnDomain(col) : [];
-
-    let container = card.querySelector('.val-pills-container');
-
-    if (!vals.length) {
-      if (container) container.remove();
-      return;
-    }
-
-    if (!container) {
-      container = document.createElement('div');
-      container.className = 'val-pills-container';
-      queryInput.closest('div').appendChild(container);
-    }
-
-    // Re-render pills (re-wires click handlers each time col changes)
-    container.innerHTML = `
-      <div class="val-pills-hint"><i class="fas fa-hand-pointer me-1"></i>Click a value to insert into query:</div>
-      <div class="val-pills">${vals.map(v =>
-        `<button class="val-pill" data-col="${escAttr(col)}" data-val="${escAttr(v)}">${escHtml(v)}</button>`
-      ).join('')}</div>
-    `;
-    container.querySelectorAll('.val-pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        const expr = `${pill.dataset.col} == '${pill.dataset.val}'`;
-        const cur  = queryInput.value.trim();
-        queryInput.value = cur ? `${cur} | ${expr}` : expr;
-        // Mark active
-        container.querySelectorAll('.val-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        updateGeneratedJSON();
-      });
-    });
-    // Sync active state with current query
-    const curQuery = queryInput.value;
-    container.querySelectorAll('.val-pill').forEach(pill => {
-      const expr = `${pill.dataset.col} == '${pill.dataset.val}'`;
-      pill.classList.toggle('active', curQuery.includes(expr));
-    });
-  }
-
-  function refreshReplaceSuggestions(card) {
-    const inputZone = card.querySelector('.col-drop-zone[data-field="Input"]');
-    if (!inputZone) return;
-    const cols = getZoneValue(inputZone);
-    const col  = cols[0];
-    const vals = col ? getColumnDomain(col) : [];
-
-    let hint = card.querySelector('.replace-val-hint');
-    if (!vals.length) { if (hint) hint.remove(); return; }
-
-    if (!hint) {
-      hint = document.createElement('div');
-      hint.className = 'replace-val-hint val-pills-container';
-      const addRowBtn = card.querySelector('.btn-add-row');
-      if (addRowBtn) addRowBtn.parentNode.insertBefore(hint, addRowBtn);
-    }
-    hint.innerHTML = `
-      <div class="val-pills-hint"><i class="fas fa-hand-pointer me-1"></i>Click to add as replacement row:</div>
-      <div class="val-pills">${vals.map(v =>
-        `<button class="val-pill" data-val="${escAttr(v)}">${escHtml(v)}</button>`
-      ).join('')}</div>
-    `;
-    hint.querySelectorAll('.val-pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        // Find first empty key input and fill it, else add new row
-        const tbody = card.querySelector('.replace-table tbody');
-        let filled = false;
-        tbody.querySelectorAll('tr').forEach(tr => {
-          const keyIn = tr.querySelector('td:first-child input');
-          if (!filled && keyIn && !keyIn.value.trim()) {
-            keyIn.value = pill.dataset.val;
-            filled = true;
-          }
-        });
-        if (!filled) {
-          addReplaceRow(card);
-          const rows = tbody.querySelectorAll('tr');
-          const lastKeyIn = rows[rows.length - 1].querySelector('td:first-child input');
-          if (lastKeyIn) lastKeyIn.value = pill.dataset.val;
-        }
-        updateGeneratedJSON();
-      });
-    });
-  }
-
-  function parseCsvTokens(value) {
-    return String(value || '')
-      .split(',')
-      .map(token => token.trim())
-      .filter(Boolean);
-  }
-
-  function clearRequiredOutputMarkers() {
-    document.querySelectorAll('#op-pipeline .op-card').forEach(card => card.classList.remove('op-missing-output'));
-    document.querySelectorAll('#op-pipeline .op-card input[data-field="Output"]').forEach(input => input.classList.remove('is-invalid'));
+    return pipelineController.updateGeneratedJSON();
   }
 
   function collectRequiredOutputIssues() {
-    clearRequiredOutputMarkers();
-    const issues = [];
-    document.querySelectorAll('#op-pipeline .op-card').forEach((card, index) => {
-      const opType = String(card.dataset.opType || '').trim();
-      if (!REQUIRED_OUTPUT_OPS.has(opType)) return;
-      const outputInput = card.querySelector('input[data-field="Output"]');
-      const outputTokens = parseCsvTokens(outputInput?.value || '');
-      if (outputTokens.length) return;
-
-      card.classList.add('op-missing-output');
-      if (outputInput) outputInput.classList.add('is-invalid');
-      issues.push(`Op ${index + 1} (${opType}) is missing Output.`);
-    });
-    return issues;
+    return pipelineController.collectRequiredOutputIssues();
   }
 
-  function parseNumericCsv(value) {
-    return parseCsvTokens(value)
-      .map(token => Number(token))
-      .filter(num => Number.isFinite(num));
-  }
-
-  function normalizeThresholdBound(value) {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  function createThresholdInstruction(input, threshold, above, output = '', options = {}) {
-    const { signed = true, binarize = false } = options;
-    const op = {
-      Name: 'Threshold',
-      Input: input,
-      Threshold: threshold,
-      Above: above
-    };
-
-    if (!signed) op.Signed = false;
-    if (binarize) op.Binarize = true;
-
-    const out = String(output || '').trim();
-    if (out) op.Output = out;
-
-    return op;
-  }
-
-  function buildThresholdOps(op, card) {
-    const input = typeof op.Input === 'string' ? op.Input.trim() : '';
-    if (!input) return [];
-
-    const minBound = normalizeThresholdBound(op.MinThreshold);
-    const maxBound = normalizeThresholdBound(op.MaxThreshold);
-    if (minBound === null && maxBound === null) return [];
-
-    const output = String(op.Output || '').trim();
-    const signed = op.Signed !== false;
-    const binarize = op.Binarize === true;
-
-    if (minBound !== null && maxBound !== null) {
-      if (output) {
-        const tempOutput = `${output}__min_${card.id || 'tmp'}`;
-        return [
-          createThresholdInstruction(input, minBound, true, tempOutput, { signed, binarize: false }),
-          createThresholdInstruction(tempOutput, maxBound, false, output, { signed, binarize })
-        ];
-      }
-      return [
-        createThresholdInstruction(input, minBound, true, '', { signed, binarize: false }),
-        createThresholdInstruction(input, maxBound, false, '', { signed, binarize })
-      ];
-    }
-
-    if (minBound !== null) {
-      return [createThresholdInstruction(input, minBound, true, output, { signed, binarize })];
-    }
-
-    return [createThresholdInstruction(input, maxBound, false, output, { signed, binarize })];
+  function copyJSON() {
+    return pipelineController.copyJSON();
   }
 
   function extractOpsFromCard(card) {
-    const name = card.dataset.opType;
-    const op = { Name: name };
-
-    // Drop zones
-    card.querySelectorAll('.col-drop-zone[data-field]').forEach(zone => {
-      const cols = getZoneValue(zone);
-      if (!cols.length) return;
-      op[zone.dataset.field] = (zone.dataset.mode === 'multi') ? cols : cols[0];
-    });
-
-    // Text / number inputs (not checkboxes)
-    card.querySelectorAll('input[data-field]:not([type="checkbox"]), textarea[data-field]').forEach(el => {
-      const val = el.value.trim();
-      if (!val) return;
-      const field = el.dataset.field;
-      if (el.type === 'number') {
-        op[field] = parseFloat(val);
-      } else if (field === 'Output' && val.includes(',')) {
-        op[field] = val.split(',').map(s => s.trim()).filter(Boolean);
-      } else {
-        op[field] = val;
-      }
-    });
-
-    // Checkboxes
-    card.querySelectorAll('input[type="checkbox"][data-field]').forEach(el => {
-      op[el.dataset.field] = el.checked;
-    });
-
-    // Replace table rows
-    const replaceTable = card.querySelector('.replace-table');
-    if (replaceTable) {
-      const rows = [];
-      replaceTable.querySelectorAll('tbody tr').forEach(tr => {
-        const [keyIn, valIn] = tr.querySelectorAll('input');
-        if (keyIn && keyIn.value.trim()) rows.push({ key: keyIn.value.trim(), value: valIn ? valIn.value.trim() : '' });
-      });
-      if (rows.length) op['Replace'] = rows;
-    }
-
-    if (name === 'Assign') {
-      if (typeof op.Output === 'string' && op.Output.includes(',')) op.Output = parseCsvTokens(op.Output);
-      if (typeof op.InputAttr === 'string' && op.InputAttr.includes(',')) op.InputAttr = parseCsvTokens(op.InputAttr);
-      if (typeof op.TargetAttr === 'string' && op.TargetAttr.includes(',')) op.TargetAttr = parseCsvTokens(op.TargetAttr);
-    }
-
-    if (name === 'DropNA' || name === 'Std') {
-      if (typeof op.Output === 'string' && op.Output.includes(',')) op.Output = parseCsvTokens(op.Output);
-    }
-
-    if (name === 'Sum' && typeof op.Weights === 'string') {
-      const weights = parseNumericCsv(op.Weights);
-      if (weights.length) {
-        op.Weights = weights;
-      } else {
-        delete op.Weights;
-      }
-    }
-
-    if (name === 'Constant' && typeof op.Value === 'string') {
-      const maybeNumber = Number(op.Value);
-      if (Number.isFinite(maybeNumber) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(op.Value.trim())) {
-        op.Value = maybeNumber;
-      }
-    }
-
-    if (name === 'Threshold') {
-      return buildThresholdOps(op, card);
-    }
-
-    return Object.keys(op).length > 1 ? [op] : [];
+    return pipelineController.extractOpsFromCard(card);
   }
 
-  function extractOp(card) {
-    const ops = extractOpsFromCard(card);
-    return ops.length ? ops[0] : null;
-  }
-
-  function updateRegressorPreview(instructions) {
-    const preview = document.getElementById('regressor-preview');
-    const chips = [];
-
-    instructions.forEach(inst => {
-      if (inst.Name === 'Concatenate' && inst.Output) {
-        chips.push(`${inst.Output}.*`);
-      } else if (inst.Name === 'Factor') {
-        const inputs = Array.isArray(inst.Input) ? inst.Input : (inst.Input ? [inst.Input] : []);
-        inputs.forEach(i => chips.push(`${i}_*`));
-      } else if (inst.Name === 'Filter' && inst.Output) {
-        chips.push(inst.Output);
-      }
-    });
-
-    preview.innerHTML = chips.length
-      ? chips.map(r => `<span class="regressor-chip">${escHtml(r)}</span>`).join('')
-      : '<div class="text-muted small">Add operations to see regressors…</div>';
-  }
-
-  // ================================================================
-  // COPY JSON
-  // ================================================================
-  function copyJSON() {
-    const text = document.getElementById('json-output').textContent;
-    navigator.clipboard.writeText(text).then(() => setStatus('JSON copied to clipboard!', 'success'));
+  async function maybeBootstrapPipelineFromModel(force = false) {
+    return pipelineController.maybeBootstrapPipelineFromModel(force, launchContext);
   }
 
   // ================================================================

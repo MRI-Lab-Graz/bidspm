@@ -75,6 +75,10 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("Analysis - Motor study - BIDSPM Runner", text)
         self.assertIn(str(bids_dir), text)
         self.assertIn(str(output_dir), text)
+        self.assertIn('/static/css/analysis.css', text)
+        self.assertIn('/static/js/analysis_model_schema.js', text)
+        self.assertIn('/static/js/analysis_model_mutations.js', text)
+        self.assertIn('/static/js/analysis_model_hints.js', text)
 
     def test_transformer_builder_project_route_links_back_to_analysis(self):
         project = self.project_manager.create_project("Transformer demo")
@@ -97,6 +101,9 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn('/static/js/transformer_builder_path_utils.js', text)
         self.assertIn('/static/js/transformer_builder_model_selection.js', text)
         self.assertIn('/static/js/transformer_builder_browser.js', text)
+        self.assertIn('/static/js/transformer_builder_scan_preview.js', text)
+        self.assertIn('/static/js/transformer_builder_columns.js', text)
+        self.assertIn('/static/js/transformer_builder_pipeline.js', text)
 
     def test_api_create_project_requires_name(self):
         response = self.client.post("/api/projects", json={})
