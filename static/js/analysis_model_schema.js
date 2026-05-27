@@ -1028,6 +1028,7 @@
     }
 
     window.BidspmAnalysisModelSchema = {
+        appendModelMetaPill,
         computeModelEditorSummary,
         createContrastSchemaHint,
         createDummyContrastsSchemaHint,
@@ -1040,14 +1041,20 @@
         createTransformationsSchemaHint,
         formatModelSectionLabel,
         getContrastSchemaChecks,
+        getDummyContrastsSchemaChecks,
         getEdgeSchemaAdvisories,
         getEdgeSchemaChecks,
         getEdgeSchemaIssues,
+        getDirectFieldCompletion,
         getHrfSchemaChecks,
         getKnownEdgeFilterMetadataKeys,
+        getModelPillTone,
         getNodeSchemaChecks,
         getNodeSchemaIssues,
+        getOptionsSchemaChecks,
         getTopLevelSchemaChecks,
+        getTransformationsSchemaChecks,
+        isFilledModelValue,
         isReadonlyModelPath,
         renderModelEditorSummary
     };

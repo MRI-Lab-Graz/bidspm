@@ -1,14 +1,16 @@
 import tempfile
 import unittest
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import bidspm_gui
 import web_discovery_model_api
 from bidspm_gui import app as flask_app
 from lib.project_manager import ProjectManager
+from web_execution_api import ExecutionRegistry
 
 
 class TestWebRoutes(unittest.TestCase):
@@ -78,7 +80,12 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn('/static/css/analysis.css', text)
         self.assertIn('/static/js/analysis_model_schema.js', text)
         self.assertIn('/static/js/analysis_model_mutations.js', text)
+        self.assertIn('/static/js/analysis_model_presets.js', text)
         self.assertIn('/static/js/analysis_model_hints.js', text)
+        self.assertIn('/static/js/analysis_browser.js', text)
+        self.assertIn('/static/js/analysis_contrast_builder.js', text)
+        self.assertIn('/static/js/analysis_preview_validation.js', text)
+        self.assertIn('/static/js/analysis_node_panels.js', text)
 
     def test_transformer_builder_project_route_links_back_to_analysis(self):
         project = self.project_manager.create_project("Transformer demo")
@@ -206,6 +213,28 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(payload["TASKS"], [])
         self.assertEqual(payload["container_type"], "apptainer")
 
+    def test_load_config_file_reads_existing_json(self):
+        config_path = Path(self.temp_dir.name) / "saved.json"
+        config_path.write_text(json.dumps({"SPACE": "T1w", "TASKS": ["motor"]}), encoding="utf-8")
+
+        response = self.client.get("/load_config_file", query_string={"path": str(config_path)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["SPACE"], "T1w")
+        self.assertEqual(response.get_json()["TASKS"], ["motor"])
+
+    def test_save_settings_writes_config_to_requested_path(self):
+        target = Path(self.temp_dir.name) / "configs" / "study.json"
+
+        response = self.client.post(
+            "/save_settings",
+            json={"filepath": str(target), "content": {"SPACE": "MNI152NLin2009cAsym"}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(target.exists())
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["SPACE"], "MNI152NLin2009cAsym")
+
     def test_validate_config_rejects_invalid_content(self):
         response = self.client.post(
             "/validate_config",
@@ -224,6 +253,26 @@ class TestWebRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"valid": False, "error": "Validation failed"})
+
+    def test_validate_config_accepts_valid_content_when_validator_passes(self):
+        with patch("docs.json_validator.JSONValidator.validate_with_schema", return_value=True):
+            response = self.client.post(
+                "/validate_config",
+                json={"content": {"SPACE": "MNI152NLin2009cAsym"}},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"valid": True})
+
+    def test_validate_config_returns_exception_message(self):
+        with patch("docs.json_validator.JSONValidator.validate_with_schema", side_effect=ValueError("schema boom")):
+            response = self.client.post(
+                "/validate_config",
+                json={"content": {"SPACE": "MNI152NLin2009cAsym"}},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"valid": False, "error": "schema boom"})
 
     def test_browse_filters_files_by_extension(self):
         root = Path(self.temp_dir.name)
@@ -246,6 +295,34 @@ class TestWebRoutes(unittest.TestCase):
         self.assertNotIn("beta.sif", names)
         self.assertNotIn("gamma.txt", names)
 
+    def test_browse_only_dirs_uses_parent_when_starting_from_file(self):
+        root = Path(self.temp_dir.name)
+        folder = root / "data"
+        folder.mkdir()
+        file_path = folder / "config.json"
+        file_path.write_text("{}", encoding="utf-8")
+        (folder / "nested").mkdir()
+
+        response = self.client.get(
+            "/browse",
+            query_string={"path": str(file_path), "only_dirs": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["current_path"], str(folder.resolve()))
+        self.assertTrue(all(item["type"] == "dir" for item in payload["items"]))
+
+    def test_load_container_file_reads_existing_json(self):
+        container_path = Path(self.temp_dir.name) / "container.json"
+        container_path.write_text(json.dumps({"container_type": "docker", "docker_image": "bidspm/test:latest"}), encoding="utf-8")
+
+        response = self.client.get("/load_container_file", query_string={"path": str(container_path)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["container_type"], "docker")
+        self.assertEqual(response.get_json()["docker_image"], "bidspm/test:latest")
+
     def test_file_content_endpoints_roundtrip_json(self):
         target = Path(self.temp_dir.name) / "configs" / "model.json"
 
@@ -265,6 +342,44 @@ class TestWebRoutes(unittest.TestCase):
         load_response = self.client.get("/file_content", query_string={"path": str(target)})
         self.assertEqual(load_response.status_code, 200)
         self.assertEqual(json.loads(load_response.get_data(as_text=True)), {"Name": "demo"})
+
+    def test_file_content_endpoints_handle_missing_path_and_invalid_json(self):
+        missing_response = self.client.get(
+            "/file_content",
+            query_string={"path": str(Path(self.temp_dir.name) / "missing.json")},
+        )
+        self.assertEqual(missing_response.status_code, 404)
+
+        no_path_response = self.client.post("/file_content", json={"content": "{}"})
+        self.assertEqual(no_path_response.status_code, 400)
+
+        invalid_json_response = self.client.post(
+            "/file_content",
+            json={
+                "path": str(Path(self.temp_dir.name) / "invalid.json"),
+                "content": "{invalid}",
+                "validate_json": True,
+            },
+        )
+        self.assertEqual(invalid_json_response.status_code, 400)
+        self.assertFalse(invalid_json_response.get_json()["success"])
+
+    def test_mkdir_requires_path_and_blocks_registered_bids_paths(self):
+        missing_response = self.client.post("/mkdir", json={})
+        self.assertEqual(missing_response.status_code, 400)
+
+        bids_dir = Path(self.temp_dir.name) / "bids"
+        bids_dir.mkdir()
+        self.project_manager.create_project("Protected bids mkdir", config={"bids_folder": str(bids_dir)})
+
+        blocked_response = self.client.post("/mkdir", json={"path": str(bids_dir / "sub-01")})
+        self.assertEqual(blocked_response.status_code, 403)
+        self.assertFalse(blocked_response.get_json()["success"])
+
+        allowed_target = Path(self.temp_dir.name) / "new-folder"
+        allowed_response = self.client.post("/mkdir", json={"path": str(allowed_target)})
+        self.assertEqual(allowed_response.status_code, 200)
+        self.assertTrue(allowed_target.exists())
 
     def test_save_file_content_blocks_registered_bids_paths(self):
         bids_dir = Path(self.temp_dir.name) / "bids"
@@ -313,6 +428,22 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(load_response.status_code, 200)
         self.assertEqual(load_response.get_json()["SPACE"], "MNI152NLin2009cAsym")
 
+    def test_legacy_config_endpoints_handle_missing_inputs(self):
+        folder = Path(self.temp_dir.name) / "missing-folder"
+
+        list_response = self.client.get("/configs", query_string={"folder": str(folder)})
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.get_json(), [])
+
+        missing_filename = self.client.get("/load_config", query_string={"folder": str(folder)})
+        self.assertEqual(missing_filename.status_code, 400)
+
+        missing_file = self.client.get(
+            "/load_config",
+            query_string={"folder": str(folder), "filename": "missing.json"},
+        )
+        self.assertEqual(missing_file.status_code, 404)
+
     def test_run_requires_actions(self):
         response = self.client.post("/run", json={})
 
@@ -327,6 +458,97 @@ class TestWebRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.get_json()["error"], "Project not found")
+
+    def test_run_rejects_missing_override_settings_file(self):
+        response = self.client.post(
+            "/run",
+            json={
+                "actions": ["smooth"],
+                "subjects_override": ["sub-01"],
+                "settings": str(Path(self.temp_dir.name) / "missing-settings.json"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Settings file not found", response.get_json()["error"])
+
+    def test_run_rejects_missing_model_file_for_stats_validation(self):
+        response = self.client.post(
+            "/run",
+            json={
+                "actions": ["stats"],
+                "model": str(Path(self.temp_dir.name) / "missing-model.json"),
+                "skip_validation": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Model file not found", response.get_json()["error"])
+
+    def test_run_returns_start_failure_when_subprocess_fails(self):
+        with patch("web_execution_api.subprocess.Popen", side_effect=OSError("boom")):
+            response = self.client.post(
+                "/run",
+                json={"actions": ["smooth"], "skip_validation": True},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to start execution", response.get_json()["error"])
+
+    def test_run_success_creates_project_settings_and_starts_process(self):
+        output_dir = Path(self.temp_dir.name) / "output"
+        output_dir.mkdir()
+        model_path = Path(self.temp_dir.name) / "model.json"
+        model_path.write_text("{}", encoding="utf-8")
+        project = self.project_manager.create_project(
+            "Execution project",
+            config={
+                "output_folder": str(output_dir),
+                "models_file": str(model_path),
+                "tasks": ["motor"],
+            },
+        )
+
+        process = MagicMock(pid=4242)
+        thread = MagicMock()
+        with patch("web_execution_api.subprocess.Popen", return_value=process) as mock_popen, \
+             patch("web_execution_api.threading.Thread", return_value=thread):
+            response = self.client.post(
+                "/run",
+                json={
+                    "actions": ["smooth"],
+                    "project_id": project.id,
+                    "subjects_override": ["sub-01", "02"],
+                    "node_name": "dataset_level",
+                    "pilot": True,
+                    "skip_validation": True,
+                    "local": True,
+                    "force": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["project_id"], project.id)
+        self.assertEqual(payload["pid"], 4242)
+        self.assertTrue(Path(payload["log_file"]).exists())
+
+        called_command = mock_popen.call_args.args[0]
+        self.assertEqual(called_command[0], "nohup")
+        self.assertIn("--action", called_command)
+        self.assertIn("smooth", called_command)
+        self.assertIn("--node-name", called_command)
+        self.assertIn("dataset_level", called_command)
+        self.assertIn("--pilot", called_command)
+        self.assertIn("--skip-modelvalidation", called_command)
+        self.assertIn("--local", called_command)
+        self.assertIn("--force", called_command)
+        self.assertIn("--settings", called_command)
+
+        settings_path = Path(called_command[called_command.index("--settings") + 1])
+        self.assertTrue(settings_path.exists())
+        self.assertEqual(json.loads(settings_path.read_text(encoding="utf-8"))["SUBJECTS"], ["01", "02"])
+        thread.start.assert_called_once()
 
     def test_stream_unknown_execution_returns_error_event(self):
         response = self.client.get("/stream/missing-execution")
@@ -367,6 +589,58 @@ class TestWebRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "already finished")
+
+    def test_stop_requests_signal_sequence_for_running_process(self):
+        log_file = Path(self.temp_dir.name) / "run.log"
+        process = MagicMock(pid=5151)
+        process.poll.side_effect = [None, None, None]
+        self.execution_registry.current_execution_id = "exec-1"
+        self.execution_registry.executions["exec-1"] = {
+            "finished": False,
+            "process": process,
+            "log_file": str(log_file),
+            "stop_requested": False,
+        }
+
+        with patch("web_execution_api.os.getpgid", return_value=5151), \
+             patch("web_execution_api.os.killpg") as mock_killpg, \
+             patch("web_execution_api.time.sleep"):
+            response = self.client.post("/stop")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "stopping")
+        self.assertTrue(self.execution_registry.executions["exec-1"]["stop_requested"])
+        self.assertEqual(mock_killpg.call_count, 3)
+
+    def test_execution_registry_helpers_cleanup_and_finalize(self):
+        manager = MagicMock()
+        registry = ExecutionRegistry(get_project_manager=lambda: manager, log_dir=Path(self.temp_dir.name) / "logs", max_executions=2)
+        registry.executions = {
+            "old-finished": {"finished": True, "start_time": 1},
+            "new-finished": {"finished": True, "start_time": 2},
+            "running": {"finished": False, "start_time": 3},
+        }
+
+        registry.cleanup_old_executions()
+        self.assertNotIn("old-finished", registry.executions)
+
+        log_file = Path(self.temp_dir.name) / "registry.log"
+        log_file.write_text("", encoding="utf-8")
+        registry.executions["exec-1"] = {
+            "finished": False,
+            "project_id": "proj-1",
+            "log_filename": "run.log",
+            "log_file": str(log_file),
+            "process": object(),
+        }
+        registry.current_execution_id = "exec-1"
+        registry.finalize_execution("exec-1", 0)
+
+        self.assertTrue(registry.executions["exec-1"]["finished"])
+        self.assertEqual(registry.executions["exec-1"]["return_code"], 0)
+        self.assertIsNone(registry.current_execution_id)
+        manager.update_project_log.assert_called_once_with("proj-1", "run.log")
+        self.assertIn("Process finished with exit code 0", log_file.read_text(encoding="utf-8"))
 
     def test_api_model_create_requires_path(self):
         response = self.client.post("/api/model/create", json={})

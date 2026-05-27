@@ -1,4 +1,5 @@
 # Python environments
+config/
 .bidspm/
 venv/
 env/
