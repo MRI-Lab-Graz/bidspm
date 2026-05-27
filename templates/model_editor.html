@@ -3,739 +3,7 @@
 {% block title %}Model Editor{% endblock %}
 
 {% block styles %}
-<style>
-  .x-small { font-size: 0.75rem; }
-  .modelx-pool { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-  .modelx-reg-badge { cursor: grab; }
-  .modelx-reg-badge:active { cursor: grabbing; }
-  .modelx-drop-zone {
-    border: 1px dashed #c7d4e2;
-    border-radius: 0.45rem;
-    padding: 0.6rem;
-    background: #ffffff;
-    min-height: 8rem;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.45rem;
-  }
-  .modelx-drop-zone.is-over {
-    border-color: #0d6efd;
-    background: #ffffff;
-    box-shadow: inset 0 0 0 2px rgba(13, 110, 253, 0.15);
-  }
-  .modelx-chip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    border: 1px solid #d5deea;
-    border-radius: 0.45rem;
-    background: #ffffff;
-    padding: 0.32rem 0.38rem;
-    width: 100%;
-    cursor: grab;
-  }
-  .modelx-chip:active { cursor: grabbing; }
-  .modelx-chip.is-drop-target {
-    border-color: #0d6efd;
-    background: #f1f7ff;
-  }
-  .modelx-chip-label { font-weight: 600; }
-  .modelx-chip-main {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    min-width: 0;
-  }
-  .modelx-chip-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex-shrink: 0;
-  }
-  .modelx-chip-handle {
-    color: #6c757d;
-    font-size: 0.78rem;
-  }
-  .modelx-chip-remove {
-    border: 0;
-    background: transparent;
-    color: #dc3545;
-    padding: 0 0.05rem;
-    line-height: 1;
-  }
-  .me-transformer-builder {
-    border: 1px solid #e3e9f2;
-    border-radius: 0.8rem;
-    background: #fbfdff;
-    padding: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.65rem;
-  }
-  .me-transformer-op-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-  }
-  .me-transformer-op-card {
-    border: 1px solid #d9e3f0;
-    border-radius: 0.6rem;
-    background: #ffffff;
-    overflow: hidden;
-  }
-  .me-transformer-op-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.45rem 0.6rem;
-    border-bottom: 1px solid #edf2f8;
-    background: #f8fbff;
-  }
-  .me-transformer-op-body {
-    padding: 0.6rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-  }
-  .me-transformer-json {
-    margin: 0;
-    padding: 0.55rem 0.65rem;
-    border: 1px solid #d6e2f0;
-    border-radius: 0.45rem;
-    background: #0f1c2d;
-    color: #dbe8fb;
-    font-size: 0.73rem;
-    line-height: 1.35;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 260px;
-    overflow: auto;
-  }
-  .modelx-reg-row {
-    border: 1px solid #dee2e6;
-    border-radius: 0.4rem;
-    padding: 0.35rem 0.45rem;
-    background: #ffffff;
-  }
-  .modelx-reg-row.is-drop-target {
-    border-color: #198754;
-    background: #f1fbf4;
-  }
-  .modelx-reg-handle { color: #6c757d; cursor: grab; }
-  .modelx-nuisance-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.35rem 0.8rem;
-  }
-  .model-workspace-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .model-node-card,
-  .model-edge-card {
-    border: 1px solid #d9e3f0;
-    border-radius: 0.9rem;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-    box-shadow: 0 8px 20px rgba(13, 110, 253, 0.06);
-    overflow: hidden;
-  }
-  .model-node-card.is-selected {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.12);
-  }
-  .model-node-card-header,
-  .model-edge-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.9rem 1rem;
-    border-bottom: 1px solid #e5edf7;
-    background: rgba(13, 110, 253, 0.03);
-  }
-  .model-node-card-body,
-  .model-edge-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    padding: 1rem;
-  }
-  .model-node-card-title,
-  .model-edge-card-title {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    flex-wrap: wrap;
-  }
-  .model-node-index,
-  .model-edge-index {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 2.1rem;
-    height: 2.1rem;
-    border-radius: 999px;
-    background: #0d6efd;
-    color: #fff;
-    font-size: 0.8rem;
-    font-weight: 700;
-  }
-  .model-node-grid,
-  .model-edge-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.85rem;
-  }
-  .model-node-panel {
-    border: 1px solid #e3e9f2;
-    border-radius: 0.8rem;
-    background: #fff;
-    padding: 0.9rem;
-  }
-  .model-node-panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-  }
-  .model-node-panel-title {
-    font-weight: 700;
-    font-size: 0.95rem;
-  }
-  .model-node-panel-hint {
-    font-size: 0.78rem;
-    color: #6c757d;
-  }
-  .model-node-chip-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .model-node-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    border: 1px solid #bcd1ee;
-    border-radius: 999px;
-    background: #eef5ff;
-    color: #1f4f92;
-    padding: 0.28rem 0.65rem;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-  .model-node-chip button {
-    border: 0;
-    background: transparent;
-    color: inherit;
-    padding: 0;
-    line-height: 1;
-  }
-  .model-node-card .accordion-item,
-  .model-edge-card .accordion-item {
-    border: 0;
-  }
-  .model-contrast-card {
-    border: 1px solid #dfe7f2;
-    border-radius: 0.75rem;
-    padding: 0.85rem;
-    background: #fbfdff;
-  }
-  .model-editor-workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
-    gap: 1rem;
-    align-items: start;
-  }
-  .model-editor-preview-card {
-    border: 1px solid #dfe7f2;
-    border-radius: 0.9rem;
-    background: linear-gradient(180deg, #0d1726 0%, #132033 100%);
-    color: #d9e6fb;
-    overflow: hidden;
-    position: sticky;
-    top: 1rem;
-  }
-  .model-editor-preview-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 0.75rem;
-    padding: 0.9rem 1rem 0.75rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-  .model-editor-preview-title {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #ffffff;
-  }
-  .model-editor-preview-hint {
-    font-size: 0.76rem;
-    color: #98b3d8;
-  }
-  .model-editor-preview-validation {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.35rem;
-    flex-wrap: wrap;
-  }
-  .model-editor-preview-validation-text {
-    font-size: 0.73rem;
-    color: #a9c0df;
-  }
-  .model-editor-preview-body {
-    max-height: 70vh;
-    overflow: auto;
-    padding: 0.9rem 1rem 1rem;
-  }
-  .model-editor-preview-json {
-    margin: 0;
-    font-size: 0.78rem;
-    line-height: 1.45;
-    color: #d9e6fb;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .model-editor-preview-empty {
-    color: #98b3d8;
-    font-size: 0.82rem;
-  }
-  #model-editor-shell {
-    background: linear-gradient(165deg, #f5fbff 0%, #f9fcff 100%);
-    border: 1px solid #d6e9fb;
-    border-radius: 1rem;
-    padding: 0.9rem;
-  }
-  #model-editor-help { color: #3d617f; }
-  .model-editor-summary {
-    background: linear-gradient(180deg, #ecf7ff 0%, #f5fbff 100%);
-    border: 1px solid #cbe3f9;
-    border-radius: 0.95rem;
-    padding: 0.95rem;
-  }
-  .model-editor-readiness-row { flex-wrap: wrap; }
-  .model-editor-progress {
-    height: 10px;
-    background: #d9e8f6;
-    border-radius: 999px;
-    overflow: hidden;
-  }
-  .model-editor-progress-bar {
-    background: linear-gradient(90deg, #40a9ff 0%, #1890ff 100%);
-    transition: width 0.2s ease;
-  }
-  .model-editor-score-ring {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: conic-gradient(#1890ff calc(var(--model-progress, 0) * 1%), #e7f3ff 0);
-    display: grid;
-    place-items: center;
-    position: relative;
-    flex-shrink: 0;
-  }
-  .model-editor-score-ring::after {
-    content: "";
-    position: absolute;
-    inset: 8px;
-    border-radius: 50%;
-    background: #ffffff;
-  }
-  .model-editor-score-ring-label {
-    position: relative;
-    z-index: 1;
-    font-size: 0.74rem;
-    font-weight: 700;
-    color: #195488;
-  }
-  .completeness-dot {
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    display: inline-block;
-    flex-shrink: 0;
-  }
-  .completeness-dot.full { background: #389e0d; }
-  .completeness-dot.partial { background: #fa8c16; }
-  .completeness-dot.empty { background: #a8bfd6; }
-  .model-section-summary-row {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.3rem 0;
-  }
-  .model-section-summary-row .section-label {
-    min-width: 150px;
-    font-size: 0.86rem;
-    font-weight: 600;
-    color: #385978;
-  }
-  .model-meta-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    align-items: center;
-  }
-  .model-meta-pill {
-    border-radius: 999px;
-    font-size: 0.73rem;
-    font-weight: 600;
-    line-height: 1.2;
-    padding: 0.2rem 0.55rem;
-    white-space: nowrap;
-  }
-  .model-meta-pill-success { background: #f6ffed; color: #237804; }
-  .model-meta-pill-warning { background: #fff7e6; color: #ad6800; }
-  .model-meta-pill-neutral { background: #edf5ff; color: #1d4d8f; }
-  .model-section-card {
-    --section-border: #d7e7f7;
-    --section-accent: #6fa4e6;
-    --section-header: #eef7ff;
-    --section-header-soft: #f8fbff;
-    --section-header-open: #e5f2ff;
-    --section-header-open-soft: #f1f8ff;
-    --section-icon-bg: #e6f7ff;
-    --section-icon-border: #bae7ff;
-    --section-icon-color: #096dd9;
-    --section-text: #1f4e7a;
-    --section-text-strong: #163f66;
-    --section-label: #18456f;
-    --section-subtitle: #4f6f8d;
-    --section-body-bg: #f7fbff;
-    --section-body-border: #e3eff9;
-    --section-nested-item-bg: #f6f9fd;
-    --section-nested-item-border: #cddceb;
-    --section-nested-head: #eef4fb;
-    --section-nested-head-open: #dfe9f6;
-    --section-nested-head-text: #203d5a;
-    --section-nested-head-open-text: #153a5d;
-    --section-nested-body: #ffffff;
-    --section-nested-body-border: #d8e3ef;
-    background: #ffffff;
-    border: 1px solid var(--section-border);
-    border-left: 4px solid var(--section-accent);
-    border-radius: 1rem;
-    box-shadow: 0 10px 24px rgba(17, 77, 143, 0.08);
-    margin-bottom: 0.9rem;
-    overflow: visible;
-  }
-  .model-section-card.section-overview {
-    --section-border: #8fb7ec;
-    --section-accent: #3d74c5;
-    --section-header: #d9e8ff;
-    --section-header-soft: #edf4ff;
-    --section-header-open: #c8dcff;
-    --section-header-open-soft: #e0ecff;
-    --section-icon-bg: #cfe1ff;
-    --section-icon-border: #97bbe9;
-    --section-icon-color: #1e4ea5;
-    --section-text: #214f8c;
-    --section-text-strong: #183d73;
-    --section-label: #1d467f;
-    --section-subtitle: #46658f;
-    --section-body-bg: #eef4ff;
-    --section-body-border: #c7dbf4;
-    --section-nested-item-bg: #f8fbff;
-    --section-nested-item-border: #b8cdea;
-    --section-nested-head: #e6efff;
-    --section-nested-head-open: #d3e2ff;
-    --section-nested-head-text: #274e86;
-    --section-nested-head-open-text: #173962;
-    --section-nested-body: #ffffff;
-    --section-nested-body-border: #cbdaf0;
-  }
-  .model-section-card.section-input {
-    --section-border: #89d2c7;
-    --section-accent: #1b8b7d;
-    --section-header: #d8f1ed;
-    --section-header-soft: #eaf9f6;
-    --section-header-open: #c5e8e2;
-    --section-header-open-soft: #ddf3ee;
-    --section-icon-bg: #c6ebe4;
-    --section-icon-border: #8ecfc3;
-    --section-icon-color: #11695f;
-    --section-text: #1c655f;
-    --section-text-strong: #0f534d;
-    --section-label: #145a54;
-    --section-subtitle: #3e7772;
-    --section-body-bg: #edf8f6;
-    --section-body-border: #c3e4de;
-    --section-nested-item-bg: #f5fcfa;
-    --section-nested-item-border: #b7ddd6;
-    --section-nested-head: #def2ee;
-    --section-nested-head-open: #c8e8e2;
-    --section-nested-head-text: #1e5c57;
-    --section-nested-head-open-text: #0f4b46;
-    --section-nested-body: #ffffff;
-    --section-nested-body-border: #cbe7e1;
-  }
-  .model-section-card.section-nodes {
-    --section-border: #9ed0aa;
-    --section-accent: #2f8f44;
-    --section-header: #dbf1df;
-    --section-header-soft: #ecf8ef;
-    --section-header-open: #cce8d3;
-    --section-header-open-soft: #def1e3;
-    --section-icon-bg: #cde9d4;
-    --section-icon-border: #99cbaa;
-    --section-icon-color: #20773a;
-    --section-text: #27653a;
-    --section-text-strong: #1b522c;
-    --section-label: #215b33;
-    --section-subtitle: #467356;
-    --section-body-bg: #eff9f1;
-    --section-body-border: #cce5d2;
-    --section-nested-item-bg: #f6fcf7;
-    --section-nested-item-border: #c0dfc9;
-    --section-nested-head: #e2f2e6;
-    --section-nested-head-open: #cfe8d6;
-    --section-nested-head-text: #2a6038;
-    --section-nested-head-open-text: #1c4c2a;
-    --section-nested-body: #ffffff;
-    --section-nested-body-border: #d1e7d6;
-  }
-  .model-section-card.section-edges {
-    --section-border: #e9c489;
-    --section-accent: #b87408;
-    --section-header: #ffefd7;
-    --section-header-soft: #fff7e8;
-    --section-header-open: #ffe1ba;
-    --section-header-open-soft: #ffedd1;
-    --section-icon-bg: #ffe3bb;
-    --section-icon-border: #e9bf79;
-    --section-icon-color: #9a6204;
-    --section-text: #7c5610;
-    --section-text-strong: #5f410a;
-    --section-label: #6e4d0d;
-    --section-subtitle: #7f6840;
-    --section-body-bg: #fff6e8;
-    --section-body-border: #f0dbb8;
-    --section-nested-item-bg: #fffcf7;
-    --section-nested-item-border: #efd8b0;
-    --section-nested-head: #ffeacc;
-    --section-nested-head-open: #ffdfb1;
-    --section-nested-head-text: #7a5310;
-    --section-nested-head-open-text: #5f3f09;
-    --section-nested-body: #ffffff;
-    --section-nested-body-border: #f0ddb9;
-  }
-  .model-section-card .dropdown-menu {
-    z-index: 1085;
-  }
-  .model-section-card .accordion-header { margin: 0; }
-  .model-section-toggle {
-    align-items: flex-start;
-    background: linear-gradient(90deg, var(--section-header) 0%, var(--section-header-soft) 100%);
-    border: 0;
-    box-shadow: none;
-    color: var(--section-text);
-    display: flex;
-    gap: 0.7rem;
-    padding: 0.9rem 1rem;
-  }
-  .model-section-toggle:not(.collapsed) {
-    background: linear-gradient(90deg, var(--section-header-open) 0%, var(--section-header-open-soft) 100%);
-    color: var(--section-text-strong);
-  }
-  .model-section-title {
-    align-items: flex-start;
-    display: flex;
-    flex: 1 1 auto;
-    gap: 0.7rem;
-    min-width: 0;
-  }
-  .model-section-icon {
-    align-items: center;
-    background: var(--section-icon-bg);
-    border: 1px solid var(--section-icon-border);
-    border-radius: 0.7rem;
-    color: var(--section-icon-color);
-    display: inline-flex;
-    flex-shrink: 0;
-    height: 2rem;
-    justify-content: center;
-    width: 2rem;
-  }
-  .model-section-heading {
-    align-items: flex-start;
-    display: flex;
-    flex-direction: column;
-    gap: 0.14rem;
-    min-width: 0;
-  }
-  .model-section-label {
-    color: var(--section-label);
-    display: block;
-    font-size: 0.98rem;
-    font-weight: 700;
-    line-height: 1.2;
-  }
-  .model-section-subtitle {
-    color: var(--section-subtitle);
-    display: block;
-    font-size: 0.76rem;
-    line-height: 1.35;
-    max-width: 38ch;
-  }
-  .model-section-meta {
-    align-items: flex-start;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    justify-content: flex-end;
-    margin-left: auto;
-    margin-right: 0.75rem;
-    min-width: 0;
-  }
-  .model-section-body {
-    background: var(--section-body-bg);
-    border-top: 1px solid var(--section-body-border);
-    padding: 1rem;
-  }
-  .model-inline-note {
-    background: #ffffff;
-    border: 1px dashed #bdd6ec;
-    border-radius: 0.85rem;
-    color: #4d6b88;
-    font-size: 0.82rem;
-    margin-top: 0.2rem;
-    padding: 0.75rem 0.85rem;
-  }
-  .model-task-picker {
-    background: #ffffff;
-    border: 1px solid #d7e7f7;
-    border-radius: 0.9rem;
-    margin-bottom: 0.85rem;
-    padding: 0.85rem;
-  }
-  .model-task-picker-title {
-    color: #195488;
-    font-size: 0.82rem;
-    font-weight: 700;
-    margin-bottom: 0.35rem;
-  }
-  .model-task-pill {
-    border: 1px solid #bcd8f4;
-    background: #edf5ff;
-    color: #1d4d8f;
-    border-radius: 999px;
-    padding: 0.2rem 0.6rem;
-    font-size: 0.78rem;
-  }
-  .model-task-pill.active {
-    background: #e6f7ff;
-    border-color: #91d5ff;
-    color: #096dd9;
-  }
-  .model-task-pill input { margin-right: 0.3rem; }
-  .json-row {
-    align-items: flex-start;
-    background: #ffffff;
-    border: 1px solid #dce8f4;
-    border-radius: 0.85rem;
-    margin-bottom: 0.55rem;
-    padding: 0.7rem 0.8rem;
-  }
-  .json-row:last-child { margin-bottom: 0; }
-  .json-key { min-width: 170px; font-size: 0.82rem; color: #2d4660; }
-  .json-path { font-size: 0.7rem; color: #6c757d; }
-  .json-locked { background: #f1f3f5 !important; }
-  .json-inline-value { flex: 1; min-width: 240px; }
-  .json-add-btn { white-space: nowrap; }
-  .json-row-actions { min-width: 84px; display: flex; justify-content: flex-end; gap: 0.3rem; }
-  .model-section-body .accordion {
-    display: flex;
-    flex-direction: column;
-    gap: 0.7rem;
-  }
-  .model-section-body .accordion-item {
-    background: var(--section-nested-item-bg);
-    border: 1px solid var(--section-nested-item-border);
-    border-radius: 0.9rem;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
-    overflow: hidden;
-  }
-  .model-section-body .accordion-button {
-    background: var(--section-nested-head);
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    color: var(--section-nested-head-text);
-    gap: 0.75rem;
-    padding: 0.8rem 0.95rem;
-  }
-  .model-section-body .accordion-button:not(.collapsed) {
-    background: var(--section-nested-head-open);
-    color: var(--section-nested-head-open-text);
-    box-shadow: none;
-  }
-  .model-section-body .accordion-body {
-    background: var(--section-nested-body);
-    border-top: 1px solid var(--section-nested-body-border);
-    padding: 0.9rem;
-  }
-  .json-row-depth-0 { border-left: 4px solid #d8e6f5; }
-  .json-row-depth-1 { border-left: 4px solid #dcecd7; }
-  .json-row-depth-2 { border-left: 4px solid #f0dfc9; }
-  .json-row-depth-3 { border-left: 4px solid #e3daf4; }
-  .json-row-depth-4 { border-left: 4px solid #d5ece9; }
-  @media (max-width: 1199.98px) {
-    .model-editor-workspace {
-      grid-template-columns: 1fr;
-    }
-    .model-editor-preview-card {
-      position: static;
-    }
-  }
-  @media (max-width: 768px) {
-    .model-section-toggle {
-      flex-wrap: wrap;
-    }
-    .model-section-meta {
-      justify-content: flex-start;
-      margin-left: 0;
-      margin-right: 1.6rem;
-    }
-    .model-section-summary-row,
-    .json-row {
-      align-items: stretch;
-      flex-direction: column;
-    }
-    .model-section-summary-row .section-label,
-    .json-key {
-      min-width: 0;
-    }
-    .json-row-actions {
-      justify-content: flex-start;
-      min-width: 0;
-    }
-  }
-  .transformer-unsaved-banner {
-    position: sticky;
-    top: 0.5rem;
-    z-index: 1010;
-    border: 1px solid #f3d188;
-    background: linear-gradient(180deg, #fff9ec 0%, #fff4d9 100%);
-    color: #6f4c09;
-    box-shadow: 0 6px 14px rgba(128, 86, 7, 0.12);
-  }
-  .transformer-unsaved-banner .btn {
-    white-space: nowrap;
-  }
-  .transformer-unsaved-banner-title {
-    font-weight: 700;
-  }
-  .transformer-unsaved-banner-detail {
-    font-size: 0.78rem;
-    color: #8a6110;
-    margin-top: 0.35rem;
-  }
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/model_editor.css', v='20260527') }}">
 {% endblock %}
 
 {% block content %}
@@ -882,6 +150,12 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_launch_context.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_apply.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_events.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_loading.js', v='20260527') }}"></script>
 <script>
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
@@ -889,6 +163,21 @@
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
+  const {
+    normalizeLaunchStringArray,
+    readTransformerLaunchContext,
+    clearTransformerLaunchContext,
+    createTransformerLaunchId,
+    normalizeFsPath,
+    stripPathQueryAndHash,
+    safeDecodePath,
+    areModelPathsEquivalent,
+    readPendingTransformerPayload,
+    clearPendingTransformerPayload
+  } = window.BidspmModelEditorLaunch.createLaunchHelpers({
+    transformerLaunchContextKey: TRANSFORMER_LAUNCH_CONTEXT_KEY,
+    pendingTransformerKey: PENDING_TRANSFORMER_KEY
+  });
   let model = null;
   window.modelEditorDraft = null;
   let modelEditorBidsTasks = Array.isArray(window.modelEditorBidsTasks)
@@ -944,14 +233,6 @@
   let rawModeReturnEditor = 'full';
   let hasUnsavedTransformerChanges = false;
 
-  function clearPendingTransformerPayload(){
-    try {
-      sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
-    } catch (e) {
-      // Ignore storage cleanup failures.
-    }
-  }
-
   function setTransformerUnsavedBanner(active, detail = '') {
     hasUnsavedTransformerChanges = Boolean(active);
     const banner = document.getElementById('transformer-unsaved-banner');
@@ -972,106 +253,8 @@
     setTransformerUnsavedBanner(false, '');
   }
 
-  function normalizeLaunchStringArray(value) {
-    if (Array.isArray(value)) {
-      return value.map(item => String(item || '').trim()).filter(Boolean);
-    }
-    if (value === undefined || value === null || typeof value === 'object') return [];
-    const normalized = String(value || '').trim();
-    return normalized ? [normalized] : [];
-  }
-
-  function readTransformerLaunchContext() {
-    try {
-      const raw = sessionStorage.getItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function clearTransformerLaunchContext() {
-    try {
-      sessionStorage.removeItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
-    } catch (e) {
-      // Ignore storage cleanup failures.
-    }
-  }
-
-  function createTransformerLaunchId() {
-    return `transformer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-
-  function normalizeFsPath(path) {
-    const raw = String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
-    if (!raw) return '';
-    const unified = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
-    const absolute = unified.startsWith('/');
-    const parts = [];
-    unified.split('/').forEach(part => {
-      if (!part || part === '.') return;
-      if (part === '..') {
-        if (parts.length && parts[parts.length - 1] !== '..') {
-          parts.pop();
-        } else if (!absolute) {
-          parts.push(part);
-        }
-        return;
-      }
-      parts.push(part);
-    });
-    const normalized = parts.join('/');
-    return absolute ? `/${normalized}` : normalized;
-  }
-
-  function stripPathQueryAndHash(path) {
-    const normalized = normalizeFsPath(path);
-    if (!normalized) return '';
-    const hashIdx = normalized.indexOf('#');
-    const noHash = hashIdx >= 0 ? normalized.slice(0, hashIdx) : normalized;
-    const queryIdx = noHash.indexOf('?');
-    return queryIdx >= 0 ? noHash.slice(0, queryIdx) : noHash;
-  }
-
-  function safeDecodePath(path) {
-    try {
-      return decodeURIComponent(path);
-    } catch (e) {
-      return path;
-    }
-  }
-
-  function areModelPathsEquivalent(pathA, pathB) {
-    const leftRaw = stripPathQueryAndHash(pathA);
-    const rightRaw = stripPathQueryAndHash(pathB);
-    if (!leftRaw || !rightRaw) return false;
-
-    const left = normalizeFsPath(safeDecodePath(leftRaw));
-    const right = normalizeFsPath(safeDecodePath(rightRaw));
-    if (!left || !right) return false;
-    if (left === right) return true;
-
-    const leftAbs = left.startsWith('/');
-    const rightAbs = right.startsWith('/');
-    if (!leftAbs && rightAbs && right.endsWith(`/${left}`)) return true;
-    if (!rightAbs && leftAbs && left.endsWith(`/${right}`)) return true;
-
-    return false;
-  }
-
   window.modelEditorMarkUnsavedTransformerChanges = markTransformerUnsavedChanges;
   window.modelEditorClearUnsavedTransformerChanges = clearTransformerUnsavedChanges;
-
-  function readPendingTransformerPayload() {
-    try {
-      const raw = sessionStorage.getItem(PENDING_TRANSFORMER_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (e) {
-      return null;
-    }
-  }
 
   function extendInterestRegressorPool(names) {
     const normalized = normalizeStringArray(names);
@@ -1489,230 +672,21 @@
   }
 
   window.getTransformerModelXRegressors = getTransformerModelXRegressors;
-
-  function consumeTransformerPayload(payload, targetModelPath) {
-    if (!payload || !model || typeof model !== 'object') return null;
-
-    const payloadProjectId = String(payload.projectId || '').trim();
-    const currentProjectId = String(CURRENT_PROJECT_ID || '').trim();
-    if (payloadProjectId && currentProjectId && payloadProjectId !== currentProjectId) {
-      return null;
-    }
-
-    const payloadModelPath = String(payload.modelPath || '').trim();
-    const normalizedTargetPath = String(targetModelPath || '').trim();
-    if (payloadModelPath && normalizedTargetPath && !areModelPathsEquivalent(payloadModelPath, normalizedTargetPath)) {
-      return null;
-    }
-
-    const payloadLaunchId = String(payload.launchId || '').trim();
-    if (payloadLaunchId) {
-      const launchContext = readTransformerLaunchContext();
-      const launchContextId = String(launchContext?.launchId || '').trim();
-      const launchContextPath = String(launchContext?.modelPath || '').trim();
-      const snapshotTargetPath = payloadModelPath || normalizedTargetPath || launchContextPath;
-      const payloadModelSnapshot = (launchContext?.modelSnapshot && typeof launchContext.modelSnapshot === 'object' && !Array.isArray(launchContext.modelSnapshot))
-        ? structuredClone(launchContext.modelSnapshot)
-        : null;
-      const validLaunchSnapshot = Boolean(
-        launchContextId
-        && launchContextId === payloadLaunchId
-        && payloadModelSnapshot
-        && Array.isArray(payloadModelSnapshot.Nodes)
-        && (!launchContextPath || !snapshotTargetPath || areModelPathsEquivalent(launchContextPath, snapshotTargetPath))
-      );
-
-      if (!validLaunchSnapshot) {
-        return {
-          appliedToTargetNodes: false,
-          staleHandoff: true,
-          tone: 'warning',
-          message: 'Transformer output was returned from a stale editor session, so it was not applied. Reopen Transformer Builder from the current model editor and apply again.'
-        };
-      }
-
-      model = payloadModelSnapshot;
-      modelEditorDraft = model;
-    }
-
-    const generatedColumns = normalizeStringArray(payload.generatedColumns);
-    const instructions = Array.isArray(payload.transformations?.Instructions)
-      ? structuredClone(payload.transformations.Instructions)
-      : [];
-    const allowedLevels = ['Run', 'Session', 'Subject', 'Dataset'];
-    const normalizeLevel = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
-      return allowedLevels.find(level => level.toLowerCase() === raw) || '';
-    };
-    const targetLevels = normalizeStringArray(payload.targetLevels)
-      .map(normalizeLevel)
-      .filter(level => allowedLevels.includes(level));
-    const effectiveTargetLevels = targetLevels.length ? Array.from(new Set(targetLevels)) : ['Run'];
-    const targetNodes = Array.isArray(model.Nodes)
-      ? model.Nodes.filter(node => node && typeof node === 'object' && effectiveTargetLevels.includes(normalizeLevel(node.Level)))
-      : [];
-
-    if (!targetNodes.length) {
-      const targetText = effectiveTargetLevels.length === allowedLevels.length
-        ? 'selected'
-        : effectiveTargetLevels.join('/');
-      return {
-        appliedToTargetNodes: false,
-        targetLevels: effectiveTargetLevels,
-        tone: 'warning',
-        message: `Pending transformer output found, but the model has no ${targetText} node(s) to apply it to.`
-      };
-    }
-
-    targetNodes.forEach(node => {
-      const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
-        ? node.Transformations
-        : {};
-      const nextTransformations = {
-        ...existingTransformations,
-        Transformer: payload.transformations?.Transformer || 'bidspm',
-        Instructions: instructions
-      };
-      if (generatedColumns.length) {
-        nextTransformations.GeneratedColumns = generatedColumns;
-      } else {
-        delete nextTransformations.GeneratedColumns;
-      }
-      node.Transformations = nextTransformations;
-    });
-
-    extendInterestRegressorPool(generatedColumns);
-
-    const levelsText = effectiveTargetLevels.join(', ');
-    return {
-      appliedToTargetNodes: true,
-      targetLevels: effectiveTargetLevels,
-      tone: 'success',
-      message: `Applied transformer pipeline to ${targetNodes.length} node(s) at level(s): ${levelsText}. Generated variables: ${generatedColumns.length}. Design Matrix was not changed; add generated variables to Model.X manually if needed. Save Model to persist it.`
-    };
-  }
-
-  function consumePendingTransformerPayload(targetModelPath) {
-    const payload = readPendingTransformerPayload();
-    return consumeTransformerPayload(payload, targetModelPath);
-  }
-
-  function getCurrentModelPathValue() {
-    const input = document.getElementById('model-path-input');
-    return String(input?.value || modelPath || '').trim();
-  }
-
-  function getTransformerBuilderUrl() {
-    const projectId = String(CURRENT_PROJECT_ID || '').trim();
-    return projectId
-      ? `/transformer-builder/${encodeURIComponent(projectId)}`
-      : '/transformer-builder';
-  }
-
-  function resolveTransformerLaunchNodeIndex(nodeIndex = null) {
-    if (Number.isInteger(nodeIndex)) return nodeIndex;
-    if (Number.isInteger(window.modelEditorInlineTransformerNodeIdx)) return window.modelEditorInlineTransformerNodeIdx;
-    if (Number.isInteger(currentNodeIndex)) return currentNodeIndex;
-    const selection = window.currentSelection;
-    if (selection && selection.type === 'nodeField' && Number.isInteger(selection.idx)) {
-      return selection.idx;
-    }
-    return null;
-  }
-
-  function persistTransformerLaunchContextPayload(payload) {
-    const value = (payload && typeof payload === 'object' && !Array.isArray(payload))
-      ? payload
-      : {};
-    try {
-      sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(value));
-      return true;
-    } catch (withSnapshotError) {
-      const fallback = { ...value };
-      delete fallback.modelSnapshot;
-      try {
-        sessionStorage.setItem(TRANSFORMER_LAUNCH_CONTEXT_KEY, JSON.stringify(fallback));
-        return true;
-      } catch (fallbackError) {
-        try {
-          sessionStorage.removeItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
-        } catch (cleanupError) {
-          // Ignore storage cleanup failures.
-        }
-        return false;
-      }
-    }
-  }
-
-  function prepareTransformerLaunchContext(nodeIndex = null) {
-    const resolvedNodeIndex = resolveTransformerLaunchNodeIndex(nodeIndex);
-    const launchNode = (Number.isInteger(resolvedNodeIndex) && Array.isArray(model?.Nodes))
-      ? model.Nodes[resolvedNodeIndex]
-      : null;
-    const launchNodeLevel = String(launchNode?.Level || '').trim();
-    const selectedTasks = normalizeLaunchStringArray(modelEditorDraft?.Input?.task);
-    const launchSnapshotSource = (modelEditorDraft && typeof modelEditorDraft === 'object' && !Array.isArray(modelEditorDraft))
-      ? modelEditorDraft
-      : model;
-    const payload = {
-      launchId: createTransformerLaunchId(),
-      projectId: String(CURRENT_PROJECT_ID || '').trim(),
-      modelPath: getCurrentModelPathValue(),
-      bidsDir: String(document.getElementById('input-BIDS_DIR')?.value || '').trim(),
-      modelSnapshot: (launchSnapshotSource && typeof launchSnapshotSource === 'object' && !Array.isArray(launchSnapshotSource))
-        ? structuredClone(launchSnapshotSource)
-        : null,
-      launchAt: Date.now(),
-      nodeIndex: Number.isInteger(resolvedNodeIndex) ? resolvedNodeIndex : null,
-      inputTasks: selectedTasks,
-      taskFilter: selectedTasks.length === 1 ? selectedTasks[0] : '',
-      nodeLevel: launchNodeLevel || null,
-      sourceScope: launchNodeLevel
-        ? (launchNodeLevel.toLowerCase() === 'run' ? 'events' : 'participants')
-        : 'auto'
-    };
-    persistTransformerLaunchContextPayload(payload);
-  }
-
-  async function applyTransformerPayloadIntoCurrentModel(payload, modelPathHint = '', options = {}) {
-    const clearPending = Boolean(options.clearPending);
-    const targetPath = String(modelPathHint || getCurrentModelPathValue()).trim();
-    if (!targetPath || !model || typeof model !== 'object') return false;
-
-    const result = consumeTransformerPayload(payload, targetPath);
-    if (!result) return false;
-    if (result.staleHandoff) {
-      if (clearPending) clearPendingTransformerPayload();
-      setStatus(result.message, result.tone || 'warning');
-      return true;
-    }
-
-    modelEditorDraft = model;
-    await refreshModelEditorHintData(model);
-    renderModelStructure();
-    renderNodeList();
-    currentSelection = { type: 'model' };
-    window.currentSelection = currentSelection;
-    selectedLabel.textContent = 'Model Workspace';
-    selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
-    if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
-    refreshRawEditorFromSelection();
-    if (result.appliedToTargetNodes) {
-      markTransformerUnsavedChanges(result.message);
-      if (clearPending) {
-        clearPendingTransformerPayload();
-        if (String(payload.launchId || '').trim()) clearTransformerLaunchContext();
-      }
-    }
-    setStatus(result.message, result.tone || 'success');
-    return true;
-  }
-
-  async function applyPendingTransformerIntoCurrentModel(modelPathHint = '') {
-    const payload = readPendingTransformerPayload();
-    if (!payload) return false;
-    return applyTransformerPayloadIntoCurrentModel(payload, modelPathHint, { clearPending: true });
-  }
+  const {
+    consumeTransformerPayload,
+    consumePendingTransformerPayload
+  } = window.BidspmModelEditorTransformerPayload.createTransformerPayloadHelpers({
+    currentProjectId: CURRENT_PROJECT_ID,
+    getModel: () => model,
+    setModel: (nextModel) => {
+      model = nextModel;
+    },
+    areModelPathsEquivalent,
+    readTransformerLaunchContext,
+    readPendingTransformerPayload,
+    normalizeStringArray,
+    extendInterestRegressorPool
+  });
 
   window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
   window.getModelEditorTransformerBuilderUrl = getTransformerBuilderUrl;
@@ -1720,42 +694,12 @@
     ? window.modelEditorInlineTransformerNodeIdx
     : null;
 
-  window.addEventListener('message', async (event) => {
-    if (event.origin !== window.location.origin) return;
-    const data = event.data && typeof event.data === 'object' ? event.data : null;
-    if (!data || data.type !== TRANSFORMER_APPLIED_EVENT) return;
-
-    const hasDirectPayload = Boolean(
-      data.transformations
-      && typeof data.transformations === 'object'
-      && !Array.isArray(data.transformations)
-      && Array.isArray(data.transformations.Instructions)
-    );
-    if (hasDirectPayload) {
-      const directPayload = {
-        launchId: String(data.launchId || '').trim(),
-        projectId: String(data.projectId || '').trim(),
-        modelPath: String(data.modelPath || '').trim(),
-        transformations: structuredClone(data.transformations),
-        generatedColumns: normalizeStringArray(data.generatedColumns),
-        targetLevels: normalizeStringArray(data.targetLevels),
-        sourceScope: String(data.sourceScope || '').trim()
-      };
-      const appliedDirect = await applyTransformerPayloadIntoCurrentModel(
-        directPayload,
-        String(data.modelPath || '').trim(),
-        { clearPending: true }
-      );
-      if (!appliedDirect) {
-        setStatus('Transformer payload received but could not be applied to the currently loaded model.', 'warning');
-      }
-      return;
-    }
-
-    const applied = await applyPendingTransformerIntoCurrentModel(String(data.modelPath || '').trim());
-    if (!applied) {
-      setStatus('Transformer payload received but could not be applied to the currently loaded model.', 'warning');
-    }
+  window.BidspmModelEditorTransformerEvents.registerTransformerAppliedListener({
+    transformerAppliedEvent: TRANSFORMER_APPLIED_EVENT,
+    applyTransformerPayloadIntoCurrentModel,
+    applyPendingTransformerIntoCurrentModel,
+    normalizeStringArray,
+    setStatus: (message, tone) => setStatus(message, tone)
   });
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
@@ -1792,6 +736,52 @@
   const statusEl = document.getElementById('editor-status');
   const rawToggleBtn = document.getElementById('btn-toggle-raw');
   let currentNodeIndex = null;
+  const {
+    getCurrentModelPathValue,
+    getTransformerBuilderUrl,
+    resolveTransformerLaunchNodeIndex,
+    persistTransformerLaunchContextPayload,
+    prepareTransformerLaunchContext
+  } = window.BidspmModelEditorLaunchContext.createLaunchContextHelpers({
+    transformerLaunchContextKey: TRANSFORMER_LAUNCH_CONTEXT_KEY,
+    currentProjectId: CURRENT_PROJECT_ID,
+    createTransformerLaunchId,
+    normalizeLaunchStringArray,
+    getModel: () => model,
+    getModelDraft: () => window.modelEditorDraft,
+    getModelPathFallback: () => modelPath,
+    getCurrentNodeIndex: () => currentNodeIndex,
+    getCurrentSelection: () => window.currentSelection
+  });
+  const {
+    applyTransformerPayloadIntoCurrentModel,
+    applyPendingTransformerIntoCurrentModel
+  } = window.BidspmModelEditorTransformerApply.createTransformerApplyHelpers({
+    consumeTransformerPayload,
+    readPendingTransformerPayload,
+    clearPendingTransformerPayload,
+    clearTransformerLaunchContext,
+    markTransformerUnsavedChanges,
+    getCurrentModelPathValue,
+    getModel: () => model,
+    setModelDraft: (nextModel) => {
+      window.modelEditorDraft = nextModel;
+    },
+    refreshModelEditorHintData: async (nextModel) => refreshModelEditorHintData(nextModel),
+    renderModelStructure: () => renderModelStructure(),
+    renderNodeList: () => renderNodeList(),
+    resetSelectionToModel: () => {
+      currentSelection = { type: 'model' };
+      window.currentSelection = currentSelection;
+      selectedLabel.textContent = 'Model Workspace';
+      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
+    },
+    renderAccordionEditor: () => {
+      if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+    },
+    refreshRawEditorFromSelection: () => refreshRawEditorFromSelection(),
+    setStatus: (message, tone) => setStatus(message, tone)
+  });
 
   function getNodeLevelOptions(){
     const fallback = ['Run', 'Session', 'Subject', 'Dataset'];
@@ -1845,98 +835,6 @@
     return model;
   }
 
-  function applyRawValueToSelection(parsed){
-    if (!currentSelection || currentSelection.type === 'model') {
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Model JSON must be an object');
-      }
-      model = parsed;
-      modelEditorDraft = model;
-      return;
-    }
-
-    if (currentSelection.type === 'modelField') {
-      model[currentSelection.field] = parsed;
-      return;
-    }
-
-    if (currentSelection.type === 'nodeField') {
-      const nodes = Array.isArray(model.Nodes) ? model.Nodes : [];
-      const node = nodes[currentSelection.idx];
-      if (!node) throw new Error('Selected node no longer exists');
-      node[currentSelection.field] = parsed;
-    }
-  }
-
-  function refreshRawEditorFromSelection(){
-    if (!rawMode) return;
-    const value = getCurrentSelectionValue();
-    rawEditor.value = JSON.stringify(value === undefined ? null : value, null, 2);
-  }
-
-  function rerenderCurrentSelection(){
-    if (!model) return;
-    if (currentSelection?.type === 'nodeField') {
-      selectNodeField(currentSelection.idx, currentSelection.field);
-      return;
-    }
-    if (currentSelection?.type === 'modelField') {
-      selectModelField(currentSelection.field);
-      return;
-    }
-    selectedLabel.textContent = 'Model';
-    selectedMeta.textContent = 'Select a field from the left panel.';
-    friendlyEditor.innerHTML = '<div class="small text-muted">Select a model field from the left panel, or use Raw JSON to edit the entire model.</div>';
-  }
-
-  setRawMode(false);
-
-  async function fetchModel(path){
-    // Show loading state in full editor
-    const accEditor = document.getElementById('model-editor-accordion');
-    if (accEditor) accEditor.innerHTML = '<div class="text-center py-4"><span class="spinner-border spinner-border-sm text-primary me-2"></span><span class="text-muted">Loading model…</span></div>';
-    const summaryPanel = document.getElementById('model-editor-summary');
-    if (summaryPanel) summaryPanel.classList.add('d-none');
-    try{
-      const res = await fetch(`/file_content?path=${encodeURIComponent(path)}`);
-      if(!res.ok) throw new Error('Failed to load file');
-      const txt = await res.text();
-      model = JSON.parse(txt);
-      // mirror into full-editor draft
-      modelEditorDraft = model;
-      const pendingTransformerResult = consumePendingTransformerPayload(path);
-      clearTransformerUnsavedChanges();
-      const pathLabel = document.getElementById('model-editor-path');
-      if(pathLabel) pathLabel.textContent = path;
-      await refreshInputEntityOptions(false);
-      await refreshModelEditorHintData(model);
-      renderModelStructure();
-      renderNodeList();
-      // reset selection to show all sections, then render full editor
-      currentSelection = { type: 'model' };
-      window.currentSelection = currentSelection;
-      selectedLabel.textContent = 'Model Workspace';
-      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
-      if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
-      refreshRawEditorFromSelection();
-      if (pendingTransformerResult?.message) {
-        if (pendingTransformerResult.appliedToTargetNodes) {
-          markTransformerUnsavedChanges(pendingTransformerResult.message);
-          clearPendingTransformerPayload();
-        }
-        setStatus(pendingTransformerResult.message, pendingTransformerResult.tone || 'success');
-      } else {
-        setStatus('Model loaded.', 'success');
-      }
-    }catch(e){
-      model = null;
-      nodeListEl.innerHTML = '';
-      friendlyEditor.innerHTML = '';
-      rawEditor.value = '';
-      setStatus('Load failed: ' + e.message, 'danger');
-    }
-  }
-
   async function refreshInputEntityOptions(showStatusMessage = false){
     await refreshDatasetInputEntities(false);
     await refreshSpaceInputOptions(false);
@@ -1944,6 +842,43 @@
     if (showStatusMessage) {
       const counts = ['task', 'run', 'session', 'subject', 'space']
         .map(k => (Array.isArray(modelEditorInputEntityValues[k]) ? modelEditorInputEntityValues[k].length : 0));
+  const {
+    fetchModel
+  } = window.BidspmModelEditorLoading.createModelLoadingHelpers({
+    setStatus: (message, tone) => setStatus(message, tone),
+    setModel: (nextModel) => {
+      model = nextModel;
+    },
+    setModelDraft: (nextModel) => {
+      window.modelEditorDraft = nextModel;
+    },
+    clearTransformerUnsavedChanges: () => clearTransformerUnsavedChanges(),
+    refreshInputEntityOptions: async (showStatusMessage) => refreshInputEntityOptions(showStatusMessage),
+    refreshModelEditorHintData: async (nextModel) => refreshModelEditorHintData(nextModel),
+    renderModelStructure: () => renderModelStructure(),
+    renderNodeList: () => renderNodeList(),
+    resetSelectionToModel: () => {
+      currentSelection = { type: 'model' };
+      window.currentSelection = currentSelection;
+      selectedLabel.textContent = 'Model Workspace';
+      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
+    },
+    isFullEditor: () => editorMode === 'full',
+    renderAccordionEditor: () => {
+      if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+    },
+    refreshRawEditorFromSelection: () => refreshRawEditorFromSelection(),
+    applyPendingTransformerIntoCurrentModel: async (path) => applyPendingTransformerIntoCurrentModel(path),
+    setPathLabel: (path) => {
+      const pathLabel = document.getElementById('model-editor-path');
+      if (pathLabel) pathLabel.textContent = path;
+    },
+    clearUiOnLoadFailure: () => {
+      nodeListEl.innerHTML = '';
+      friendlyEditor.innerHTML = '';
+      rawEditor.value = '';
+    }
+  });
       const total = counts.reduce((a, b) => a + b, 0);
       if (total > 0) {
         setStatus(`Loaded input options: task(${counts[0]}), run(${counts[1]}), session(${counts[2]}), subject(${counts[3]}), space(${counts[4]}).`, 'success');
