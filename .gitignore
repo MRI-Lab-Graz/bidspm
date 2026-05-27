@@ -149,6 +149,9 @@ Thumbs.db
 *.temp
 *.bak
 *.backup
+script_*.js
+temp_script_*.js
+extracted_scripts.txt
 bidspm_runner.egg-info/
 
 # Data directories (typically large, should be specified separately)
