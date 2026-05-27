@@ -688,19 +688,6 @@
     extendInterestRegressorPool
   });
 
-  window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
-  window.getModelEditorTransformerBuilderUrl = getTransformerBuilderUrl;
-  window.modelEditorInlineTransformerNodeIdx = Number.isInteger(window.modelEditorInlineTransformerNodeIdx)
-    ? window.modelEditorInlineTransformerNodeIdx
-    : null;
-
-  window.BidspmModelEditorTransformerEvents.registerTransformerAppliedListener({
-    transformerAppliedEvent: TRANSFORMER_APPLIED_EVENT,
-    applyTransformerPayloadIntoCurrentModel,
-    applyPendingTransformerIntoCurrentModel,
-    normalizeStringArray,
-    setStatus: (message, tone) => setStatus(message, tone)
-  });
   let currentSelection = { type: 'model' };
   window.currentSelection = currentSelection;
 
@@ -783,6 +770,58 @@
     setStatus: (message, tone) => setStatus(message, tone)
   });
 
+  const {
+    fetchModel
+  } = window.BidspmModelEditorLoading.createModelLoadingHelpers({
+    setStatus: (message, tone) => setStatus(message, tone),
+    setModel: (nextModel) => {
+      model = nextModel;
+    },
+    setModelDraft: (nextModel) => {
+      window.modelEditorDraft = nextModel;
+    },
+    clearTransformerUnsavedChanges: () => clearTransformerUnsavedChanges(),
+    refreshInputEntityOptions: async (showStatusMessage) => refreshInputEntityOptions(showStatusMessage),
+    refreshModelEditorHintData: async (nextModel) => refreshModelEditorHintData(nextModel),
+    renderModelStructure: () => renderModelStructure(),
+    renderNodeList: () => renderNodeList(),
+    resetSelectionToModel: () => {
+      currentSelection = { type: 'model' };
+      window.currentSelection = currentSelection;
+      selectedLabel.textContent = 'Model Workspace';
+      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
+    },
+    isFullEditor: () => editorMode === 'full',
+    renderAccordionEditor: () => {
+      if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+    },
+    refreshRawEditorFromSelection: () => refreshRawEditorFromSelection(),
+    applyPendingTransformerIntoCurrentModel: async (path) => applyPendingTransformerIntoCurrentModel(path),
+    setPathLabel: (path) => {
+      const pathLabel = document.getElementById('model-editor-path');
+      if (pathLabel) pathLabel.textContent = path;
+    },
+    clearUiOnLoadFailure: () => {
+      nodeListEl.innerHTML = '';
+      friendlyEditor.innerHTML = '';
+      rawEditor.value = '';
+    }
+  });
+
+  window.prepareModelEditorTransformerLaunchContext = prepareTransformerLaunchContext;
+  window.getModelEditorTransformerBuilderUrl = getTransformerBuilderUrl;
+  window.modelEditorInlineTransformerNodeIdx = Number.isInteger(window.modelEditorInlineTransformerNodeIdx)
+    ? window.modelEditorInlineTransformerNodeIdx
+    : null;
+
+  window.BidspmModelEditorTransformerEvents.registerTransformerAppliedListener({
+    transformerAppliedEvent: TRANSFORMER_APPLIED_EVENT,
+    applyTransformerPayloadIntoCurrentModel,
+    applyPendingTransformerIntoCurrentModel,
+    normalizeStringArray,
+    setStatus: (message, tone) => setStatus(message, tone)
+  });
+
   function getNodeLevelOptions(){
     const fallback = ['Run', 'Session', 'Subject', 'Dataset'];
     if (Array.isArray(window.NODE_LEVEL_OPTIONS) && window.NODE_LEVEL_OPTIONS.length) {
@@ -842,43 +881,6 @@
     if (showStatusMessage) {
       const counts = ['task', 'run', 'session', 'subject', 'space']
         .map(k => (Array.isArray(modelEditorInputEntityValues[k]) ? modelEditorInputEntityValues[k].length : 0));
-  const {
-    fetchModel
-  } = window.BidspmModelEditorLoading.createModelLoadingHelpers({
-    setStatus: (message, tone) => setStatus(message, tone),
-    setModel: (nextModel) => {
-      model = nextModel;
-    },
-    setModelDraft: (nextModel) => {
-      window.modelEditorDraft = nextModel;
-    },
-    clearTransformerUnsavedChanges: () => clearTransformerUnsavedChanges(),
-    refreshInputEntityOptions: async (showStatusMessage) => refreshInputEntityOptions(showStatusMessage),
-    refreshModelEditorHintData: async (nextModel) => refreshModelEditorHintData(nextModel),
-    renderModelStructure: () => renderModelStructure(),
-    renderNodeList: () => renderNodeList(),
-    resetSelectionToModel: () => {
-      currentSelection = { type: 'model' };
-      window.currentSelection = currentSelection;
-      selectedLabel.textContent = 'Model Workspace';
-      selectedMeta.textContent = 'Edit input filters, node pipelines, edges and contrasts below.';
-    },
-    isFullEditor: () => editorMode === 'full',
-    renderAccordionEditor: () => {
-      if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
-    },
-    refreshRawEditorFromSelection: () => refreshRawEditorFromSelection(),
-    applyPendingTransformerIntoCurrentModel: async (path) => applyPendingTransformerIntoCurrentModel(path),
-    setPathLabel: (path) => {
-      const pathLabel = document.getElementById('model-editor-path');
-      if (pathLabel) pathLabel.textContent = path;
-    },
-    clearUiOnLoadFailure: () => {
-      nodeListEl.innerHTML = '';
-      friendlyEditor.innerHTML = '';
-      rawEditor.value = '';
-    }
-  });
       const total = counts.reduce((a, b) => a + b, 0);
       if (total > 0) {
         setStatus(`Loaded input options: task(${counts[0]}), run(${counts[1]}), session(${counts[2]}), subject(${counts[3]}), space(${counts[4]}).`, 'success');
