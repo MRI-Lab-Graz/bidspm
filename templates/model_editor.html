@@ -972,6 +972,15 @@
     setTransformerUnsavedBanner(false, '');
   }
 
+  function normalizeLaunchStringArray(value) {
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    if (value === undefined || value === null || typeof value === 'object') return [];
+    const normalized = String(value || '').trim();
+    return normalized ? [normalized] : [];
+  }
+
   function readTransformerLaunchContext() {
     try {
       const raw = sessionStorage.getItem(TRANSFORMER_LAUNCH_CONTEXT_KEY);
@@ -1097,6 +1106,310 @@
 
   window.stripLegacyGeneratedColumnsFromModel = stripLegacyGeneratedColumnsFromModel;
 
+  function normalizeTransformerSuggestionValues(values) {
+    return Array.from(new Set((Array.isArray(values) ? values : [])
+      .map(value => String(value ?? '').trim())
+      .filter(Boolean)));
+  }
+
+  function normalizeTransformerSuggestionColumns(value) {
+    const items = Array.isArray(value) ? value : (value ? [value] : []);
+    return items.map(item => String(item || '').trim()).filter(Boolean);
+  }
+
+  function getModelEditorSeedColumnDomains(node) {
+    const valuesMap = {};
+    const nodeLevel = String(node?.Level || '').trim().toLowerCase();
+    const useEventDomains = !nodeLevel || nodeLevel === 'run';
+    const useParticipantDomains = !nodeLevel || nodeLevel !== 'run';
+
+    if (useEventDomains) {
+      const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+        ? window.modelEditorEventSamples
+        : { trial_type: [], condition: [] };
+      const numericSamples = (window.modelEditorEventNumericSamples && typeof window.modelEditorEventNumericSamples === 'object')
+        ? window.modelEditorEventNumericSamples
+        : {};
+
+      const trialValues = normalizeStringArray(eventSamples.trial_type);
+      const conditionValues = normalizeStringArray(eventSamples.condition);
+      if (trialValues.length) valuesMap.trial_type = trialValues;
+      if (conditionValues.length) valuesMap.condition = conditionValues;
+
+      Object.entries(numericSamples).forEach(([columnName, values]) => {
+        const normalizedName = String(columnName || '').trim();
+        if (!normalizedName) return;
+        valuesMap[normalizedName] = normalizeTransformerSuggestionValues(values);
+      });
+    }
+
+    if (useParticipantDomains) {
+      const participantInfo = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+        ? window.modelEditorParticipantsInfo
+        : { sample_values: {} };
+      const sampleValues = (participantInfo.sample_values && typeof participantInfo.sample_values === 'object')
+        ? participantInfo.sample_values
+        : {};
+      Object.entries(sampleValues).forEach(([columnName, values]) => {
+        const normalizedName = String(columnName || '').trim();
+        if (!normalizedName) return;
+        valuesMap[normalizedName] = normalizeTransformerSuggestionValues(values);
+      });
+    }
+
+    return valuesMap;
+  }
+
+  function getTransformerSuggestionDomain(valuesMap, name) {
+    return normalizeTransformerSuggestionValues(valuesMap[name] || []);
+  }
+
+  function buildTransformerSuggestionCombinations(levelSets, index = 0, parts = [], names = []) {
+    if (index >= levelSets.length) {
+      if (parts.length) names.push(parts.join('_'));
+      return names;
+    }
+
+    levelSets[index].forEach(level => {
+      buildTransformerSuggestionCombinations(levelSets, index + 1, [...parts, level], names);
+    });
+    return names;
+  }
+
+  function normalizeTransformerFilterLiteral(value) {
+    const literal = String(value || '').trim();
+    if (!literal) return '';
+    if ((literal.startsWith("'") && literal.endsWith("'")) || (literal.startsWith('"') && literal.endsWith('"'))) {
+      return literal.slice(1, -1).trim();
+    }
+    return literal.replace(/^\(+|\)+$/g, '').trim();
+  }
+
+  function inferTransformerFilterSuggestionDomain(query, inputColumn, inputValues) {
+    const normalizedInput = String(inputColumn || '').trim();
+    const domain = normalizeTransformerSuggestionValues(inputValues);
+    const normalizedQuery = String(query || '').trim();
+    if (!normalizedInput || !normalizedQuery || !domain.length) return domain;
+
+    const matched = new Set();
+    let sawInputEquality = false;
+
+    normalizedQuery.split('|').map(part => part.trim()).filter(Boolean).forEach(part => {
+      const clause = part.replace(/^\(+|\)+$/g, '').trim();
+      const match = clause.match(/^(.+?)\s*==\s*(.+)$/);
+      if (!match) return;
+
+      const left = String(match[1] || '').trim();
+      if (left !== normalizedInput) return;
+
+      sawInputEquality = true;
+      const literal = normalizeTransformerFilterLiteral(match[2]);
+      if (literal) matched.add(literal);
+    });
+
+    if (!sawInputEquality) return domain;
+    const filtered = domain.filter(value => matched.has(String(value)));
+    return filtered.length ? filtered : Array.from(matched);
+  }
+
+  function applyTransformerSuggestionReplacements(value, replacements) {
+    let nextValue = String(value ?? '').trim();
+    replacements.forEach(rule => {
+      const key = String(rule?.key || '').trim();
+      if (!key) return;
+
+      const replacement = String(rule?.value ?? '').trim();
+      if (nextValue === key) {
+        nextValue = replacement;
+        return;
+      }
+
+      try {
+        const regex = new RegExp(key);
+        if (regex.test(nextValue)) nextValue = nextValue.replace(regex, replacement);
+      } catch (e) {
+        // Ignore invalid regex patterns while still applying literal replacements.
+      }
+    });
+    return nextValue;
+  }
+
+  function applyTransformerSuggestionDomains(valuesMap, instruction) {
+    const opName = String(instruction?.Name || '').trim();
+    if (!opName) return;
+
+    const inputColumns = normalizeTransformerSuggestionColumns(instruction.Input);
+    const outputColumns = normalizeTransformerSuggestionColumns(instruction.Output);
+    const inputColumn = inputColumns[0] || '';
+    const targetColumn = outputColumns[0] || inputColumn;
+
+    switch (opName) {
+      case 'Filter': {
+        if (!targetColumn) return;
+        const inputValues = getTransformerSuggestionDomain(valuesMap, inputColumn);
+        valuesMap[targetColumn] = inferTransformerFilterSuggestionDomain(instruction.Query, inputColumn, inputValues);
+        return;
+      }
+      case 'Concatenate': {
+        const outputName = outputColumns[0];
+        if (!outputName || !inputColumns.length) return;
+        const levelSets = inputColumns.map(col => getTransformerSuggestionDomain(valuesMap, col));
+        if (levelSets.some(levels => !levels.length)) return;
+        valuesMap[outputName] = normalizeTransformerSuggestionValues(buildTransformerSuggestionCombinations(levelSets));
+        return;
+      }
+      case 'Factor': {
+        if (!inputColumns.length) return;
+        const levelSets = inputColumns.map(col => getTransformerSuggestionDomain(valuesMap, col));
+        if (levelSets.some(levels => !levels.length)) return;
+        const factorColumns = [];
+        const buildFactorColumns = (index, parts) => {
+          if (index >= inputColumns.length) {
+            factorColumns.push(parts.join('_'));
+            return;
+          }
+          const column = inputColumns[index];
+          levelSets[index].forEach(level => {
+            buildFactorColumns(index + 1, [...parts, column, level]);
+          });
+        };
+        buildFactorColumns(0, []);
+        factorColumns.forEach(name => {
+          valuesMap[name] = ['0', '1'];
+        });
+        return;
+      }
+      case 'Replace': {
+        if (!targetColumn) return;
+        const inputValues = getTransformerSuggestionDomain(valuesMap, inputColumn);
+        const replacements = Array.isArray(instruction.Replace) ? instruction.Replace : [];
+        valuesMap[targetColumn] = normalizeTransformerSuggestionValues(inputValues.map(value => applyTransformerSuggestionReplacements(value, replacements)));
+        return;
+      }
+      case 'Copy': {
+        if (!inputColumns.length || !outputColumns.length) return;
+        outputColumns.forEach((outputName, index) => {
+          const sourceName = inputColumns[index] || inputColumns[inputColumns.length - 1];
+          if (!outputName || !sourceName) return;
+          valuesMap[outputName] = [...getTransformerSuggestionDomain(valuesMap, sourceName)];
+        });
+        return;
+      }
+      case 'Assign': {
+        const targetColumns = normalizeTransformerSuggestionColumns(instruction.Target);
+        if (!inputColumns.length || !targetColumns.length) return;
+        const assigned = targetColumns.map((targetName, index) => ({
+          targetName,
+          sourceName: inputColumns[index] || inputColumns[inputColumns.length - 1]
+        }));
+
+        if (outputColumns.length) {
+          assigned.forEach(({ sourceName }, index) => {
+            const outputName = outputColumns[index] || outputColumns[outputColumns.length - 1];
+            if (!outputName || !sourceName) return;
+            valuesMap[outputName] = [...getTransformerSuggestionDomain(valuesMap, sourceName)];
+          });
+          return;
+        }
+
+        assigned.forEach(({ targetName, sourceName }) => {
+          if (!targetName || !sourceName) return;
+          valuesMap[targetName] = [...getTransformerSuggestionDomain(valuesMap, sourceName)];
+        });
+        return;
+      }
+      case 'DropNA': {
+        if (!targetColumn) return;
+        valuesMap[targetColumn] = [...getTransformerSuggestionDomain(valuesMap, inputColumn)];
+        return;
+      }
+      case 'Split': {
+        if (!inputColumns.length || !outputColumns.length) return;
+        outputColumns.forEach(outputName => {
+          if (!outputName) return;
+          valuesMap[outputName] = [...getTransformerSuggestionDomain(valuesMap, inputColumn)];
+        });
+        return;
+      }
+      case 'LabelIdenticalRows':
+      case 'Label_identical_rows': {
+        if (!inputColumns.length) return;
+        if (outputColumns.length) {
+          outputColumns.forEach(outputName => {
+            if (!outputName) return;
+            valuesMap[outputName] = [];
+          });
+          return;
+        }
+        inputColumns.forEach(col => {
+          valuesMap[`${col}_label`] = [];
+        });
+        return;
+      }
+      case 'MergeIdenticalRows': {
+        return;
+      }
+      case 'Constant': {
+        const outputName = outputColumns[0];
+        if (!outputName) return;
+        const rawValue = instruction.Value;
+        const constantValue = rawValue === undefined || rawValue === null || rawValue === ''
+          ? '1'
+          : String(rawValue);
+        valuesMap[outputName] = [constantValue];
+        return;
+      }
+      case 'Product':
+      case 'Std':
+      case 'Sum':
+      case 'Scale':
+      case 'Mean': {
+        if (!targetColumn) return;
+        valuesMap[targetColumn] = [...getTransformerSuggestionDomain(valuesMap, inputColumn)];
+        return;
+      }
+      case 'Threshold': {
+        if (!targetColumn) return;
+        valuesMap[targetColumn] = instruction.Binarize
+          ? ['0', '1']
+          : [...getTransformerSuggestionDomain(valuesMap, inputColumn)];
+        return;
+      }
+      case 'Select': {
+        if (!inputColumns.length) return;
+        const keep = new Set(inputColumns);
+        Object.keys(valuesMap).forEach(name => {
+          if (!keep.has(name)) delete valuesMap[name];
+        });
+        return;
+      }
+      case 'Delete': {
+        inputColumns.forEach(name => {
+          delete valuesMap[name];
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  function buildTransformerSuggestionValueDomains(node) {
+    const valuesMap = getModelEditorSeedColumnDomains(node);
+    const instructions = Array.isArray(node?.Transformations?.Instructions)
+      ? node.Transformations.Instructions.filter(item => item && typeof item === 'object')
+      : [];
+    instructions.forEach(instruction => applyTransformerSuggestionDomains(valuesMap, instruction));
+    return valuesMap;
+  }
+
+  function shouldOfferTransformerLevelSuggestions(values) {
+    const domain = normalizeTransformerSuggestionValues(values);
+    if (!domain.length) return false;
+    if (domain.every(value => value === '0' || value === '1')) return false;
+    return domain.some(value => Number.isNaN(Number(value)));
+  }
+
   function getTransformerModelXRegressors(node) {
     function inferGeneratedColumnsFromInstructionLocal(instruction) {
       if (!instruction || typeof instruction !== 'object') return [];
@@ -1152,10 +1465,21 @@
     const inferredGenerated = Array.isArray(transformations?.Instructions)
       ? Array.from(new Set(transformations.Instructions.flatMap(instruction => inferGeneratedColumnsFromInstructionLocal(instruction))))
       : [];
+    const valueDomains = buildTransformerSuggestionValueDomains(node);
+    const dynamicGenerated = [];
+
+    inferredGenerated.forEach(name => {
+      const domain = getTransformerSuggestionDomain(valueDomains, name);
+      if (!shouldOfferTransformerLevelSuggestions(domain)) return;
+      domain.forEach(level => {
+        dynamicGenerated.push(`${name}.${level}`);
+      });
+    });
 
     return Array.from(new Set([
       ...explicitGenerated,
-      ...inferredGenerated
+      ...inferredGenerated,
+      ...dynamicGenerated
     ])).filter(name => {
       if (!name || name === '1') return false;
       if (name.startsWith('trial_type.') || name.startsWith('condition.')) return false;
@@ -1326,7 +1650,7 @@
       ? model.Nodes[resolvedNodeIndex]
       : null;
     const launchNodeLevel = String(launchNode?.Level || '').trim();
-    const selectedTasks = normalizeEditorStringArray(modelEditorDraft?.Input?.task);
+    const selectedTasks = normalizeLaunchStringArray(modelEditorDraft?.Input?.task);
     const launchSnapshotSource = (modelEditorDraft && typeof modelEditorDraft === 'object' && !Array.isArray(modelEditorDraft))
       ? modelEditorDraft
       : model;

@@ -1,0 +1,21 @@
+[run]
+branch = True
+source =
+    bidspm_gui
+    lib
+    web_config_fs_api
+    web_discovery_model_api
+    web_execution_api
+    web_pages
+    web_projects_api
+    web_utility_stats_api
+omit =
+    tests/*
+    build/*
+    external/*
+    frontend_desktop/*
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 1
