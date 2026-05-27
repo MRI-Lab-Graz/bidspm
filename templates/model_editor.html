@@ -1244,6 +1244,8 @@
     return root;
   }
 
+  window.buildBidspmNuisanceRegressorPicker = buildNuisanceRegressorPicker;
+
   async function refreshModelEditorHintData(explicitModelContent = null){
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim() || '';
     const prepDir = document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || '';
@@ -6711,8 +6713,8 @@
         const nuisanceHint = document.createElement('div');
         nuisanceHint.className = 'small text-muted mb-2';
         nuisanceHint.textContent = confoundColumns.length
-          ? `Detected ${confoundColumns.length} confound columns. Drag or click badges into Design Matrix space.`
-          : 'No confounds file detected yet. Set fMRIPrep folder to validate columns.';
+          ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
+          : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
         nuisanceCard.appendChild(nuisanceHint);
 
         const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
@@ -6738,32 +6740,55 @@
           nuisanceCard.appendChild(removeNuisanceBtn);
         }
 
-        const nuisanceOptions = Array.from(new Set([
-          ...defaultTransRot,
-          'framewise_displacement',
-          ...transRotConfounds
-        ]));
-        const nuisanceGrid = document.createElement('div');
-        nuisanceGrid.className = 'modelx-pool';
-
-        nuisanceOptions.forEach(reg => {
-          const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
-          const badge = document.createElement('button');
-          badge.type = 'button';
-          badge.className = presentInConfounds
-            ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
-            : 'btn btn-sm btn-outline-danger modelx-reg-badge';
-          badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
-          badge.draggable = true;
-          badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
-          badge.addEventListener('dragstart', (event)=>{
-            event.dataTransfer.effectAllowed = 'copy';
-            event.dataTransfer.setData('application/x-modelx-regressor', reg);
-            event.dataTransfer.setData('text/plain', reg);
+        const nuisancePickerFactory = typeof window.buildBidspmNuisanceRegressorPicker === 'function'
+          ? window.buildBidspmNuisanceRegressorPicker
+          : null;
+        if (nuisancePickerFactory) {
+          const nuisancePicker = nuisancePickerFactory({
+            confoundColumns,
+            curatedColumns: transRotConfounds.length ? transRotConfounds : defaultTransRot,
+            getSelectedSet: () => new Set(normalizeList(getByPath(modelEditorDraft, basePath))),
+            onAdd: (reg) => addRegressorToModelX(basePath, reg),
+            onRemove: (reg) => {
+              const arr = getByPath(modelEditorDraft, basePath);
+              if (!Array.isArray(arr)) return;
+              const filtered = arr.filter(value => String(value || '').trim() !== reg);
+              if (filtered.length === arr.length) return;
+              setByPath(modelEditorDraft, basePath, filtered);
+              syncHrfVariablesWithModelX();
+              setModelEditorStatus(`Removed ${reg} from Model.X`, 'info');
+              renderModelAccordionEditor();
+            }
           });
-          nuisanceGrid.appendChild(badge);
-        });
-        nuisanceCard.appendChild(nuisanceGrid);
+          nuisanceCard.appendChild(nuisancePicker);
+        } else {
+          const nuisanceOptions = Array.from(new Set([
+            ...defaultTransRot,
+            'framewise_displacement',
+            ...transRotConfounds
+          ]));
+          const nuisanceGrid = document.createElement('div');
+          nuisanceGrid.className = 'modelx-pool';
+
+          nuisanceOptions.forEach(reg => {
+            const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.className = presentInConfounds
+              ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+              : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+            badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+            badge.draggable = true;
+            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+            badge.addEventListener('dragstart', (event)=>{
+              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.setData('application/x-modelx-regressor', reg);
+              event.dataTransfer.setData('text/plain', reg);
+            });
+            nuisanceGrid.appendChild(badge);
+          });
+          nuisanceCard.appendChild(nuisanceGrid);
+        }
         listWrap.appendChild(nuisanceCard);
 
         const dropZoneTitle = document.createElement('div');
