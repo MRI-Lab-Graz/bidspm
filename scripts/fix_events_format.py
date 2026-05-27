@@ -11,6 +11,7 @@ import pandas as pd
 import sys
 import re
 import shutil
+import unicodedata
 from pathlib import Path
 from glob import glob
 
@@ -18,7 +19,131 @@ from glob import glob
 PASSTHROUGH_TASKS = {'MRECO', 'MREOC'}
 
 
-def fix_events_dataframe(df):
+def normalize_label(value):
+    """Normalize labels for resilient subject and item matching."""
+    text = ''.join(
+        char for char in unicodedata.normalize('NFKD', str(value or ''))
+        if not unicodedata.combining(char)
+    )
+    text = text.casefold().strip()
+    return re.sub(r'[^a-z0-9]+', '', text)
+
+
+def sanitize_column_name(value):
+    """Convert external column labels into BIDS-friendly snake_case names."""
+    text = unicodedata.normalize('NFKD', str(value or '')).encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^A-Za-z0-9]+', '_', text).strip('_').lower()
+    return text or 'metadata'
+
+
+def clean_metadata_value(value):
+    """Convert spreadsheet values into stable TSV-friendly strings."""
+    if pd.isna(value):
+        return 'n/a'
+    if isinstance(value, float):
+        return f"{value:g}"
+    text = str(value).strip()
+    return text if text else 'n/a'
+
+
+class ItemMetadataMatcher:
+    """Match item rows to spreadsheet metadata, preferring exact names then order."""
+
+    def __init__(self, metadata_columns, records):
+        self.metadata_columns = metadata_columns
+        self.records = records
+        self.used = [False] * len(records)
+        self.next_unused = 0
+        self.by_name = {}
+        for index, record in enumerate(records):
+            self.by_name.setdefault(record['_normalized_item'], []).append(index)
+
+    def _claim_index(self, index):
+        self.used[index] = True
+        while self.next_unused < len(self.used) and self.used[self.next_unused]:
+            self.next_unused += 1
+        return {
+            column: self.records[index].get(column, 'n/a')
+            for column in self.metadata_columns
+        }
+
+    def claim(self, item_name):
+        normalized_item = normalize_label(item_name)
+        for index in self.by_name.get(normalized_item, []):
+            if not self.used[index]:
+                return self._claim_index(index)
+
+        if self.next_unused < len(self.records):
+            return self._claim_index(self.next_unused)
+
+        return None
+
+
+def find_matching_excel(events_file, excel_dir=None):
+    """Find a subject-matched Excel workbook for the source events file."""
+    events_path = Path(events_file)
+    subject = parse_bids_filename(events_path.name).get('sub')
+    if not subject:
+        return None
+
+    search_dir = Path(excel_dir) if excel_dir else Path(__file__).resolve().parent
+    if not search_dir.exists():
+        return None
+
+    targets = {normalize_label(subject), normalize_label(f"sub-{subject}")}
+    candidates = sorted(search_dir.glob('*.xlsx')) + sorted(search_dir.glob('*.XLSX'))
+    for candidate in candidates:
+        normalized_stem = normalize_label(candidate.stem)
+        if normalized_stem in targets:
+            return candidate
+        if normalized_stem.startswith('sub') and normalized_stem[3:] in targets:
+            return candidate
+
+    return None
+
+
+def load_item_metadata_matcher(excel_path):
+    """Load item metadata from the first sheet of an Excel workbook."""
+    try:
+        metadata_df = pd.read_excel(excel_path, engine='openpyxl')
+    except ImportError as exc:
+        raise RuntimeError(
+            "Reading item metadata from Excel requires openpyxl. Install it with 'pip install openpyxl'."
+        ) from exc
+
+    metadata_df = metadata_df.dropna(how='all')
+    if metadata_df.empty:
+        return None
+
+    item_column = metadata_df.columns[0]
+    metadata_columns = [sanitize_column_name(column) for column in metadata_df.columns[1:]]
+    records = []
+
+    for _, row in metadata_df.iterrows():
+        item_name = clean_metadata_value(row[item_column])
+        if item_name == 'n/a':
+            continue
+
+        record = {'_normalized_item': normalize_label(item_name)}
+        for source_column, output_column in zip(metadata_df.columns[1:], metadata_columns):
+            record[output_column] = clean_metadata_value(row[source_column])
+        records.append(record)
+
+    if not records:
+        return None
+
+    return ItemMetadataMatcher(metadata_columns, records)
+
+
+def load_item_metadata_for_events(events_file, excel_dir=None):
+    """Load workbook metadata for a source events file when a matching workbook exists."""
+    excel_path = find_matching_excel(events_file, excel_dir=excel_dir)
+    if not excel_path:
+        return None, None
+    return load_item_metadata_matcher(excel_path), excel_path
+
+
+def fix_events_dataframe(df, item_metadata=None):
     """Fix the events dataframe formatting."""
 
     def col(row, name, default='n/a'):
@@ -36,6 +161,23 @@ def fix_events_dataframe(df):
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    metadata_columns = item_metadata.metadata_columns if item_metadata else []
+
+    def make_event(onset, duration, response_time='n/a'):
+        event = {
+            'onset': onset,
+            'duration': duration,
+            'trial_type': 'n/a',
+            'item': 'n/a',
+            'rating': 'n/a',
+            'rating_type': 'n/a',
+            'button_type': 'n/a',
+            'response_time': response_time if response_time != 'n/a' and pd.notna(response_time) else 'n/a'
+        }
+        for column in metadata_columns:
+            event[column] = 'n/a'
+        return event
 
     # Create output dataframe
     new_rows = []
@@ -66,16 +208,9 @@ def fix_events_dataframe(df):
                 i += 1
                 continue
             # Standalone keyboard event
-            kb_event = {
-                'onset': onset,
-                'duration': 0,
-                'trial_type': 'button_press',
-                'item': 'n/a',
-                'rating': 'n/a',
-                'rating_type': 'n/a',
-                'button_type': trial_type.replace('_key', ''),
-                'response_time': 'n/a'
-            }
+            kb_event = make_event(onset, 0)
+            kb_event['trial_type'] = 'button_press'
+            kb_event['button_type'] = trial_type.replace('_key', '')
             new_rows.append(kb_event)
             i += 1
             continue
@@ -86,16 +221,7 @@ def fix_events_dataframe(df):
             continue
         
         # Initialize new event
-        new_event = {
-            'onset': onset,
-            'duration': duration,
-            'trial_type': 'n/a',
-            'item': 'n/a',
-            'rating': 'n/a',
-            'rating_type': 'n/a',
-            'button_type': 'n/a',
-            'response_time': response_time if response_time != 'n/a' and pd.notna(response_time) else 'n/a'
-        }
+        new_event = make_event(onset, duration, response_time=response_time)
         
         # === FIXATION ===
         if event_type == 'TextStim' and trial_type == 'fixation':
@@ -106,6 +232,10 @@ def fix_events_dataframe(df):
             item_name = event_type.replace('AUTitem ', '')
             new_event['trial_type'] = 'item'
             new_event['item'] = item_name
+            metadata = item_metadata.claim(item_name) if item_metadata else None
+            if metadata:
+                for column, value in metadata.items():
+                    new_event[column] = value
         
         # === VERBAL RESPONSE (response2 Krawatte) ===
         elif event_type == 'AUTresponse':
@@ -166,16 +296,9 @@ def fix_events_dataframe(df):
                 }
                 button_type = button_type_map.get(button_type, button_type)
 
-                kb_event = {
-                    'onset': round(new_onset, 4),
-                    'duration': 0,
-                    'trial_type': 'button_press',
-                    'item': 'n/a',
-                    'rating': 'n/a',
-                    'rating_type': 'n/a',
-                    'button_type': button_type,
-                    'response_time': 'n/a'
-                }
+                kb_event = make_event(round(new_onset, 4), 0)
+                kb_event['trial_type'] = 'button_press'
+                kb_event['button_type'] = button_type
                 new_rows.append(kb_event)
             
             # Skip the keyboard row
@@ -185,6 +308,7 @@ def fix_events_dataframe(df):
     
     # Create output dataframe with column order
     columns = ['onset', 'duration', 'trial_type', 'item', 'rating', 'rating_type', 'button_type', 'response_time']
+    columns.extend(metadata_columns)
     result_df = pd.DataFrame(new_rows, columns=columns)
     
     # Sort by onset
@@ -196,10 +320,11 @@ def fix_events_dataframe(df):
     return result_df
 
 
-def fix_single_file(input_path, output_path=None):
+def fix_single_file(input_path, output_path=None, excel_dir=None):
     """Fix a single events file."""
     df = pd.read_csv(input_path, sep='\t')
-    result_df = fix_events_dataframe(df)
+    item_metadata, _ = load_item_metadata_for_events(input_path, excel_dir=excel_dir)
+    result_df = fix_events_dataframe(df, item_metadata=item_metadata)
     
     if output_path is None:
         p = Path(input_path)
@@ -277,7 +402,7 @@ def backup_existing_files(target_dir, file_pattern):
         shutil.copy2(str(f), backup_dir / f.name)  # copy, never move – originals stay in BIDS
 
 
-def process_folder(source_folder, dest_folder, force=False, dry_run=False):
+def process_folder(source_folder, dest_folder, force=False, dry_run=False, excel_dir=None):
     """
     Process all events files in source folder and copy to dest folder with BIDS naming.
     
@@ -339,7 +464,10 @@ def process_folder(source_folder, dest_folder, force=False, dry_run=False):
             # Read, fix, and save
             try:
                 df = pd.read_csv(events_file, sep='\t')
-                result_df = fix_events_dataframe(df)
+                item_metadata, excel_path = load_item_metadata_for_events(events_file, excel_dir=excel_dir)
+                if excel_path:
+                    print(f"  Matched metadata workbook: {excel_path.name}")
+                result_df = fix_events_dataframe(df, item_metadata=item_metadata)
                 result_df.to_csv(output_path, sep='\t', index=False)
                 print(f"  Created: {output_path}")
                 processed += 1
@@ -352,6 +480,7 @@ def process_folder(source_folder, dest_folder, force=False, dry_run=False):
 
 def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None,
                           ses_override=None, run=None, force=False,
+                          excel_dir=None,
                           backup=False, dry_run=False):
     """
     Process all events files in source folder and copy to correct BIDS paths.
@@ -490,7 +619,10 @@ def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None
                 print(f"  Pass-through: keeping {src_task} content unchanged.")
                 result_df = df
             else:
-                result_df = fix_events_dataframe(df)
+                item_metadata, excel_path = load_item_metadata_for_events(events_file, excel_dir=excel_dir)
+                if excel_path:
+                    print(f"  Matched metadata workbook: {excel_path.name}")
+                result_df = fix_events_dataframe(df, item_metadata=item_metadata)
         except Exception as e:
             print(f"  ERROR reading/processing source: {e}")
             continue
@@ -586,6 +718,9 @@ Examples:
     parser.add_argument('--run', metavar='RUN',
                         help='Run index to include in output filename (e.g. 1). '
                              'Inserted after task label: sub-X_ses-Y_task-Z_run-1_events.tsv')
+    parser.add_argument('--excel-dir', metavar='EXCEL_DIR',
+                        help='Directory containing subject-matched .xlsx item metadata files. '
+                             'Defaults to the script directory.')
     parser.add_argument('--force', action='store_true',
                         help='Overwrite existing output files even if content is identical.')
     parser.add_argument('--backup', action='store_true',
@@ -601,13 +736,14 @@ Examples:
             process_folder_to_bids(args.folder, args.bids, task=args.task,
                                    source_task=args.source_task,
                                    ses_override=args.ses, run=args.run,
+                                   excel_dir=args.excel_dir,
                                    force=force, backup=args.backup, dry_run=args.dry_run)
         elif args.dest:
-            process_folder(args.folder, args.dest, force=force, dry_run=args.dry_run)
+            process_folder(args.folder, args.dest, force=force, dry_run=args.dry_run, excel_dir=args.excel_dir)
         else:
             parser.error("--folder requires either --bids <bids_root> or --dest <func_dir>")
     elif args.input:
-        result = fix_single_file(args.input, args.output)
+        result = fix_single_file(args.input, args.output, excel_dir=args.excel_dir)
 
         out = args.output
         if out is None:

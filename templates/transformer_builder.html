@@ -636,6 +636,13 @@
     'Std',
     'Threshold'
   ]);
+  const MUNGE_OPERATION_NAMES = new Set([
+    'Assign', 'Filter', 'Concatenate', 'Factor', 'Replace', 'Copy', 'DropNA',
+    'Split', 'LabelIdenticalRows', 'MergeIdenticalRows', 'Select', 'Delete'
+  ]);
+  const COMPUTE_OPERATION_NAMES = new Set([
+    'Constant', 'Product', 'Scale', 'Mean', 'Std', 'Sum', 'Threshold'
+  ]);
 
   // ---- State ----
   let availableColumns = [];
@@ -665,6 +672,8 @@
   if (['auto', 'events', 'participants', 'combined'].includes(launchSourceScope)) {
     document.getElementById('select-source-scope').value = launchSourceScope;
   }
+  const launchTaskFilter = normalizeLaunchTaskFilter(launchContext);
+  let pendingLaunchTaskFilter = launchTaskFilter;
   updateScopeHint();
   updateLaunchContextHint();
 
@@ -708,6 +717,7 @@
   });
   document.getElementById('select-task').addEventListener('change', () => {
     // Changing task filter should force a fresh random file within that task.
+    pendingLaunchTaskFilter = '';
     currentPreviewFile = null;
     scanEvents(false);
   });
@@ -822,7 +832,7 @@
       return;
     }
 
-    const generatedColumns = getGeneratedColumns().map(col => col.name);
+    const generatedColumns = getGeneratedModelXRegressorSuggestions();
     const launchId = String(launchContext?.launchId || '').trim();
     const targetProjectId = String(launchContext?.projectId || CURRENT_PROJECT_ID || '').trim();
     const targetLevels = getTargetLevels();
@@ -876,6 +886,7 @@
 
   async function initializeModelSelection() {
     await refreshModelCandidates();
+    await maybeBootstrapPipelineFromModel();
     scheduleLiveModelValidation();
   }
 
@@ -1100,21 +1111,51 @@
     const hint = document.getElementById('launch-context-hint');
     if (!hint) return;
 
-    if (!launchNodeLevel) {
+    if (!launchNodeLevel && !launchTaskFilter) {
       hint.textContent = '';
       hint.classList.add('d-none');
       return;
     }
 
     const selectedLevel = getSelectedTargetLevel();
-    if (selectedLevel !== launchNodeLevel) {
+    if (launchNodeLevel && selectedLevel !== launchNodeLevel) {
       hint.textContent = '';
       hint.classList.add('d-none');
       return;
     }
 
-    hint.textContent = `Preselected from active node: target level ${launchNodeLevel}.`;
+    const parts = [];
+    if (launchNodeLevel) {
+      parts.push(`target level ${launchNodeLevel}`);
+    }
+    if (launchTaskFilter) {
+      parts.push(`task ${launchTaskFilter}`);
+    }
+
+    if (!parts.length) {
+      hint.textContent = '';
+      hint.classList.add('d-none');
+      return;
+    }
+
+    hint.textContent = `Preselected from active model: ${parts.join(' and ')}.`;
     hint.classList.remove('d-none');
+  }
+
+  function normalizeLaunchTaskFilter(context) {
+    const directTask = String(context?.taskFilter || '').trim();
+    if (directTask) return directTask;
+
+    const inputTasks = Array.isArray(context?.inputTasks)
+      ? context.inputTasks.map(task => String(task || '').trim()).filter(Boolean)
+      : [];
+    return inputTasks.length === 1 ? inputTasks[0] : '';
+  }
+
+  function getRequestedTaskFilter() {
+    const taskSel = document.getElementById('select-task');
+    const selectedTask = String(taskSel?.value || '').trim();
+    return selectedTask || pendingLaunchTaskFilter;
   }
 
   function mergeColumnValueMaps(left, right) {
@@ -1218,13 +1259,13 @@
       const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
         ? node.Transformations
         : {};
-      const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
-      node.Transformations = {
+      const nextTransformations = {
         ...existingTransformations,
         Transformer: transformations.Transformer || 'bidspm',
-        Instructions: instructions,
-        GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
+        Instructions: instructions
       };
+      delete nextTransformations.GeneratedColumns;
+      node.Transformations = nextTransformations;
     });
 
     return {
@@ -1350,8 +1391,7 @@
   async function scanEventsColumns(forceNewPreview = false) {
     const bidsDir = document.getElementById('input-bids-dir').value.trim();
     const eventsFile = document.getElementById('input-events-file').value.trim();
-    const taskSel = document.getElementById('select-task');
-    const selectedTask = taskSel.value.trim();
+    const selectedTask = getRequestedTaskFilter();
 
     if (!bidsDir && !eventsFile) {
       setStatus('Enter a BIDS directory or select a single events.tsv file.', 'warning');
@@ -1436,8 +1476,7 @@
     setStatus('Scanning events + participants columns…', 'info');
     setPreviewScopeMode('combined');
 
-    const taskSel = document.getElementById('select-task');
-    const selectedTask = taskSel.value.trim();
+    const selectedTask = getRequestedTaskFilter();
     const eventsFile = document.getElementById('input-events-file').value.trim();
     const payload = {
       preview_max_rows: getPreviewMaxRows(),
@@ -1746,6 +1785,35 @@
     });
 
     return generated;
+  }
+
+  function getGeneratedModelXRegressorSuggestions() {
+    const suggestions = [];
+    const seen = new Set();
+
+    const addSuggestion = (value) => {
+      const normalized = String(value || '').trim();
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      suggestions.push(normalized);
+    };
+
+    getGeneratedColumns().forEach(colInfo => {
+      const columnName = String(colInfo?.name || '').trim();
+      if (!columnName) return;
+
+      addSuggestion(columnName);
+
+      if (String(colInfo?.derivedFrom || '').trim() === 'Concatenate') {
+        getColumnDomain(columnName).forEach(level => {
+          const normalizedLevel = String(level || '').trim();
+          if (!normalizedLevel) return;
+          addSuggestion(`${columnName}.${normalizedLevel}`);
+        });
+      }
+    });
+
+    return suggestions;
   }
 
   function inferGeneratedColumnsForCard(card, opType) {
@@ -2254,6 +2322,171 @@
     }
 
     updateGeneratedJSON();
+    return card;
+  }
+
+  function getOperationCategory(opType) {
+    if (MUNGE_OPERATION_NAMES.has(opType)) return 'munge';
+    if (COMPUTE_OPERATION_NAMES.has(opType)) return 'compute';
+    return '';
+  }
+
+  function clearPipelineCards() {
+    const pipeline = document.getElementById('op-pipeline');
+    pipeline.querySelectorAll('.op-card').forEach(card => card.remove());
+    if (!pipeline.querySelector('.op-card')) {
+      const hint = document.createElement('div');
+      hint.id = 'pipeline-empty-hint';
+      hint.className = 'empty-pipeline-hint';
+      hint.innerHTML = '<i class="fas fa-plus-circle d-block mb-2" style="font-size:1.6rem;opacity:.4;"></i>Click an operation above to add it.<br>Drag columns from the left into the input fields.';
+      pipeline.appendChild(hint);
+    }
+  }
+
+  function setCardFieldValue(card, fieldName, value) {
+    const input = card.querySelector(`input[data-field="${fieldName}"], textarea[data-field="${fieldName}"]`);
+    if (!input) return;
+    if (input.type === 'checkbox') {
+      input.checked = Boolean(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      input.value = value.map(item => String(item || '').trim()).filter(Boolean).join(', ');
+      return;
+    }
+    input.value = value === undefined || value === null ? '' : String(value);
+  }
+
+  function setCardZoneValue(card, fieldName, value) {
+    const zone = card.querySelector(`.col-drop-zone[data-field="${fieldName}"]`);
+    if (!zone) return;
+    setZoneValue(zone, normalizeColumnList(value));
+  }
+
+  function populateReplaceRows(card, replacements) {
+    const tbody = card.querySelector('.replace-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    (Array.isArray(replacements) ? replacements : []).forEach(rule => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" placeholder="old_value"></td>
+        <td><input type="text" placeholder="new_value"></td>
+        <td><button class="btn btn-sm btn-link text-danger p-0 btn-rm-row" title="Remove">×</button></td>
+      `;
+      const [keyInput, valueInput] = tr.querySelectorAll('input');
+      keyInput.value = String(rule?.key || '').trim();
+      valueInput.value = String(rule?.value || '').trim();
+      tr.querySelectorAll('input').forEach(input => input.addEventListener('input', updateGeneratedJSON));
+      wireRmRow(tr.querySelector('.btn-rm-row'));
+      tbody.appendChild(tr);
+    });
+    if (!tbody.children.length) {
+      addReplaceRow(card);
+    }
+  }
+
+  function populateCardFromInstruction(card, instruction) {
+    if (!card || !instruction || typeof instruction !== 'object') return;
+
+    setCardZoneValue(card, 'Input', instruction.Input);
+    setCardZoneValue(card, 'Target', instruction.Target);
+    setCardZoneValue(card, 'By', instruction.By);
+
+    if (card.dataset.opType === 'Threshold' && Object.prototype.hasOwnProperty.call(instruction, 'Threshold')) {
+      if (instruction.Above === false) {
+        setCardFieldValue(card, 'MaxThreshold', instruction.Threshold);
+      } else {
+        setCardFieldValue(card, 'MinThreshold', instruction.Threshold);
+      }
+    } else {
+      setCardFieldValue(card, 'Output', instruction.Output);
+    }
+
+    ['Query', 'InputAttr', 'TargetAttr', 'Value', 'Weights'].forEach(fieldName => {
+      if (Object.prototype.hasOwnProperty.call(instruction, fieldName)) {
+        setCardFieldValue(card, fieldName, instruction[fieldName]);
+      }
+    });
+
+    ['Cumulative', 'Demean', 'Rescale', 'OmitNan', 'Binarize', 'Signed'].forEach(fieldName => {
+      const checkbox = card.querySelector(`input[type="checkbox"][data-field="${fieldName}"]`);
+      if (!checkbox) return;
+      if (Object.prototype.hasOwnProperty.call(instruction, fieldName)) {
+        checkbox.checked = Boolean(instruction[fieldName]);
+      }
+    });
+
+    if (card.dataset.opType === 'Replace') {
+      populateReplaceRows(card, instruction.Replace);
+    }
+  }
+
+  function findSeedTransformations(model) {
+    const nodes = Array.isArray(model?.Nodes) ? model.Nodes : [];
+    const targetLevels = new Set(getTargetLevels().map(level => normalizeNodeLevel(level)).filter(Boolean));
+    const preferredNodes = nodes.filter(node => {
+      if (!node || typeof node !== 'object') return false;
+      const level = normalizeNodeLevel(node.Level);
+      return targetLevels.size ? targetLevels.has(level) : true;
+    });
+    const nodesToInspect = preferredNodes.length ? preferredNodes : nodes;
+
+    for (const node of nodesToInspect) {
+      const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+        ? node.Transformations
+        : null;
+      const instructions = Array.isArray(transformations?.Instructions)
+        ? transformations.Instructions.filter(item => item && typeof item === 'object')
+        : [];
+      if (instructions.length) {
+        return {
+          nodeName: String(node?.Name || '').trim(),
+          nodeLevel: normalizeNodeLevel(node?.Level),
+          instructions
+        };
+      }
+    }
+
+    return null;
+  }
+
+  async function maybeBootstrapPipelineFromModel(force = false) {
+    if (!force && document.querySelector('#op-pipeline .op-card')) return false;
+
+    let model = null;
+    if (launchContext?.modelSnapshot && typeof launchContext.modelSnapshot === 'object' && !Array.isArray(launchContext.modelSnapshot)) {
+      model = structuredClone(launchContext.modelSnapshot);
+    } else {
+      const selectedModelPath = getSelectedModelPath();
+      if (!selectedModelPath) return false;
+      try {
+        model = await loadModelForValidation(selectedModelPath);
+      } catch (e) {
+        return false;
+      }
+    }
+
+    const seed = findSeedTransformations(model);
+    if (!seed || !seed.instructions.length) return false;
+
+    clearPipelineCards();
+
+    seed.instructions.forEach(instruction => {
+      const opType = String(instruction?.Name || '').trim();
+      const category = getOperationCategory(opType);
+      if (!category) return;
+      const card = addOperation(opType, category);
+      populateCardFromInstruction(card, instruction);
+    });
+
+    updateGeneratedJSON();
+
+    const nodeLabel = seed.nodeName
+      ? `${seed.nodeLevel || 'node'} ${seed.nodeName}`
+      : (seed.nodeLevel || 'selected node');
+    setStatus(`Loaded ${seed.instructions.length} existing transformer instruction(s) from ${nodeLabel}.`, 'success');
+    return true;
   }
 
   // ================================================================

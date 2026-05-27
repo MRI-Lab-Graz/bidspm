@@ -4,6 +4,7 @@
 # Core validation dependencies
 requests>=2.28.0
 jsonschema>=4.17.0
+openpyxl>=3.1.0
 
 # Web interface dependencies
 flask>=2.3.0

@@ -1073,6 +1073,99 @@
     ]));
   }
 
+  function stripLegacyGeneratedColumnsFromModel(input) {
+    if (!input || typeof input !== 'object') return input;
+
+    const clone = structuredClone(input);
+    const walk = (value) => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        value.forEach(item => walk(item));
+        return;
+      }
+
+      if (value.Transformations && typeof value.Transformations === 'object' && !Array.isArray(value.Transformations)) {
+        delete value.Transformations.GeneratedColumns;
+      }
+
+      Object.values(value).forEach(entry => walk(entry));
+    };
+
+    walk(clone);
+    return clone;
+  }
+
+  window.stripLegacyGeneratedColumnsFromModel = stripLegacyGeneratedColumnsFromModel;
+
+  function getTransformerModelXRegressors(node) {
+    function inferGeneratedColumnsFromInstructionLocal(instruction) {
+      if (!instruction || typeof instruction !== 'object') return [];
+
+      const opName = String(instruction.Name || '').trim();
+      const outputValues = normalizeStringArray(instruction.Output);
+
+      if (opName === 'Factor') {
+        const normalizedInputs = normalizeStringArray(instruction.Input);
+        if (!normalizedInputs.length) return [];
+
+        const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+          ? window.modelEditorEventSamples
+          : { trial_type: [], condition: [] };
+        const levelSets = normalizedInputs.map(column => {
+          if (column === 'trial_type') return normalizeStringArray(eventSamples.trial_type);
+          if (column === 'condition') return normalizeStringArray(eventSamples.condition);
+          return [];
+        });
+
+        const hasConcreteLevels = levelSets.every(levels => levels.length > 0);
+        if (!hasConcreteLevels) {
+          return normalizedInputs.map(column => `${column}_*`);
+        }
+
+        const names = [];
+        const build = (index, parts) => {
+          if (index >= normalizedInputs.length) {
+            names.push(parts.join('_'));
+            return;
+          }
+          const column = normalizedInputs[index];
+          levelSets[index].forEach(level => {
+            build(index + 1, [...parts, column, level]);
+          });
+        };
+        build(0, []);
+        return names;
+      }
+
+      if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
+        if (outputValues.length) return outputValues;
+        return normalizeStringArray(instruction.Input).map(name => `${name}_label`);
+      }
+
+      return outputValues;
+    }
+
+    const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+      ? node.Transformations
+      : null;
+    const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
+    const inferredGenerated = Array.isArray(transformations?.Instructions)
+      ? Array.from(new Set(transformations.Instructions.flatMap(instruction => inferGeneratedColumnsFromInstructionLocal(instruction))))
+      : [];
+
+    return Array.from(new Set([
+      ...explicitGenerated,
+      ...inferredGenerated
+    ])).filter(name => {
+      if (!name || name === '1') return false;
+      if (name.startsWith('trial_type.') || name.startsWith('condition.')) return false;
+      if (isLikelyNuisanceRegressor(name)) return false;
+      return true;
+    });
+  }
+
+  window.getTransformerModelXRegressors = getTransformerModelXRegressors;
+
   function consumeTransformerPayload(payload, targetModelPath) {
     if (!payload || !model || typeof model !== 'object') return null;
 
@@ -1151,13 +1244,17 @@
       const existingTransformations = (node.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
         ? node.Transformations
         : {};
-      const existingGenerated = normalizeStringArray(existingTransformations.GeneratedColumns);
-      node.Transformations = {
+      const nextTransformations = {
         ...existingTransformations,
         Transformer: payload.transformations?.Transformer || 'bidspm',
-        Instructions: instructions,
-        GeneratedColumns: Array.from(new Set([...existingGenerated, ...generatedColumns]))
+        Instructions: instructions
       };
+      if (generatedColumns.length) {
+        nextTransformations.GeneratedColumns = generatedColumns;
+      } else {
+        delete nextTransformations.GeneratedColumns;
+      }
+      node.Transformations = nextTransformations;
     });
 
     extendInterestRegressorPool(generatedColumns);
@@ -1229,6 +1326,7 @@
       ? model.Nodes[resolvedNodeIndex]
       : null;
     const launchNodeLevel = String(launchNode?.Level || '').trim();
+    const selectedTasks = normalizeEditorStringArray(modelEditorDraft?.Input?.task);
     const launchSnapshotSource = (modelEditorDraft && typeof modelEditorDraft === 'object' && !Array.isArray(modelEditorDraft))
       ? modelEditorDraft
       : model;
@@ -1242,6 +1340,8 @@
         : null,
       launchAt: Date.now(),
       nodeIndex: Number.isInteger(resolvedNodeIndex) ? resolvedNodeIndex : null,
+      inputTasks: selectedTasks,
+      taskFilter: selectedTasks.length === 1 ? selectedTasks[0] : '',
       nodeLevel: launchNodeLevel || null,
       sourceScope: launchNodeLevel
         ? (launchNodeLevel.toLowerCase() === 'run' ? 'events' : 'participants')
@@ -1765,7 +1865,14 @@
 
       const trialRegs = trialValues.map(v => `trial_type.${v}`);
       const conditionRegs = conditionValues.map(v => `condition.${v}`);
-      window.modelEditorInterestRegressors = Array.from(new Set([...trialRegs, ...conditionRegs])).filter(Boolean);
+      const transformed = Array.isArray(data?.model?.transformed_columns)
+        ? data.model.transformed_columns.map(value => String(value || '').trim()).filter(Boolean)
+        : [];
+      window.modelEditorInterestRegressors = Array.from(new Set([
+        ...trialRegs,
+        ...conditionRegs,
+        ...transformed
+      ])).filter(Boolean);
 
       const confounds = data?.dataset?.confounds || {};
       window.modelEditorConfoundColumns = normalizeStringArray(confounds.columns);
@@ -2596,8 +2703,10 @@
   }
 
   function normalizeStringArray(value){
-    if (!Array.isArray(value)) return [];
-    return value.map(v => String(v).trim()).filter(Boolean);
+    if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+    if (value === undefined || value === null || typeof value === 'object') return [];
+    const normalized = String(value).trim();
+    return normalized ? [normalized] : [];
   }
 
   function ensureNodeModelObject(node, idx){
@@ -3186,6 +3295,8 @@
     const conditionRegressors = hasSingleSelectedTask
       ? normalizeStringArray(eventSamples.condition).map(v => `condition.${v}`)
       : [];
+    const transformerRegressors = getTransformerModelXRegressors(node);
+    const hasTransformerPipeline = Boolean(node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations));
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
     const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
 
@@ -3436,6 +3547,49 @@
       xCard.appendChild(condPool);
     }
 
+    if (transformerRegressors.length || hasTransformerPipeline) {
+      const transformerCard = document.createElement('div');
+      transformerCard.className = 'border rounded p-2 bg-white';
+
+      const transformerTitle = document.createElement('div');
+      transformerTitle.className = 'small fw-bold mb-1';
+      transformerTitle.textContent = 'Transformer-generated regressors';
+      transformerCard.appendChild(transformerTitle);
+
+      const transformerHint = document.createElement('div');
+      transformerHint.className = 'small text-muted mb-2';
+      transformerHint.textContent = transformerRegressors.length
+        ? 'Outputs from the attached transformer pipeline. Drag or click badges into the Design Matrix space.'
+        : 'No generated transformer columns detected yet. Define Output names in Transformer Builder to reuse them in Model.X.';
+      transformerCard.appendChild(transformerHint);
+
+      const transformerPool = document.createElement('div');
+      transformerPool.className = 'modelx-pool';
+      if (!transformerRegressors.length) {
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'Transformer outputs will appear here after you define generated columns.';
+        transformerPool.appendChild(empty);
+      } else {
+        transformerRegressors.forEach(reg => {
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = 'btn btn-sm btn-outline-success modelx-reg-badge';
+          badge.textContent = reg;
+          badge.draggable = true;
+          badge.addEventListener('click', ()=> addModelXRegressor(reg));
+          badge.addEventListener('dragstart', (event)=>{
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+            event.dataTransfer.setData('text/plain', reg);
+          });
+          transformerPool.appendChild(badge);
+        });
+      }
+      transformerCard.appendChild(transformerPool);
+      xCard.appendChild(transformerCard);
+    }
+
     const nuisanceCard = document.createElement('div');
     nuisanceCard.className = 'border rounded p-2';
     const nuisanceTitle = document.createElement('div');
@@ -3524,7 +3678,7 @@
     if (!Array.isArray(modelObj.X) || modelObj.X.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'small text-muted w-100';
-      empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
+      empty.textContent = 'Drop trial_type / transformer / nuisance badges here to build Model.X. Drag badges to reorder.';
       xList.appendChild(empty);
     } else {
       modelObj.X.forEach((reg, regIdx) => {
@@ -5611,9 +5765,12 @@
   function getEdgesSectionStats(edges){ const list = Array.isArray(edges)?edges:[]; const nodeNames = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes.map(node => String(node?.Name || '').trim()).filter(Boolean) : []; const knownFilterKeys = getKnownEdgeFilterMetadataKeys(); const ready = list.filter(edge => getEdgeSchemaIssues(edge, nodeNames, knownFilterKeys).length === 0).length; const filters = list.filter(edge => edge?.Filter && typeof edge.Filter === 'object' && !Array.isArray(edge.Filter)).length; const withUnknownFilterKeys = list.filter(edge => getEdgeSchemaAdvisories(edge, nodeNames, knownFilterKeys).length > 0).length; const total = list.length>0 ? list.length : 1; return { filled: ready, total, subtitle: 'Source to destination node links', badges:[ { text: `Edges ${list.length}`, tone: list.length ? 'success' : 'neutral' }, { text: `Ready ${ready}/${list.length||0}`, tone: list.length ? getModelPillTone(ready, list.length) : 'neutral' }, { text: `With filter ${filters}`, tone: 'neutral' }, { text: withUnknownFilterKeys ? `Unknown filter keys ${withUnknownFilterKeys}` : 'Known filter keys', tone: withUnknownFilterKeys ? 'warning' : 'neutral' } ], dotClass: getCompletionDotClass(ready, total) }; }
 
   function normalizeEditorStringArray(value) {
-    return Array.isArray(value)
-      ? value.map(item => String(item || '').trim()).filter(Boolean)
-      : [];
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    if (value === undefined || value === null || typeof value === 'object') return [];
+    const normalized = String(value || '').trim();
+    return normalized ? [normalized] : [];
   }
 
   function getModelNodeByName(nodeName) {
@@ -5804,10 +5961,9 @@
 
   function ensureNodeTransformationsObject(node) {
     if (!node.Transformations || typeof node.Transformations !== 'object' || Array.isArray(node.Transformations)) {
-      node.Transformations = { Transformer: 'bidspm', Instructions: [], GeneratedColumns: [] };
+      node.Transformations = { Transformer: 'bidspm', Instructions: [] };
     }
     if (!Array.isArray(node.Transformations.Instructions)) node.Transformations.Instructions = [];
-    if (!Array.isArray(node.Transformations.GeneratedColumns)) node.Transformations.GeneratedColumns = [];
     if (!node.Transformations.Transformer) node.Transformations.Transformer = 'bidspm';
     return node.Transformations;
   }
@@ -5947,7 +6103,7 @@
     transformations.Instructions.forEach(instruction => {
       inferGeneratedColumnsFromInstruction(instruction).forEach(name => generated.push(name));
     });
-    transformations.GeneratedColumns = Array.from(new Set(normalizeEditorStringArray(generated)));
+    return Array.from(new Set(normalizeEditorStringArray(generated)));
   }
 
   function renderNodeTransformationsPanel(container, node, idx) {
@@ -6840,6 +6996,14 @@
         const conditionRegressors = hasSingleSelectedTask
           ? normalizeList(eventSamples.condition).map(v => `condition.${v}`)
           : [];
+        const nodeMatch = String(basePath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
+        const currentNode = nodeMatch && Array.isArray(modelEditorDraft?.Nodes)
+          ? modelEditorDraft.Nodes[Number(nodeMatch[1])]
+          : null;
+        const transformerRegressors = typeof window.getTransformerModelXRegressors === 'function'
+          ? window.getTransformerModelXRegressors(currentNode)
+          : [];
+        const hasTransformerPipeline = Boolean(currentNode?.Transformations && typeof currentNode.Transformations === 'object' && !Array.isArray(currentNode.Transformations));
         const confoundColumns = normalizeList(window.modelEditorConfoundColumns);
         const transRotConfounds = normalizeList(window.modelEditorTransRotConfounds);
         const defaultTransRot = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
@@ -7063,6 +7227,48 @@
           listWrap.appendChild(condPool);
         }
 
+        if (transformerRegressors.length || hasTransformerPipeline) {
+          const transformerCard = document.createElement('div');
+          transformerCard.className = 'border rounded p-2 mb-2 bg-white';
+          const transformerTitle = document.createElement('div');
+          transformerTitle.className = 'small fw-bold mb-1';
+          transformerTitle.textContent = 'Transformer-generated regressors';
+          transformerCard.appendChild(transformerTitle);
+
+          const transformerHint = document.createElement('div');
+          transformerHint.className = 'small text-muted mb-2';
+          transformerHint.textContent = transformerRegressors.length
+            ? 'Outputs from the attached transformer pipeline. Drag or click badges into the Design Matrix space.'
+            : 'No generated transformer columns detected yet. Define Output names in Transformer Builder to reuse them in Model.X.';
+          transformerCard.appendChild(transformerHint);
+
+          const transformerPool = document.createElement('div');
+          transformerPool.className = 'modelx-pool';
+          if (!transformerRegressors.length) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = 'Transformer outputs will appear here after you define generated columns.';
+            transformerPool.appendChild(empty);
+          } else {
+            transformerRegressors.forEach(reg => {
+              const badge = document.createElement('button');
+              badge.type = 'button';
+              badge.className = 'btn btn-sm btn-outline-success modelx-reg-badge';
+              badge.textContent = reg;
+              badge.draggable = true;
+              badge.addEventListener('click', ()=> addModelXRegressor(basePath, reg));
+              badge.addEventListener('dragstart', (event)=>{
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                event.dataTransfer.setData('text/plain', reg);
+              });
+              transformerPool.appendChild(badge);
+            });
+          }
+          transformerCard.appendChild(transformerPool);
+          listWrap.appendChild(transformerCard);
+        }
+
         const nuisanceCard = document.createElement('div');
         nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
         const nuisanceTitle = document.createElement('div');
@@ -7162,7 +7368,7 @@
         if (!currentRegs.length) {
           const empty = document.createElement('div');
           empty.className = 'small text-muted w-100';
-          empty.textContent = 'Drop trial_type / nuisance badges here to build Model.X. Drag badges to reorder.';
+          empty.textContent = 'Drop trial_type / transformer / nuisance badges here to build Model.X. Drag badges to reorder.';
           dropZone.appendChild(empty);
         } else {
           currentRegs.forEach((reg, idx) => {
@@ -7583,7 +7789,10 @@
       setModelPreviewValidationState('idle', 'Load a model to run live schema validation.');
       return;
     }
-    preview.textContent = JSON.stringify(modelEditorDraft, null, 2);
+    const snapshot = typeof window.stripLegacyGeneratedColumnsFromModel === 'function'
+      ? window.stripLegacyGeneratedColumnsFromModel(modelEditorDraft)
+      : structuredClone(modelEditorDraft);
+    preview.textContent = JSON.stringify(snapshot, null, 2);
     preview.classList.remove('model-editor-preview-empty');
     scheduleModelPreviewValidation();
   }
@@ -7620,7 +7829,9 @@
       return;
     }
 
-    const snapshot = structuredClone(modelEditorDraft);
+    const snapshot = typeof window.stripLegacyGeneratedColumnsFromModel === 'function'
+      ? window.stripLegacyGeneratedColumnsFromModel(modelEditorDraft)
+      : structuredClone(modelEditorDraft);
     setModelPreviewValidationState('checking', 'Validating live JSON preview...');
 
     try {
@@ -7685,7 +7896,10 @@
     if (!Array.isArray(modelEditorDraft.Input?.task) || modelEditorDraft.Input.task.length === 0) { if (status) status.innerHTML = '<div class="alert alert-danger py-1 x-small mb-0">Select at least one Input.task.</div>'; return; }
     if (status) status.innerHTML = '<div class="text-muted x-small">Saving...</div>';
     try{
-      const res = await fetch('/file_content', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path: modelPathVal, content: JSON.stringify(modelEditorDraft, null, 2), validate_json: true }) });
+      const snapshot = typeof window.stripLegacyGeneratedColumnsFromModel === 'function'
+        ? window.stripLegacyGeneratedColumnsFromModel(modelEditorDraft)
+        : structuredClone(modelEditorDraft);
+      const res = await fetch('/file_content', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ path: modelPathVal, content: JSON.stringify(snapshot, null, 2), validate_json: true }) });
       const result = await res.json();
       if (!result.success) { if (status) status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${result.error}</div>`; return; }
       if (status) status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model saved.</div>';
