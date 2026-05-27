@@ -41,7 +41,7 @@
     function normalizeFsPath(path) {
       const raw = String(path || '').trim().replace(/^['"]+|['"]+$/g, '');
       if (!raw) return '';
-      const unified = raw.replace(/\\/g, '/').replace(/\/+\/g, '/');
+      const unified = raw.replace(/\\/g, '/').replace(/\/+/g, '/');
       const absolute = unified.startsWith('/');
       const parts = [];
       unified.split('/').forEach(part => {
