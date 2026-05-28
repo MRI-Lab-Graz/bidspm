@@ -46,6 +46,8 @@ class TestNewFeatures(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
+        self.assertIn("Guided Workflow", text)
+        self.assertIn("Group variable", text)
         self.assertIn("Session node", text)
         self.assertIn('/static/js/analysis_model_schema.js', text)
         self.assertIn('/static/js/analysis_model_mutations.js', text)

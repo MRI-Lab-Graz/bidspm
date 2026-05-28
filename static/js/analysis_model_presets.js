@@ -17,6 +17,58 @@
         return normalized ? [normalized] : [];
     }
 
+    function getDatasetPresetRequirementState(preset, options = {}) {
+        const selectedPreset = String(preset || 'one_sample_all').trim() || 'one_sample_all';
+        const groupVariable = String(options.groupVariable || '').trim();
+        const covariate = String(options.covariate || '').trim();
+        const groupA = String(options.groupA || '').trim();
+        const groupB = String(options.groupB || '').trim();
+        const groupLevels = normalizeStringArray(options.groupLevels);
+
+        const needsGroupVariable = ['one_sample_by_group', 'two_sample_groups', 'one_way_anova'].includes(selectedPreset);
+        const needsCovariate = selectedPreset === 'linear_regression';
+        const needsGroupPair = selectedPreset === 'two_sample_groups';
+        const hasGroupVariable = Boolean(groupVariable);
+        const hasCovariate = Boolean(covariate);
+        const hasDistinctGroupPair = Boolean(groupA && groupB && groupA !== groupB);
+        const hasEnoughGroupLevels = groupLevels.length >= 2;
+        const canApplyPreset = !needsGroupVariable
+            ? true
+            : needsGroupPair
+                ? hasGroupVariable && hasDistinctGroupPair
+                : selectedPreset === 'one_way_anova'
+                    ? hasGroupVariable && hasEnoughGroupLevels
+                    : hasGroupVariable;
+        const canApplyWithCovariate = needsCovariate ? hasCovariate : true;
+        const disabledReason = !canApplyWithCovariate
+            ? 'Select a numeric participants.tsv covariate before applying this preset.'
+            : (!canApplyPreset
+                ? (needsGroupPair
+                    ? (hasGroupVariable
+                        ? 'Pick two distinct observed group values before applying this preset.'
+                        : 'Select a categorical participants.tsv variable before applying this preset.')
+                    : (selectedPreset === 'one_way_anova'
+                        ? (hasGroupVariable
+                            ? 'At least two observed group values are needed before applying this preset.'
+                            : 'Select a categorical participants.tsv variable before applying this preset.')
+                        : 'Select a categorical participants.tsv variable before applying this preset.'))
+                : '');
+
+        return {
+            selectedPreset,
+            needsGroupVariable,
+            needsCovariate,
+            needsGroupPair,
+            hasGroupVariable,
+            hasCovariate,
+            hasDistinctGroupPair,
+            hasEnoughGroupLevels,
+            canApplyPreset,
+            canApplyWithCovariate,
+            disabledReason
+        };
+    }
+
     function createModelHelperApi(config = {}) {
         const getModelDraft = config.getModelDraft || (() => null);
         const getInterestRegressors = config.getInterestRegressors || (() => []);
@@ -207,12 +259,17 @@
                         Weights: [1, -1],
                         Test: 't'
                     }];
+                    return {
+                        message: `Applied two-sample group comparison using ${groupVariable}.`,
+                        tone: 'success',
+                        suggestedName: `between_${slugifyNodeToken(groupVariable)}_groups`
+                    };
                 }
                 return {
                     message: groupVariable
-                        ? `Applied two-sample group comparison using ${groupVariable}.`
+                        ? 'Added two-sample scaffold using ' + groupVariable + '. Pick two distinct observed group values to finish the contrast.'
                         : 'Added two-sample scaffold. Select a categorical participants.tsv variable to finish setup.',
-                    tone: groupVariable ? 'success' : 'warning',
+                    tone: 'warning',
                     suggestedName: groupVariable ? `between_${slugifyNodeToken(groupVariable)}_groups` : 'between_groups'
                 };
             }
@@ -232,12 +289,17 @@
                         Weights: allLevels.map(() => 1),
                         Test: 't'
                     }];
+                    return {
+                        message: `Applied one-way ANOVA scaffold using ${groupVariable}.`,
+                        tone: 'success',
+                        suggestedName: `${slugifyNodeToken(groupVariable)}_anova`
+                    };
                 }
                 return {
                     message: groupVariable
-                        ? `Applied one-way ANOVA scaffold using ${groupVariable}.`
+                        ? 'Added one-way ANOVA scaffold using ' + groupVariable + '. More observed group values are needed to build the contrast automatically.'
                         : 'Added one-way ANOVA scaffold. Select a categorical participants.tsv variable to finish setup.',
-                    tone: groupVariable ? 'success' : 'warning',
+                    tone: 'warning',
                     suggestedName: groupVariable ? `${slugifyNodeToken(groupVariable)}_anova` : 'one_way_anova'
                 };
             }
@@ -369,6 +431,7 @@
     window.BidspmAnalysisModelPresets = {
         createModelHelperApi,
         emptyParticipantsInfo,
-        normalizeStringArray
+        normalizeStringArray,
+        getDatasetPresetRequirementState
     };
 })();

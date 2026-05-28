@@ -193,6 +193,9 @@
                             </div>
                             <div id="model-editor-section-summary"></div>
                         </div>
+                        <div id="analysis-guided-editor-shell" class="analysis-guided-editor-shell mb-3">
+                            <div class="text-center py-4 text-muted small"><i class="fas fa-compass me-2"></i>Load a model to start the guided workflow.</div>
+                        </div>
                         <div class="model-editor-workspace-grid">
                             <div id="model-editor-accordion" class="model-editor-shell"></div>
                             <div class="model-editor-preview-card">
@@ -572,7 +575,8 @@
     const {
         createModelHelperApi,
         emptyParticipantsInfo,
-        normalizeStringArray
+        normalizeStringArray,
+        getDatasetPresetRequirementState
     } = window.BidspmAnalysisModelPresets;
     
     let eventSource = null;
@@ -933,6 +937,567 @@
         setModelEditorStatus,
         openTransformerBuilder
     });
+
+    const ANALYSIS_GUIDED_NODE_LEVEL_ORDER = { Run: 0, Session: 1, Subject: 2, Dataset: 3 };
+    let analysisGuidedRegressorSearch = '';
+    let analysisGuidedRegressorFilter = 'all';
+    let analysisGuidedDatasetPreset = 'one_sample_all';
+    let analysisGuidedDatasetPresetOptions = { groupVariable: '', covariate: '', groupA: '', groupB: '' };
+
+    function getAnalysisGuidedShell() {
+        return document.getElementById('analysis-guided-editor-shell');
+    }
+
+    function getAnalysisGuidedNodeRank(level) {
+        return Number.isInteger(ANALYSIS_GUIDED_NODE_LEVEL_ORDER[level]) ? ANALYSIS_GUIDED_NODE_LEVEL_ORDER[level] : -1;
+    }
+
+    function getAnalysisGuidedRunNodeIndex() {
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        const exact = nodes.findIndex(node => String(node?.Level || '').trim() === 'Run');
+        if (exact >= 0) return exact;
+        return nodes.length ? 0 : -1;
+    }
+
+    function getAnalysisGuidedNodeByLevel(level) {
+        const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+        const idx = nodes.findIndex(node => String(node?.Level || '').trim() === level);
+        return idx >= 0 ? { idx, node: nodes[idx] } : null;
+    }
+
+    function ensureAnalysisGuidedCollections() {
+        if (!modelEditorDraft || typeof modelEditorDraft !== 'object') return;
+        if (!Array.isArray(modelEditorDraft.Nodes)) modelEditorDraft.Nodes = [];
+        if (!Array.isArray(modelEditorDraft.Edges)) modelEditorDraft.Edges = [];
+        if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object' || Array.isArray(modelEditorDraft.Input)) {
+            modelEditorDraft.Input = {};
+        }
+        if (!Array.isArray(modelEditorDraft.Input.task)) modelEditorDraft.Input.task = [];
+    }
+
+    function openAnalysisGuidedPath(path) {
+        if (!path) return;
+        modelEditorPendingOpenPaths.add(path);
+        if (/^Nodes\[\d+\]/.test(path)) modelEditorPendingOpenPaths.add('Nodes');
+        renderModelAccordionEditor();
+        document.getElementById('analysis-model-workspace-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function addAnalysisGuidedNodeFromPreset(preset) {
+        ensureAnalysisGuidedCollections();
+        const built = buildNodeFromPreset(preset);
+        const targetRank = getAnalysisGuidedNodeRank(String(built.node?.Level || '').trim());
+        modelEditorDraft.Nodes.push(built.node);
+        const newIndex = modelEditorDraft.Nodes.length - 1;
+        const upstream = modelEditorDraft.Nodes
+            .map((node, idx) => ({ node, idx, rank: getAnalysisGuidedNodeRank(String(node?.Level || '').trim()) }))
+            .filter(entry => entry.idx !== newIndex && entry.rank >= 0 && entry.rank < targetRank)
+            .sort((left, right) => right.rank - left.rank)[0];
+        if (upstream?.node?.Name && built.node?.Name) {
+            modelEditorDraft.Edges.push({ Source: upstream.node.Name, Destination: built.node.Name });
+        }
+        setModelEditorStatus(built.message, built.tone || 'success');
+        openAnalysisGuidedPath(`Nodes[${newIndex}].${built.selectField || 'Model'}`);
+        if (String(built.node?.Level || '').trim() === 'Run') {
+            Promise.allSettled([
+                loadBidsTasksForModelEditor().catch(() => { modelEditorBidsTasks = []; }),
+                loadInterestRegressorsForModelEditor(modelEditorDraft),
+                loadGroupByOptionsForModelEditor()
+            ]).then(() => renderAnalysisGuidedWorkflow());
+        }
+    }
+
+    function getAnalysisGuidedRegressorEntries(node) {
+        const selectedTasks = normalizeStringArray(modelEditorDraft?.Input?.task);
+        const hasSingleSelectedTask = selectedTasks.length === 1;
+        const trialEntries = hasSingleSelectedTask
+            ? normalizeStringArray(modelEditorEventSamples.trial_type).map(value => ({ name: `trial_type.${value}`, kind: 'trial', label: 'events.tsv trial_type' }))
+            : [];
+        const conditionEntries = hasSingleSelectedTask
+            ? normalizeStringArray(modelEditorEventSamples.condition).map(value => ({ name: `condition.${value}`, kind: 'condition', label: 'events.tsv condition' }))
+            : [];
+        const transformerEntries = getTransformerModelXRegressorsForNode(node).map(value => ({ name: value, kind: 'transformer', label: 'transformer output' }));
+        const nuisanceEntries = normalizeStringArray(modelEditorConfoundColumns).map(value => ({ name: value, kind: 'nuisance', label: 'fMRIPrep confound' }));
+        const unique = new Map();
+        [...trialEntries, ...conditionEntries, ...transformerEntries, ...nuisanceEntries].forEach(entry => {
+            if (!entry.name || unique.has(entry.name)) return;
+            unique.set(entry.name, entry);
+        });
+        return Array.from(unique.values()).sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    function createAnalysisGuidedActionButton(label, className, handler) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = className;
+        btn.textContent = label;
+        btn.addEventListener('click', handler);
+        return btn;
+    }
+
+    function appendAnalysisGuidedPills(container, items) {
+        const values = Array.isArray(items) ? items.filter(item => item && item.text) : [];
+        if (!values.length) return;
+        const row = document.createElement('div');
+        row.className = 'analysis-guided-pill-row';
+        values.forEach(item => {
+            const pill = document.createElement('span');
+            pill.className = `analysis-guided-pill tone-${item.tone || 'neutral'}`;
+            pill.textContent = item.text;
+            row.appendChild(pill);
+        });
+        container.appendChild(row);
+    }
+
+    function renderAnalysisGuidedWorkflow() {
+        const shell = getAnalysisGuidedShell();
+        if (!shell) return;
+        shell.innerHTML = '';
+
+        if (!modelEditorDraft || typeof modelEditorDraft !== 'object') {
+            shell.innerHTML = '<div class="text-center py-4 text-muted small"><i class="fas fa-compass me-2"></i>Load a model to start the guided workflow.</div>';
+            return;
+        }
+
+        ensureAnalysisGuidedCollections();
+
+        const wrap = document.createElement('div');
+        wrap.className = 'analysis-guided-stack';
+
+        const hero = document.createElement('section');
+        hero.className = 'analysis-guided-card analysis-guided-hero';
+        hero.innerHTML = '<div class="analysis-guided-title">Guided Workflow</div><div class="analysis-guided-hint">Stay in the analysis recipe: pick tasks, build the run model, then add aggregation nodes. The accordion below remains the exact JSON editor.</div>';
+        appendAnalysisGuidedPills(hero, [
+            { text: modelEditorDraft.Name ? `Model ${modelEditorDraft.Name}` : 'Unnamed model', tone: modelEditorDraft.Name ? 'success' : 'warning' },
+            { text: `Nodes ${Array.isArray(modelEditorDraft.Nodes) ? modelEditorDraft.Nodes.length : 0}`, tone: 'neutral' },
+            { text: `Tasks ${normalizeStringArray(modelEditorDraft.Input?.task).join(', ') || '<unset>'}`, tone: normalizeStringArray(modelEditorDraft.Input?.task).length ? 'success' : 'warning' }
+        ]);
+        wrap.appendChild(hero);
+
+        const step1 = document.createElement('section');
+        step1.className = 'analysis-guided-card';
+        step1.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">1</span><div><div class="analysis-guided-step-title">Data & Task</div><div class="analysis-guided-step-hint">Set dataset paths and choose the task before thinking about Nodes and Edges.</div></div></div>';
+        const step1Body = document.createElement('div');
+        step1Body.className = 'analysis-guided-body';
+        const summary = document.createElement('div');
+        summary.className = 'analysis-guided-summary-grid';
+        [
+            { label: 'BIDS folder', value: document.getElementById('input-BIDS_DIR')?.value?.trim() || 'Not set' },
+            { label: 'fMRIPrep folder', value: document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || 'Not set' },
+            { label: 'Model file', value: document.getElementById('input-MODELS_FILE')?.value?.trim() || 'Not set' }
+        ].forEach(item => {
+            const block = document.createElement('div');
+            block.className = 'analysis-guided-summary-block';
+            block.innerHTML = `<div class="analysis-guided-summary-label">${item.label}</div><div class="analysis-guided-summary-value">${item.value}</div>`;
+            summary.appendChild(block);
+        });
+        step1Body.appendChild(summary);
+        const actions = document.createElement('div');
+        actions.className = 'analysis-guided-toolbar';
+        actions.appendChild(createAnalysisGuidedActionButton('Open Input section', 'btn btn-sm btn-outline-primary', () => openAnalysisGuidedPath('Input')));
+        actions.appendChild(createAnalysisGuidedActionButton('Reload dataset hints', 'btn btn-sm btn-outline-secondary', async () => {
+            await Promise.allSettled([
+                loadBidsTasksForModelEditor().catch(() => { modelEditorBidsTasks = []; }),
+                loadInterestRegressorsForModelEditor(modelEditorDraft),
+                loadGroupByOptionsForModelEditor()
+            ]);
+            renderModelAccordionEditor();
+        }));
+        step1Body.appendChild(actions);
+        const taskWrap = document.createElement('div');
+        taskWrap.className = 'analysis-guided-chip-wrap';
+        const availableTasks = Array.from(new Set([
+            ...normalizeStringArray(modelEditorBidsTasks),
+            ...normalizeStringArray(modelEditorDraft.Input?.task)
+        ])).filter(Boolean);
+        if (!availableTasks.length) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = 'No BIDS tasks detected yet.';
+            taskWrap.appendChild(empty);
+        } else {
+            const selectedTasks = new Set(normalizeStringArray(modelEditorDraft.Input?.task));
+            availableTasks.forEach(task => {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = `analysis-guided-chip ${selectedTasks.has(task) ? 'is-active' : ''}`;
+                chip.textContent = task;
+                chip.addEventListener('click', async () => {
+                    const next = new Set(normalizeStringArray(modelEditorDraft.Input.task));
+                    if (next.has(task)) next.delete(task);
+                    else next.add(task);
+                    modelEditorDraft.Input.task = Array.from(next);
+                    await loadInterestRegressorsForModelEditor(modelEditorDraft);
+                    renderModelAccordionEditor();
+                });
+                taskWrap.appendChild(chip);
+            });
+        }
+        step1Body.appendChild(taskWrap);
+        step1.appendChild(step1Body);
+        wrap.appendChild(step1);
+
+        const step2 = document.createElement('section');
+        step2.className = 'analysis-guided-card';
+        step2.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">2</span><div><div class="analysis-guided-step-title">Subject-Level Model</div><div class="analysis-guided-step-hint">Search one regressor library, then tune the current run-level design matrix inline.</div></div></div>';
+        const step2Body = document.createElement('div');
+        step2Body.className = 'analysis-guided-body';
+        const runIdx = getAnalysisGuidedRunNodeIndex();
+        if (runIdx < 0) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = 'No run-level node exists yet.';
+            step2Body.appendChild(empty);
+            step2Body.appendChild(createAnalysisGuidedActionButton('Add run-level node', 'btn btn-sm btn-outline-primary', () => addAnalysisGuidedNodeFromPreset('guided_run')));
+        } else {
+            const runNode = modelEditorDraft.Nodes[runIdx];
+            const arrayPath = `Nodes[${runIdx}].Model.X`;
+            const rows = Array.isArray(getByPath(modelEditorDraft, arrayPath)) ? getByPath(modelEditorDraft, arrayPath) : [];
+            const selectedSet = new Set(normalizeStringArray(rows));
+            appendAnalysisGuidedPills(step2Body, [
+                { text: `${runNode.Name || `run_level_${runIdx + 1}`}`, tone: 'success' },
+                { text: `Regressors ${rows.length}`, tone: rows.length ? 'success' : 'warning' },
+                { text: `Contrasts ${Array.isArray(runNode.Contrasts) ? runNode.Contrasts.length : 0}`, tone: 'neutral' }
+            ]);
+            const toolbar = document.createElement('div');
+            toolbar.className = 'analysis-guided-toolbar';
+            const search = document.createElement('input');
+            search.type = 'search';
+            search.className = 'form-control form-control-sm analysis-guided-search';
+            search.placeholder = 'Search regressors';
+            search.value = analysisGuidedRegressorSearch;
+            search.addEventListener('input', () => {
+                analysisGuidedRegressorSearch = search.value;
+                renderAnalysisGuidedWorkflow();
+            });
+            toolbar.appendChild(search);
+            const filter = document.createElement('select');
+            filter.className = 'form-select form-select-sm analysis-guided-filter';
+            [
+                { value: 'all', label: 'All sources' },
+                { value: 'trial', label: 'Trial types' },
+                { value: 'condition', label: 'Condition.*' },
+                { value: 'transformer', label: 'Transformer' },
+                { value: 'nuisance', label: 'Nuisance' }
+            ].forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                filter.appendChild(opt);
+            });
+            filter.value = analysisGuidedRegressorFilter;
+            filter.addEventListener('change', () => {
+                analysisGuidedRegressorFilter = filter.value;
+                renderAnalysisGuidedWorkflow();
+            });
+            toolbar.appendChild(filter);
+            toolbar.appendChild(createAnalysisGuidedActionButton('Open Model.X', 'btn btn-sm btn-outline-secondary', () => openAnalysisGuidedPath(arrayPath)));
+            toolbar.appendChild(createAnalysisGuidedActionButton('Contrast Builder', 'btn btn-sm btn-outline-primary', () => openContrastBuilder(runIdx)));
+            step2Body.appendChild(toolbar);
+            const entries = getAnalysisGuidedRegressorEntries(runNode).filter(entry => {
+                if (analysisGuidedRegressorFilter !== 'all' && entry.kind !== analysisGuidedRegressorFilter) return false;
+                const query = analysisGuidedRegressorSearch.trim().toLowerCase();
+                if (query && !entry.name.toLowerCase().includes(query) && !entry.label.toLowerCase().includes(query)) return false;
+                return true;
+            });
+            const library = document.createElement('div');
+            library.className = 'analysis-guided-library-grid';
+            if (!entries.length) {
+                const empty = document.createElement('div');
+                empty.className = 'small text-muted';
+                empty.textContent = 'No regressors match the current filter.';
+                library.appendChild(empty);
+            } else {
+                entries.forEach(entry => {
+                    const card = document.createElement('button');
+                    card.type = 'button';
+                    card.className = `analysis-guided-library-item kind-${entry.kind} ${selectedSet.has(entry.name) ? 'is-selected' : ''}`;
+                    card.innerHTML = `<span class="analysis-guided-library-name">${entry.name}</span><span class="analysis-guided-library-meta">${selectedSet.has(entry.name) ? 'In design matrix' : entry.label}</span>`;
+                    card.addEventListener('click', () => {
+                        if (selectedSet.has(entry.name)) {
+                            const idx = normalizeStringArray(getByPath(modelEditorDraft, arrayPath)).findIndex(value => value === entry.name);
+                            if (idx >= 0) removeArrayItem(`${arrayPath}[${idx}]`);
+                        } else {
+                            addRegressorToModelX(arrayPath, entry.name);
+                        }
+                        renderModelAccordionEditor();
+                    });
+                    library.appendChild(card);
+                });
+            }
+            step2Body.appendChild(library);
+            const matrix = document.createElement('div');
+            matrix.className = 'analysis-guided-matrix';
+            rows.forEach((regressor, regIdx) => {
+                const path = `${arrayPath}[${regIdx}]`;
+                const row = document.createElement('div');
+                row.className = 'analysis-guided-matrix-row';
+                row.innerHTML = `<div class="analysis-guided-matrix-copy"><div class="analysis-guided-matrix-label">${regressor}</div><div class="analysis-guided-matrix-meta">${regressor === '1' ? 'Intercept' : (isNuisanceRegressor(regressor) ? 'Nuisance regressor' : 'Interest regressor')}</div></div>`;
+                const controls = document.createElement('div');
+                controls.className = 'analysis-guided-toolbar';
+                controls.appendChild(createAnalysisGuidedActionButton('↑', 'btn btn-sm btn-outline-secondary', () => {
+                    moveModelXRegressorByStep(arrayPath, regIdx, -1);
+                    renderModelAccordionEditor();
+                }));
+                controls.appendChild(createAnalysisGuidedActionButton('↓', 'btn btn-sm btn-outline-secondary', () => {
+                    moveModelXRegressorByStep(arrayPath, regIdx, 1);
+                    renderModelAccordionEditor();
+                }));
+                if (isHrfApplicableRegressor(regressor)) {
+                    controls.appendChild(createAnalysisGuidedActionButton(
+                        isModelXRegressorHrfEnabled(path) ? 'HRF on' : 'HRF off',
+                        isModelXRegressorHrfEnabled(path) ? 'btn btn-sm btn-success' : 'btn btn-sm btn-outline-secondary',
+                        () => {
+                            toggleModelXRegressorHrf(path);
+                            renderModelAccordionEditor();
+                        }
+                    ));
+                }
+                controls.appendChild(createAnalysisGuidedActionButton('Remove', 'btn btn-sm btn-outline-danger', () => {
+                    removeArrayItem(path);
+                    renderModelAccordionEditor();
+                }));
+                row.appendChild(controls);
+                matrix.appendChild(row);
+            });
+            step2Body.appendChild(matrix);
+        }
+        step2.appendChild(step2Body);
+        wrap.appendChild(step2);
+
+        const step3 = document.createElement('section');
+        step3.className = 'analysis-guided-card';
+        step3.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">3</span><div><div class="analysis-guided-step-title">Aggregation & Group level</div><div class="analysis-guided-step-hint">Add Subject or Dataset nodes as workflow stages, then apply second-level presets if needed.</div></div></div>';
+        const step3Body = document.createElement('div');
+        step3Body.className = 'analysis-guided-body';
+        const chain = document.createElement('div');
+        chain.className = 'analysis-guided-chain';
+        (modelEditorDraft.Nodes || []).forEach((node, idx) => {
+            const incoming = (modelEditorDraft.Edges || []).find(edge => String(edge?.Destination || '').trim() === String(node?.Name || '').trim());
+            const card = document.createElement('div');
+            card.className = 'analysis-guided-chain-card';
+            card.innerHTML = `<div class="analysis-guided-chain-title">${node.Level || 'Run'} · ${node.Name || `node #${idx + 1}`}</div><div class="analysis-guided-chain-meta">${incoming?.Source ? `From ${incoming.Source} | ` : ''}GroupBy ${normalizeStringArray(node.GroupBy).join(', ') || '<unset>'}</div>`;
+            card.appendChild(createAnalysisGuidedActionButton('Open node', 'btn btn-sm btn-outline-secondary', () => openAnalysisGuidedPath(`Nodes[${idx}].Model`)));
+            chain.appendChild(card);
+        });
+        if (!chain.childElementCount) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = 'No nodes yet.';
+            chain.appendChild(empty);
+        }
+        step3Body.appendChild(chain);
+        const nodeActions = document.createElement('div');
+        nodeActions.className = 'analysis-guided-toolbar';
+        if (!getAnalysisGuidedNodeByLevel('Subject')) {
+            nodeActions.appendChild(createAnalysisGuidedActionButton('Add subject node', 'btn btn-sm btn-outline-primary', () => addAnalysisGuidedNodeFromPreset('subject_fixed')));
+        }
+        if (!getAnalysisGuidedNodeByLevel('Dataset')) {
+            nodeActions.appendChild(createAnalysisGuidedActionButton('Add dataset node', 'btn btn-sm btn-outline-primary', () => addAnalysisGuidedNodeFromPreset('dataset_basic')));
+        }
+        const datasetEntry = getAnalysisGuidedNodeByLevel('Dataset');
+        if (datasetEntry) {
+            const participantsInfo = getModelEditorParticipantsInfo();
+            const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+            const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+            const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+                ? participantsInfo.sample_values
+                : {};
+            const inferredGroupVariable = String(
+                analysisGuidedDatasetPresetOptions.groupVariable
+                || categoricalColumns.find(value => normalizeStringArray(datasetEntry.node.GroupBy).includes(value))
+                || normalizeStringArray(datasetEntry.node?.Model?.X).find(value => categoricalColumns.includes(value))
+                || categoricalColumns[0]
+                || ''
+            ).trim();
+            const groupLevels = normalizeStringArray(sampleValues[inferredGroupVariable]);
+            const inferredCovariate = String(
+                analysisGuidedDatasetPresetOptions.covariate
+                || normalizeStringArray(datasetEntry.node?.Model?.X).find(value => numericColumns.includes(value))
+                || numericColumns[0]
+                || ''
+            ).trim();
+            const inferredGroupA = String(analysisGuidedDatasetPresetOptions.groupA || groupLevels[0] || '').trim();
+            const inferredGroupB = String(analysisGuidedDatasetPresetOptions.groupB || groupLevels.find(level => level !== inferredGroupA) || groupLevels[0] || '').trim();
+            analysisGuidedDatasetPresetOptions = {
+                groupVariable: inferredGroupVariable,
+                covariate: inferredCovariate,
+                groupA: inferredGroupA,
+                groupB: inferredGroupB
+            };
+            const presetRequirementState = getDatasetPresetRequirementState(analysisGuidedDatasetPreset, {
+                groupVariable: inferredGroupVariable,
+                covariate: inferredCovariate,
+                groupA: inferredGroupA,
+                groupB: inferredGroupB,
+                groupLevels
+            });
+            const {
+                needsGroupVariable,
+                needsCovariate,
+                needsGroupPair,
+                canApplyPreset,
+                canApplyWithCovariate,
+                disabledReason: applyDisabledReason
+            } = presetRequirementState;
+            const presetSelect = document.createElement('select');
+            presetSelect.className = 'form-select form-select-sm analysis-guided-filter';
+            [
+                { value: 'one_sample_all', label: 'One-sample across all subjects' },
+                { value: 'one_sample_by_group', label: 'One-sample by group' },
+                { value: 'two_sample_groups', label: 'Two-sample group comparison' },
+                { value: 'one_way_anova', label: 'One-way ANOVA' },
+                { value: 'linear_regression', label: 'Linear regression' }
+            ].forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                presetSelect.appendChild(opt);
+            });
+            presetSelect.value = analysisGuidedDatasetPreset;
+            presetSelect.addEventListener('change', () => {
+                analysisGuidedDatasetPreset = presetSelect.value;
+                renderAnalysisGuidedWorkflow();
+            });
+            nodeActions.appendChild(presetSelect);
+            if (needsGroupVariable) {
+                const groupSelect = document.createElement('select');
+                groupSelect.className = 'form-select form-select-sm analysis-guided-filter';
+                const emptyGroup = document.createElement('option');
+                emptyGroup.value = '';
+                emptyGroup.textContent = categoricalColumns.length ? 'Group variable' : 'No categorical participants.tsv column';
+                groupSelect.appendChild(emptyGroup);
+                categoricalColumns.forEach(value => {
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = value;
+                    groupSelect.appendChild(opt);
+                });
+                groupSelect.value = inferredGroupVariable;
+                groupSelect.addEventListener('change', () => {
+                    analysisGuidedDatasetPresetOptions.groupVariable = groupSelect.value;
+                    analysisGuidedDatasetPresetOptions.groupA = '';
+                    analysisGuidedDatasetPresetOptions.groupB = '';
+                    renderAnalysisGuidedWorkflow();
+                });
+                nodeActions.appendChild(groupSelect);
+            }
+            if (needsCovariate) {
+                const covariateSelect = document.createElement('select');
+                covariateSelect.className = 'form-select form-select-sm analysis-guided-filter';
+                const emptyCovariate = document.createElement('option');
+                emptyCovariate.value = '';
+                emptyCovariate.textContent = numericColumns.length ? 'Covariate' : 'No numeric participants.tsv column';
+                covariateSelect.appendChild(emptyCovariate);
+                numericColumns.forEach(value => {
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = value;
+                    covariateSelect.appendChild(opt);
+                });
+                covariateSelect.value = inferredCovariate;
+                covariateSelect.addEventListener('change', () => {
+                    analysisGuidedDatasetPresetOptions.covariate = covariateSelect.value;
+                });
+                nodeActions.appendChild(covariateSelect);
+            }
+            if (needsGroupPair) {
+                const groupASelect = document.createElement('select');
+                groupASelect.className = 'form-select form-select-sm analysis-guided-filter';
+                const emptyGroupA = document.createElement('option');
+                emptyGroupA.value = '';
+                emptyGroupA.textContent = groupLevels.length ? 'Group A' : 'No group values';
+                groupASelect.appendChild(emptyGroupA);
+                groupLevels.forEach(value => {
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = value;
+                    groupASelect.appendChild(opt);
+                });
+                groupASelect.value = inferredGroupA;
+                groupASelect.addEventListener('change', () => {
+                    analysisGuidedDatasetPresetOptions.groupA = groupASelect.value;
+                    if (analysisGuidedDatasetPresetOptions.groupA === analysisGuidedDatasetPresetOptions.groupB) {
+                        analysisGuidedDatasetPresetOptions.groupB = groupLevels.find(level => level !== analysisGuidedDatasetPresetOptions.groupA) || analysisGuidedDatasetPresetOptions.groupA || '';
+                        renderAnalysisGuidedWorkflow();
+                    }
+                });
+                nodeActions.appendChild(groupASelect);
+                const groupBSelect = document.createElement('select');
+                groupBSelect.className = 'form-select form-select-sm analysis-guided-filter';
+                const emptyGroupB = document.createElement('option');
+                emptyGroupB.value = '';
+                emptyGroupB.textContent = groupLevels.length ? 'Group B' : 'No group values';
+                groupBSelect.appendChild(emptyGroupB);
+                groupLevels.forEach(value => {
+                    const opt = document.createElement('option');
+                    opt.value = value;
+                    opt.textContent = value;
+                    groupBSelect.appendChild(opt);
+                });
+                groupBSelect.value = inferredGroupB;
+                groupBSelect.addEventListener('change', () => {
+                    analysisGuidedDatasetPresetOptions.groupB = groupBSelect.value;
+                });
+                nodeActions.appendChild(groupBSelect);
+            }
+            const applyPresetButton = createAnalysisGuidedActionButton('Apply preset', 'btn btn-sm btn-outline-secondary', () => {
+                const result = applyDatasetNodePreset(datasetEntry.node, analysisGuidedDatasetPreset, {
+                    groupVariable: analysisGuidedDatasetPresetOptions.groupVariable,
+                    covariate: analysisGuidedDatasetPresetOptions.covariate,
+                    groupA: analysisGuidedDatasetPresetOptions.groupA,
+                    groupB: analysisGuidedDatasetPresetOptions.groupB
+                });
+                setModelEditorStatus(result.message, result.tone || 'success');
+                renderModelAccordionEditor();
+            });
+            applyPresetButton.disabled = !(canApplyPreset && canApplyWithCovariate);
+            applyPresetButton.title = applyDisabledReason;
+            nodeActions.appendChild(applyPresetButton);
+            const participantsHint = document.createElement('div');
+            participantsHint.className = 'small text-muted';
+            participantsHint.textContent = applyDisabledReason
+                ? applyDisabledReason
+                : participantsInfo.sample_status !== 'present'
+                ? 'participants.tsv has not been loaded yet. Reload dataset hints to populate any grouping or covariate controls.'
+                : needsCovariate
+                    ? 'This preset uses a numeric participants.tsv covariate.'
+                    : needsGroupPair
+                        ? 'This preset compares two levels from one categorical participants.tsv variable.'
+                        : needsGroupVariable
+                            ? 'This preset uses one categorical participants.tsv grouping variable.'
+                            : 'This preset averages across all subjects and needs no extra participants.tsv selector.';
+            step3Body.appendChild(participantsHint);
+        }
+        step3Body.appendChild(nodeActions);
+        step3.appendChild(step3Body);
+        wrap.appendChild(step3);
+
+        const step4 = document.createElement('section');
+        step4.className = 'analysis-guided-card';
+        step4.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">4</span><div><div class="analysis-guided-step-title">Review & Save</div><div class="analysis-guided-step-hint">Use live schema validation and the preview pane as the final check before saving.</div></div></div>';
+        const step4Body = document.createElement('div');
+        step4Body.className = 'analysis-guided-body';
+        appendAnalysisGuidedPills(step4Body, [
+            { text: document.getElementById('model-preview-validation-badge')?.textContent?.trim() || 'idle', tone: /valid/i.test(document.getElementById('model-preview-validation-badge')?.textContent || '') ? 'success' : 'neutral' },
+            { text: modelEditorDraft.BIDSModelVersion || '<no BIDSModelVersion>', tone: modelEditorDraft.BIDSModelVersion ? 'success' : 'warning' },
+            { text: modelEditorDraft.Description ? 'Description set' : 'Description missing', tone: modelEditorDraft.Description ? 'neutral' : 'warning' }
+        ]);
+        const note = document.createElement('div');
+        note.className = 'small text-muted';
+        note.textContent = document.getElementById('model-preview-validation-text')?.textContent?.trim() || 'Load a model to run live validation.';
+        step4Body.appendChild(note);
+        const saveActions = document.createElement('div');
+        saveActions.className = 'analysis-guided-toolbar';
+        saveActions.appendChild(createAnalysisGuidedActionButton('Save model', 'btn btn-sm btn-primary', () => document.getElementById('btn-save-model-editor')?.click()));
+        saveActions.appendChild(createAnalysisGuidedActionButton('Contrast Builder', 'btn btn-sm btn-outline-secondary', () => document.getElementById('btn-open-contrast-builder')?.click()));
+        saveActions.appendChild(createAnalysisGuidedActionButton('Open accordion editor', 'btn btn-sm btn-outline-secondary', () => document.getElementById('analysis-model-workspace-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
+        step4Body.appendChild(saveActions);
+        step4.appendChild(step4Body);
+        wrap.appendChild(step4);
+
+        shell.appendChild(wrap);
+    }
 
     function getBranchBadgeDescriptors(path, value) {
         if (/^Nodes\[\d+\]$/.test(path) && value && typeof value === 'object') {
@@ -2479,6 +3044,7 @@
         renderModelEditorSummary(summary);
         summary.sections.forEach(section => createModelSectionCard(editor, section));
         updateModelJsonPreview();
+        renderAnalysisGuidedWorkflow();
     }
 
     async function loadBidsTasksForModelEditor() {
@@ -3035,8 +3601,16 @@
         // Suggest a default path based on the current project folder or studies/
         const configFolder = document.getElementById('config-folder')?.value?.trim() || 'studies/';
         const suggestedPath = configFolder.replace(/\/$/, '') + '/model.json';
+        let userPath = null;
+        let usedPromptFallback = false;
 
-        const userPath = prompt('Save new model file to:', suggestedPath);
+        try {
+            userPath = window.prompt('Save new model file to:', suggestedPath);
+        } catch (error) {
+            usedPromptFallback = true;
+            userPath = document.getElementById('input-MODELS_FILE')?.value?.trim() || suggestedPath;
+            console.warn('prompt() unavailable for createNewModel(); falling back to the model path field.', error);
+        }
         if (!userPath) return;
 
         const trimmed = userPath.trim();
@@ -3082,6 +3656,11 @@
                 modelInput.value = trimmed;
                 modelInput.dispatchEvent(new Event('input', { bubbles: true }));
                 modelInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            if (usedPromptFallback) {
+                document.getElementById('model-validation-message').textContent = `Prompt unavailable; using ${trimmed}`;
+                document.getElementById('model-validation-status').style.display = 'block';
             }
 
             console.info(`Model created (${result.source}): ${taskInfo}`);

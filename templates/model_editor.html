@@ -88,6 +88,10 @@
           <div id="transformer-unsaved-banner-detail" class="transformer-unsaved-banner-detail d-none"></div>
         </div>
 
+        <div id="guided-editor-shell" class="guided-editor-shell mb-3">
+          <div class="text-center py-4 text-muted small"><i class="fas fa-compass me-2"></i>Load a model to start the guided workflow.</div>
+        </div>
+
         <!-- Friendly transformations editor (secondary) -->
         <div id="transformations-editor" style="display:none; min-height: 420px;">
           <div id="friendly-editor"></div>
@@ -150,6 +154,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260527') }}"></script>
 <script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260527') }}"></script>
 <script src="{{ url_for('static', filename='js/model_editor_launch_context.js', v='20260527') }}"></script>
 <script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260527') }}"></script>
@@ -163,6 +168,15 @@
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
+  const getDatasetPresetRequirementState = window.BidspmAnalysisModelPresets?.getDatasetPresetRequirementState
+    || (() => ({
+      needsGroupVariable: false,
+      needsCovariate: false,
+      needsGroupPair: false,
+      canApplyPreset: true,
+      canApplyWithCovariate: true,
+      disabledReason: ''
+    }));
   const {
     normalizeLaunchStringArray,
     readTransformerLaunchContext,
@@ -892,6 +906,7 @@
     if (selectedLabel && selectedLabel.textContent === 'Model — Input') {
       renderInputFieldEditor();
     }
+    if (typeof window.renderModelEditorGuidedWorkflow === 'function') window.renderModelEditorGuidedWorkflow();
   }
 
   async function refreshDatasetInputEntities(showStatusMessage = false){
@@ -1475,6 +1490,7 @@
     }
 
     container.appendChild(list);
+    if (typeof window.renderModelEditorGuidedWorkflow === 'function') window.renderModelEditorGuidedWorkflow();
   }
 
   function selectModelField(field){
@@ -2166,6 +2182,831 @@
     }
     return node.Model;
   }
+
+  const GUIDED_NODE_LEVEL_ORDER = { Run: 0, Session: 1, Subject: 2, Dataset: 3 };
+  let guidedRegressorSearch = '';
+  let guidedRegressorFilter = 'all';
+  let guidedDatasetPreset = 'one_sample_all';
+  let guidedDatasetPresetOptions = { groupVariable: '', covariate: '', groupA: '', groupB: '' };
+
+  function getGuidedEditorShell(){
+    return document.getElementById('guided-editor-shell');
+  }
+
+  function getGuidedActiveModel(){
+    const draft = (window.modelEditorDraft && typeof window.modelEditorDraft === 'object') ? window.modelEditorDraft : null;
+    if (editorMode === 'full' && draft) return draft;
+    return model || draft;
+  }
+
+  function syncGuidedModelReferences(nextModel){
+    if (!nextModel || typeof nextModel !== 'object') return nextModel;
+    model = nextModel;
+    window.modelEditorDraft = nextModel;
+    return nextModel;
+  }
+
+  function openGuidedModelField(field, preferFieldView = false){
+    const toggleBtn = document.getElementById('btn-open-full-editor');
+    if (preferFieldView && editorMode === 'full' && toggleBtn) {
+      toggleBtn.click();
+    } else if (!preferFieldView && editorMode !== 'full' && toggleBtn) {
+      toggleBtn.click();
+    }
+    selectModelField(field);
+    const target = editorMode === 'full'
+      ? document.getElementById('model-editor-shell')
+      : document.getElementById('transformations-editor');
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openGuidedNodeField(idx, field, preferFieldView = false){
+    const toggleBtn = document.getElementById('btn-open-full-editor');
+    if (preferFieldView && editorMode === 'full' && toggleBtn) {
+      toggleBtn.click();
+    } else if (!preferFieldView && editorMode !== 'full' && toggleBtn) {
+      toggleBtn.click();
+    }
+    selectNodeField(idx, field);
+    const target = editorMode === 'full'
+      ? document.getElementById('model-editor-shell')
+      : document.getElementById('transformations-editor');
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function applyGuidedMutation(message = '', tone = 'info', options = {}){
+    const activeModel = syncGuidedModelReferences(getGuidedActiveModel());
+    if (!activeModel || typeof activeModel !== 'object') return;
+
+    const finalize = () => {
+      renderNodeList();
+      renderModelStructure();
+      if (editorMode === 'full') {
+        if (typeof window.renderModelAccordionEditor === 'function') window.renderModelAccordionEditor();
+      } else {
+        const selection = window.currentSelection || currentSelection;
+        if (selection?.type === 'nodeField') selectNodeField(Number(selection.idx), selection.field || 'Transformations');
+        else if (selection?.type === 'modelField') selectModelField(selection.field || 'Input');
+      }
+      if (message) setStatus(message, tone);
+    };
+
+    if (options.refreshHints) {
+      Promise.resolve(refreshInputEntityOptions(false))
+        .then(() => refreshModelEditorHintData(activeModel))
+        .then(finalize)
+        .catch(() => finalize());
+      return;
+    }
+
+    finalize();
+  }
+
+  function createGuidedStepCard(step, title, description){
+    const card = document.createElement('section');
+    card.className = 'guided-step-card';
+
+    const header = document.createElement('div');
+    header.className = 'guided-step-header';
+
+    const badge = document.createElement('div');
+    badge.className = 'guided-step-badge';
+    badge.textContent = step;
+    header.appendChild(badge);
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'guided-step-title-wrap';
+    const heading = document.createElement('div');
+    heading.className = 'guided-step-title';
+    heading.textContent = title;
+    titleWrap.appendChild(heading);
+    if (description) {
+      const hint = document.createElement('div');
+      hint.className = 'guided-step-hint';
+      hint.textContent = description;
+      titleWrap.appendChild(hint);
+    }
+    header.appendChild(titleWrap);
+
+    const body = document.createElement('div');
+    body.className = 'guided-step-body';
+
+    card.appendChild(header);
+    card.appendChild(body);
+    return { card, body };
+  }
+
+  function appendGuidedSummaryPillRow(container, items){
+    const values = Array.isArray(items) ? items.filter(item => item && item.text) : [];
+    if (!values.length) return;
+    const row = document.createElement('div');
+    row.className = 'guided-pill-row';
+    values.forEach(item => {
+      const pill = document.createElement('span');
+      pill.className = `guided-pill guided-pill-${item.tone || 'neutral'}`;
+      pill.textContent = item.text;
+      row.appendChild(pill);
+    });
+    container.appendChild(row);
+  }
+
+  function getGuidedNodeRank(level){
+    return Number.isInteger(GUIDED_NODE_LEVEL_ORDER[level]) ? GUIDED_NODE_LEVEL_ORDER[level] : -1;
+  }
+
+  function getGuidedRunNodeIndex(activeModel){
+    const nodes = Array.isArray(activeModel?.Nodes) ? activeModel.Nodes : [];
+    const exact = nodes.findIndex(node => String(node?.Level || '').trim() === 'Run');
+    if (exact >= 0) return exact;
+    return nodes.length ? 0 : -1;
+  }
+
+  function getGuidedNodeByLevel(activeModel, level){
+    const nodes = Array.isArray(activeModel?.Nodes) ? activeModel.Nodes : [];
+    const idx = nodes.findIndex(node => String(node?.Level || '').trim() === level);
+    return idx >= 0 ? { idx, node: nodes[idx] } : null;
+  }
+
+  function ensureGuidedCollections(activeModel){
+    if (!Array.isArray(activeModel.Nodes)) activeModel.Nodes = [];
+    if (!Array.isArray(activeModel.Edges)) activeModel.Edges = [];
+  }
+
+  function sanitizeGuidedHrfVariables(node, idx){
+    const modelObj = ensureNodeModelObject(node, idx);
+    if (!modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) return [];
+    const allowed = new Set(modelObj.X.filter(name => name !== '1' && !isLikelyNuisanceRegressor(name)));
+    const next = normalizeStringArray(modelObj.HRF.Variables).filter(name => allowed.has(name));
+    if (!next.length) {
+      delete modelObj.HRF;
+      return [];
+    }
+    modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+    modelObj.HRF.Variables = next;
+    return next;
+  }
+
+  function addGuidedRegressor(node, idx, regressor){
+    const modelObj = ensureNodeModelObject(node, idx);
+    const normalized = String(regressor || '').trim();
+    if (!normalized) return false;
+    if (modelObj.X.includes(normalized)) return false;
+    modelObj.X.push(normalized);
+    sanitizeGuidedHrfVariables(node, idx);
+    return true;
+  }
+
+  function removeGuidedRegressor(node, idx, regressor){
+    const modelObj = ensureNodeModelObject(node, idx);
+    const normalized = String(regressor || '').trim();
+    const before = modelObj.X.length;
+    modelObj.X = modelObj.X.filter(value => value !== normalized);
+    sanitizeGuidedHrfVariables(node, idx);
+    return modelObj.X.length !== before;
+  }
+
+  function moveGuidedRegressor(node, idx, fromIndex, step){
+    const modelObj = ensureNodeModelObject(node, idx);
+    const targetIndex = fromIndex + step;
+    if (fromIndex < 0 || fromIndex >= modelObj.X.length) return false;
+    if (targetIndex < 0 || targetIndex >= modelObj.X.length) return false;
+    const [moved] = modelObj.X.splice(fromIndex, 1);
+    modelObj.X.splice(targetIndex, 0, moved);
+    sanitizeGuidedHrfVariables(node, idx);
+    return true;
+  }
+
+  function setGuidedHrfEnabled(node, idx, regressor, enabled){
+    const modelObj = ensureNodeModelObject(node, idx);
+    const normalized = String(regressor || '').trim();
+    if (!normalized || normalized === '1' || isLikelyNuisanceRegressor(normalized)) return false;
+    const current = sanitizeGuidedHrfVariables(node, idx);
+    const nextSet = new Set(current);
+    if (enabled) nextSet.add(normalized);
+    else nextSet.delete(normalized);
+    const next = Array.from(nextSet).filter(name => modelObj.X.includes(name));
+    if (!next.length) {
+      delete modelObj.HRF;
+      return true;
+    }
+    if (!modelObj.HRF || typeof modelObj.HRF !== 'object' || Array.isArray(modelObj.HRF)) modelObj.HRF = {};
+    modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
+    modelObj.HRF.Variables = next;
+    return true;
+  }
+
+  function getGuidedRegressorEntries(node, activeModel){
+    const selectedTasks = normalizeStringArray(activeModel?.Input?.task);
+    const hasSingleSelectedTask = selectedTasks.length === 1;
+    const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
+      ? window.modelEditorEventSamples
+      : { trial_type: [], condition: [] };
+    const trialEntries = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.trial_type).map(value => ({ name: `trial_type.${value}`, kind: 'trial', label: 'events.tsv trial_type' }))
+      : [];
+    const conditionEntries = hasSingleSelectedTask
+      ? normalizeStringArray(eventSamples.condition).map(value => ({ name: `condition.${value}`, kind: 'condition', label: 'events.tsv condition' }))
+      : [];
+    const transformerEntries = (typeof window.getTransformerModelXRegressors === 'function')
+      ? window.getTransformerModelXRegressors(node).map(value => ({ name: value, kind: 'transformer', label: 'transformer output' }))
+      : [];
+    const nuisanceEntries = normalizeStringArray(window.modelEditorConfoundColumns)
+      .map(value => ({ name: value, kind: 'nuisance', label: 'fMRIPrep confound' }));
+    const map = new Map();
+    [...trialEntries, ...conditionEntries, ...transformerEntries, ...nuisanceEntries].forEach(entry => {
+      if (!entry.name || map.has(entry.name)) return;
+      map.set(entry.name, entry);
+    });
+    return Array.from(map.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function createGuidedActionButton(label, className, handler){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener('click', handler);
+    return btn;
+  }
+
+  function addGuidedNodeFromPreset(preset){
+    const activeModel = syncGuidedModelReferences(getGuidedActiveModel());
+    if (!activeModel || typeof activeModel !== 'object') return;
+    ensureGuidedCollections(activeModel);
+    const built = buildNodeFromPreset(preset);
+    const targetRank = getGuidedNodeRank(String(built.node?.Level || '').trim());
+    activeModel.Nodes.push(built.node);
+    const newIndex = activeModel.Nodes.length - 1;
+    const upstream = activeModel.Nodes
+      .map((node, idx) => ({ node, idx, rank: getGuidedNodeRank(String(node?.Level || '').trim()) }))
+      .filter(entry => entry.idx !== newIndex && entry.rank >= 0 && entry.rank < targetRank)
+      .sort((left, right) => right.rank - left.rank)[0];
+    if (upstream?.node?.Name && built.node?.Name) {
+      activeModel.Edges.push({ Source: upstream.node.Name, Destination: built.node.Name });
+    }
+    syncGuidedModelReferences(activeModel);
+    selectNodeField(newIndex, built.selectField || 'Model');
+    applyGuidedMutation(built.message, built.tone || 'success', { refreshHints: built.node?.Level === 'Run' });
+  }
+
+  function renderGuidedWorkflow(){
+    const shell = getGuidedEditorShell();
+    if (!shell) return;
+    shell.innerHTML = '';
+
+    const activeModel = getGuidedActiveModel();
+    if (!activeModel || typeof activeModel !== 'object') {
+      shell.innerHTML = '<div class="text-center py-4 text-muted small"><i class="fas fa-compass me-2"></i>Load a model to start the guided workflow.</div>';
+      return;
+    }
+
+    ensureGuidedCollections(activeModel);
+
+    const stack = document.createElement('div');
+    stack.className = 'guided-workflow-stack';
+
+    const hero = document.createElement('section');
+    hero.className = 'guided-hero-card';
+    const heroTitle = document.createElement('div');
+    heroTitle.className = 'guided-hero-title';
+    heroTitle.textContent = 'Guided Workflow';
+    hero.appendChild(heroTitle);
+    const heroHint = document.createElement('div');
+    heroHint.className = 'guided-hero-hint';
+    heroHint.textContent = 'Work from the analysis recipe downward. The advanced JSON-backed editor stays below and updates from the same draft.';
+    hero.appendChild(heroHint);
+    appendGuidedSummaryPillRow(hero, [
+      { text: activeModel.Name ? `Model ${activeModel.Name}` : 'Unnamed model', tone: activeModel.Name ? 'success' : 'warning' },
+      { text: `Nodes ${Array.isArray(activeModel.Nodes) ? activeModel.Nodes.length : 0}`, tone: 'neutral' },
+      { text: `Edges ${Array.isArray(activeModel.Edges) ? activeModel.Edges.length : 0}`, tone: 'neutral' },
+      { text: normalizeStringArray(activeModel.Input?.task).length ? `Tasks ${normalizeStringArray(activeModel.Input.task).join(', ')}` : 'Input.task unset', tone: normalizeStringArray(activeModel.Input?.task).length ? 'success' : 'warning' }
+    ]);
+    stack.appendChild(hero);
+
+    const step1 = createGuidedStepCard('1', 'Data & Task', 'Start from dataset selection and task filtering, not raw Input JSON.');
+    const datasetSummary = document.createElement('div');
+    datasetSummary.className = 'guided-summary-grid';
+    const bidsPath = document.getElementById('input-BIDS_DIR')?.value?.trim() || '';
+    const prepPath = document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || '';
+    [
+      { label: 'BIDS folder', value: bidsPath || 'Not set' },
+      { label: 'fMRIPrep folder', value: prepPath || 'Not set' },
+      { label: 'Model path', value: modelPath || 'Not set' }
+    ].forEach(item => {
+      const block = document.createElement('div');
+      block.className = 'guided-summary-block';
+      block.innerHTML = `<div class="guided-summary-label">${item.label}</div><div class="guided-summary-value">${item.value}</div>`;
+      datasetSummary.appendChild(block);
+    });
+    step1.body.appendChild(datasetSummary);
+
+    const taskToolbar = document.createElement('div');
+    taskToolbar.className = 'guided-toolbar';
+    taskToolbar.appendChild(createGuidedActionButton('Edit Input filters', 'btn btn-sm btn-outline-primary', () => openGuidedModelField('Input', true)));
+    taskToolbar.appendChild(createGuidedActionButton('Reload dataset hints', 'btn btn-sm btn-outline-secondary', async () => {
+      await refreshInputEntityOptions(true);
+      await refreshModelEditorHintData(activeModel);
+      renderGuidedWorkflow();
+    }));
+    step1.body.appendChild(taskToolbar);
+
+    const taskWrap = document.createElement('div');
+    taskWrap.className = 'guided-chip-wrap';
+    const availableTasks = Array.from(new Set([
+      ...normalizeStringArray(modelEditorBidsTasks),
+      ...normalizeStringArray(activeModel.Input?.task)
+    ])).filter(Boolean);
+    if (!availableTasks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted';
+      empty.textContent = 'No BIDS tasks detected yet. Set the dataset path, then reload dataset hints.';
+      taskWrap.appendChild(empty);
+    } else {
+      const selectedTasks = new Set(normalizeStringArray(activeModel.Input?.task));
+      availableTasks.forEach(task => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `guided-chip ${selectedTasks.has(task) ? 'is-active' : ''}`;
+        btn.textContent = task;
+        btn.addEventListener('click', async () => {
+          if (!activeModel.Input || typeof activeModel.Input !== 'object' || Array.isArray(activeModel.Input)) activeModel.Input = {};
+          const next = new Set(normalizeStringArray(activeModel.Input.task));
+          if (next.has(task)) next.delete(task);
+          else next.add(task);
+          activeModel.Input.task = Array.from(next);
+          syncGuidedModelReferences(activeModel);
+          await refreshModelEditorHintData(activeModel);
+          applyGuidedMutation('Updated Input.task selection.', 'success');
+        });
+        taskWrap.appendChild(btn);
+      });
+    }
+    step1.body.appendChild(taskWrap);
+    stack.appendChild(step1.card);
+
+    const step2 = createGuidedStepCard('2', 'Subject-Level Model', 'Pick conditions, transformer outputs, and nuisance regressors close to the design matrix they affect.');
+    const runNodeIndex = getGuidedRunNodeIndex(activeModel);
+    if (runNodeIndex < 0) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted';
+      empty.textContent = 'No run-level node exists yet. Add one to start defining the design matrix.';
+      step2.body.appendChild(empty);
+      step2.body.appendChild(createGuidedActionButton('Add run-level node', 'btn btn-sm btn-outline-primary', () => addGuidedNodeFromPreset('guided_run')));
+    } else {
+      const runNode = activeModel.Nodes[runNodeIndex];
+      const modelObj = ensureNodeModelObject(runNode, runNodeIndex);
+      const runHeader = document.createElement('div');
+      runHeader.className = 'guided-section-head';
+      runHeader.innerHTML = `<div><strong>${runNode.Name || `run_level_${runNodeIndex + 1}`}</strong><div class="small text-muted">${String(runNode.Level || 'Run')} node with GroupBy ${normalizeStringArray(runNode.GroupBy).join(', ') || '<unset>'}</div></div>`;
+      const runActions = document.createElement('div');
+      runActions.className = 'guided-toolbar';
+      runActions.appendChild(createGuidedActionButton('Transformations', 'btn btn-sm btn-outline-secondary', () => openGuidedNodeField(runNodeIndex, 'Transformations', true)));
+      runActions.appendChild(createGuidedActionButton('Model.X', 'btn btn-sm btn-outline-secondary', () => openGuidedNodeField(runNodeIndex, 'Model', true)));
+      runActions.appendChild(createGuidedActionButton('Contrasts', 'btn btn-sm btn-outline-secondary', () => openGuidedNodeField(runNodeIndex, 'Contrasts', true)));
+      runHeader.appendChild(runActions);
+      step2.body.appendChild(runHeader);
+
+      appendGuidedSummaryPillRow(step2.body, [
+        { text: `Design matrix rows ${modelObj.X.length}`, tone: modelObj.X.length ? 'success' : 'warning' },
+        { text: `Explicit contrasts ${Array.isArray(runNode.Contrasts) ? runNode.Contrasts.length : 0}`, tone: Array.isArray(runNode.Contrasts) && runNode.Contrasts.length ? 'success' : 'neutral' },
+        { text: runNode.DummyContrasts ? `Dummy ${runNode.DummyContrasts.Test || 't'}` : 'Dummy contrasts off', tone: runNode.DummyContrasts ? 'success' : 'neutral' }
+      ]);
+
+      const libraryToolbar = document.createElement('div');
+      libraryToolbar.className = 'guided-toolbar';
+      const searchInput = document.createElement('input');
+      searchInput.type = 'search';
+      searchInput.className = 'form-control form-control-sm guided-search';
+      searchInput.placeholder = 'Search available regressors';
+      searchInput.value = guidedRegressorSearch;
+      searchInput.addEventListener('input', () => {
+        guidedRegressorSearch = searchInput.value;
+        renderGuidedWorkflow();
+      });
+      libraryToolbar.appendChild(searchInput);
+      const filterSelect = document.createElement('select');
+      filterSelect.className = 'form-select form-select-sm guided-filter';
+      [
+        { value: 'all', label: 'All sources' },
+        { value: 'trial', label: 'Trial types' },
+        { value: 'condition', label: 'Condition.*' },
+        { value: 'transformer', label: 'Transformer' },
+        { value: 'nuisance', label: 'Nuisance' }
+      ].forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        filterSelect.appendChild(opt);
+      });
+      filterSelect.value = guidedRegressorFilter;
+      filterSelect.addEventListener('change', () => {
+        guidedRegressorFilter = filterSelect.value;
+        renderGuidedWorkflow();
+      });
+      libraryToolbar.appendChild(filterSelect);
+      libraryToolbar.appendChild(createGuidedActionButton('Add intercept', 'btn btn-sm btn-outline-success', () => {
+        if (addGuidedRegressor(runNode, runNodeIndex, '1')) applyGuidedMutation('Added intercept to Model.X.', 'success');
+      }));
+      step2.body.appendChild(libraryToolbar);
+
+      const selectedSet = new Set(normalizeStringArray(modelObj.X));
+      const query = guidedRegressorSearch.trim().toLowerCase();
+      const entries = getGuidedRegressorEntries(runNode, activeModel).filter(entry => {
+        if (guidedRegressorFilter !== 'all' && entry.kind !== guidedRegressorFilter) return false;
+        if (query && !entry.name.toLowerCase().includes(query) && !entry.label.toLowerCase().includes(query)) return false;
+        return true;
+      });
+      const library = document.createElement('div');
+      library.className = 'guided-library-grid';
+      if (!entries.length) {
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'No regressors match the current task selection and filter.';
+        library.appendChild(empty);
+      } else {
+        entries.forEach(entry => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `guided-library-item kind-${entry.kind} ${selectedSet.has(entry.name) ? 'is-selected' : ''}`;
+          const name = document.createElement('span');
+          name.className = 'guided-library-name';
+          name.textContent = entry.name;
+          const meta = document.createElement('span');
+          meta.className = 'guided-library-meta';
+          meta.textContent = selectedSet.has(entry.name) ? 'In design matrix' : entry.label;
+          btn.appendChild(name);
+          btn.appendChild(meta);
+          btn.addEventListener('click', () => {
+            if (selectedSet.has(entry.name)) {
+              if (removeGuidedRegressor(runNode, runNodeIndex, entry.name)) applyGuidedMutation(`Removed ${entry.name} from Model.X.`, 'info');
+              return;
+            }
+            if (addGuidedRegressor(runNode, runNodeIndex, entry.name)) applyGuidedMutation(`Added ${entry.name} to Model.X.`, 'success');
+          });
+          library.appendChild(btn);
+        });
+      }
+      step2.body.appendChild(library);
+
+      const matrixSection = document.createElement('div');
+      matrixSection.className = 'guided-matrix-section';
+      const matrixTitle = document.createElement('div');
+      matrixTitle.className = 'guided-subtitle';
+      matrixTitle.textContent = 'Current design matrix';
+      matrixSection.appendChild(matrixTitle);
+      if (!modelObj.X.length) {
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'Add regressors from the library above or open Model.X in the advanced editor.';
+        matrixSection.appendChild(empty);
+      } else {
+        const hrfSet = new Set(sanitizeGuidedHrfVariables(runNode, runNodeIndex));
+        modelObj.X.forEach((regressor, regIdx) => {
+          const row = document.createElement('div');
+          row.className = 'guided-matrix-row';
+          const labelWrap = document.createElement('div');
+          labelWrap.className = 'guided-matrix-label-wrap';
+          const name = document.createElement('div');
+          name.className = 'guided-matrix-label';
+          name.textContent = regressor;
+          labelWrap.appendChild(name);
+          const meta = document.createElement('div');
+          meta.className = 'guided-matrix-meta';
+          if (regressor === '1') meta.textContent = 'Intercept';
+          else if (isLikelyNuisanceRegressor(regressor)) meta.textContent = 'Nuisance regressor';
+          else if (regressor.startsWith('trial_type.')) meta.textContent = 'Condition from events.tsv';
+          else if (regressor.startsWith('condition.')) meta.textContent = 'condition.* regressor';
+          else meta.textContent = 'Generated or custom regressor';
+          labelWrap.appendChild(meta);
+          row.appendChild(labelWrap);
+
+          const controls = document.createElement('div');
+          controls.className = 'guided-matrix-actions';
+          if (regressor !== '1' && !isLikelyNuisanceRegressor(regressor)) {
+            const hrfLabel = document.createElement('label');
+            hrfLabel.className = 'form-check form-switch guided-hrf-toggle';
+            const hrfInput = document.createElement('input');
+            hrfInput.type = 'checkbox';
+            hrfInput.className = 'form-check-input';
+            hrfInput.checked = hrfSet.has(regressor);
+            hrfInput.addEventListener('change', () => {
+              if (setGuidedHrfEnabled(runNode, runNodeIndex, regressor, hrfInput.checked)) applyGuidedMutation(`Updated HRF setting for ${regressor}.`, 'info');
+            });
+            const hrfText = document.createElement('span');
+            hrfText.className = 'guided-hrf-text';
+            hrfText.textContent = 'HRF';
+            hrfLabel.appendChild(hrfInput);
+            hrfLabel.appendChild(hrfText);
+            controls.appendChild(hrfLabel);
+          }
+          controls.appendChild(createGuidedActionButton('↑', 'btn btn-sm btn-outline-secondary', () => {
+            if (moveGuidedRegressor(runNode, runNodeIndex, regIdx, -1)) applyGuidedMutation('Regressor order updated.', 'info');
+          }));
+          controls.appendChild(createGuidedActionButton('↓', 'btn btn-sm btn-outline-secondary', () => {
+            if (moveGuidedRegressor(runNode, runNodeIndex, regIdx, 1)) applyGuidedMutation('Regressor order updated.', 'info');
+          }));
+          controls.appendChild(createGuidedActionButton('Remove', 'btn btn-sm btn-outline-danger', () => {
+            if (removeGuidedRegressor(runNode, runNodeIndex, regressor)) applyGuidedMutation(`Removed ${regressor} from Model.X.`, 'info');
+          }));
+          row.appendChild(controls);
+          matrixSection.appendChild(row);
+        });
+      }
+      step2.body.appendChild(matrixSection);
+
+      const contrastSummary = document.createElement('div');
+      contrastSummary.className = 'guided-contrast-summary';
+      const contrastHead = document.createElement('div');
+      contrastHead.className = 'guided-section-head';
+      contrastHead.innerHTML = '<div><strong>Contrasts</strong><div class="small text-muted">Keep explicit and dummy contrasts close to the current design matrix.</div></div>';
+      const contrastActions = document.createElement('div');
+      contrastActions.className = 'guided-toolbar';
+      const dummyLabel = document.createElement('label');
+      dummyLabel.className = 'form-check form-switch guided-hrf-toggle';
+      const dummyInput = document.createElement('input');
+      dummyInput.type = 'checkbox';
+      dummyInput.className = 'form-check-input';
+      dummyInput.checked = Boolean(runNode.DummyContrasts);
+      dummyInput.addEventListener('change', () => {
+        if (dummyInput.checked) runNode.DummyContrasts = runNode.DummyContrasts && typeof runNode.DummyContrasts === 'object' ? runNode.DummyContrasts : { Test: 't' };
+        else delete runNode.DummyContrasts;
+        applyGuidedMutation('Updated dummy contrasts.', 'info');
+      });
+      const dummyText = document.createElement('span');
+      dummyText.className = 'guided-hrf-text';
+      dummyText.textContent = 'Auto baseline';
+      dummyLabel.appendChild(dummyInput);
+      dummyLabel.appendChild(dummyText);
+      contrastActions.appendChild(dummyLabel);
+      contrastActions.appendChild(createGuidedActionButton('Edit contrasts', 'btn btn-sm btn-outline-primary', () => openGuidedNodeField(runNodeIndex, 'Contrasts', true)));
+      contrastHead.appendChild(contrastActions);
+      contrastSummary.appendChild(contrastHead);
+      const contrastList = document.createElement('div');
+      contrastList.className = 'guided-chip-wrap';
+      if (Array.isArray(runNode.Contrasts) && runNode.Contrasts.length) {
+        runNode.Contrasts.forEach(contrast => {
+          const pill = document.createElement('span');
+          pill.className = 'guided-chip static';
+          pill.textContent = contrast?.Name || 'Unnamed contrast';
+          contrastList.appendChild(pill);
+        });
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'No explicit contrasts yet.';
+        contrastList.appendChild(empty);
+      }
+      contrastSummary.appendChild(contrastList);
+      step2.body.appendChild(contrastSummary);
+    }
+    stack.appendChild(step2.card);
+
+    const step3 = createGuidedStepCard('3', 'Aggregation & Group level', 'Think in terms of the chain Run → Subject → Dataset. Edges stay implicit unless you need something unusual.');
+    const chain = document.createElement('div');
+    chain.className = 'guided-chain';
+    activeModel.Nodes.forEach((node, idx) => {
+      const card = document.createElement('div');
+      card.className = 'guided-chain-card';
+      const incoming = (Array.isArray(activeModel.Edges) ? activeModel.Edges : []).find(edge => String(edge?.Destination || '').trim() === String(node?.Name || '').trim());
+      const title = document.createElement('div');
+      title.className = 'guided-chain-title';
+      title.textContent = `${node.Level || 'Run'} · ${node.Name || `node #${idx + 1}`}`;
+      card.appendChild(title);
+      const meta = document.createElement('div');
+      meta.className = 'guided-chain-meta';
+      meta.textContent = incoming?.Source
+        ? `From ${incoming.Source} | GroupBy ${normalizeStringArray(node.GroupBy).join(', ') || '<unset>'}`
+        : `GroupBy ${normalizeStringArray(node.GroupBy).join(', ') || '<unset>'}`;
+      card.appendChild(meta);
+      card.appendChild(createGuidedActionButton('Open node', 'btn btn-sm btn-outline-secondary', () => openGuidedNodeField(idx, 'Model', true)));
+      chain.appendChild(card);
+    });
+    if (!activeModel.Nodes.length) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-muted';
+      empty.textContent = 'No nodes yet.';
+      chain.appendChild(empty);
+    }
+    step3.body.appendChild(chain);
+
+    const aggregationActions = document.createElement('div');
+    aggregationActions.className = 'guided-toolbar';
+    if (!getGuidedNodeByLevel(activeModel, 'Subject')) {
+      aggregationActions.appendChild(createGuidedActionButton('Add subject fixed-effects node', 'btn btn-sm btn-outline-primary', () => addGuidedNodeFromPreset('subject_fixed')));
+    }
+    if (!getGuidedNodeByLevel(activeModel, 'Dataset')) {
+      aggregationActions.appendChild(createGuidedActionButton('Add dataset node', 'btn btn-sm btn-outline-primary', () => addGuidedNodeFromPreset('dataset_basic')));
+    }
+    step3.body.appendChild(aggregationActions);
+
+    const datasetEntry = getGuidedNodeByLevel(activeModel, 'Dataset');
+    if (datasetEntry) {
+      const participantsInfo = getModelEditorParticipantsInfo();
+      const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+      const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+      const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+        ? participantsInfo.sample_values
+        : {};
+      const inferredGroupVariable = String(
+        guidedDatasetPresetOptions.groupVariable
+        || categoricalColumns.find(value => normalizeStringArray(datasetEntry.node.GroupBy).includes(value))
+        || normalizeStringArray(datasetEntry.node?.Model?.X).find(value => categoricalColumns.includes(value))
+        || categoricalColumns[0]
+        || ''
+      ).trim();
+      const groupLevels = normalizeStringArray(sampleValues[inferredGroupVariable]);
+      const inferredCovariate = String(
+        guidedDatasetPresetOptions.covariate
+        || normalizeStringArray(datasetEntry.node?.Model?.X).find(value => numericColumns.includes(value))
+        || numericColumns[0]
+        || ''
+      ).trim();
+      const inferredGroupA = String(guidedDatasetPresetOptions.groupA || groupLevels[0] || '').trim();
+      const inferredGroupB = String(guidedDatasetPresetOptions.groupB || groupLevels.find(level => level !== inferredGroupA) || groupLevels[0] || '').trim();
+      guidedDatasetPresetOptions = {
+        groupVariable: inferredGroupVariable,
+        covariate: inferredCovariate,
+        groupA: inferredGroupA,
+        groupB: inferredGroupB
+      };
+      const presetRequirementState = getDatasetPresetRequirementState(guidedDatasetPreset, {
+        groupVariable: inferredGroupVariable,
+        covariate: inferredCovariate,
+        groupA: inferredGroupA,
+        groupB: inferredGroupB,
+        groupLevels
+      });
+      const {
+        needsGroupVariable,
+        needsCovariate,
+        needsGroupPair,
+        canApplyPreset,
+        canApplyWithCovariate,
+        disabledReason: applyDisabledReason
+      } = presetRequirementState;
+
+      const presetRow = document.createElement('div');
+      presetRow.className = 'guided-toolbar';
+      const presetSelect = document.createElement('select');
+      presetSelect.className = 'form-select form-select-sm guided-filter';
+      [
+        { value: 'one_sample_all', label: 'One-sample across all subjects' },
+        { value: 'one_sample_by_group', label: 'One-sample by group' },
+        { value: 'two_sample_groups', label: 'Two-sample group comparison' },
+        { value: 'one_way_anova', label: 'One-way ANOVA' },
+        { value: 'linear_regression', label: 'Linear regression' }
+      ].forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        presetSelect.appendChild(opt);
+      });
+      presetSelect.value = guidedDatasetPreset;
+      presetSelect.addEventListener('change', () => {
+        guidedDatasetPreset = presetSelect.value;
+        renderGuidedWorkflow();
+      });
+      presetRow.appendChild(presetSelect);
+      if (needsGroupVariable) {
+        const groupSelect = document.createElement('select');
+        groupSelect.className = 'form-select form-select-sm guided-filter';
+        const emptyGroup = document.createElement('option');
+        emptyGroup.value = '';
+        emptyGroup.textContent = categoricalColumns.length ? 'Group variable' : 'No categorical participants.tsv column';
+        groupSelect.appendChild(emptyGroup);
+        categoricalColumns.forEach(value => {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          groupSelect.appendChild(opt);
+        });
+        groupSelect.value = inferredGroupVariable;
+        groupSelect.addEventListener('change', () => {
+          guidedDatasetPresetOptions.groupVariable = groupSelect.value;
+          guidedDatasetPresetOptions.groupA = '';
+          guidedDatasetPresetOptions.groupB = '';
+          renderGuidedWorkflow();
+        });
+        presetRow.appendChild(groupSelect);
+      }
+      if (needsCovariate) {
+        const covariateSelect = document.createElement('select');
+        covariateSelect.className = 'form-select form-select-sm guided-filter';
+        const emptyCovariate = document.createElement('option');
+        emptyCovariate.value = '';
+        emptyCovariate.textContent = numericColumns.length ? 'Covariate' : 'No numeric participants.tsv column';
+        covariateSelect.appendChild(emptyCovariate);
+        numericColumns.forEach(value => {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          covariateSelect.appendChild(opt);
+        });
+        covariateSelect.value = inferredCovariate;
+        covariateSelect.addEventListener('change', () => {
+          guidedDatasetPresetOptions.covariate = covariateSelect.value;
+        });
+        presetRow.appendChild(covariateSelect);
+      }
+      if (needsGroupPair) {
+        const groupASelect = document.createElement('select');
+        groupASelect.className = 'form-select form-select-sm guided-filter';
+        const emptyGroupA = document.createElement('option');
+        emptyGroupA.value = '';
+        emptyGroupA.textContent = groupLevels.length ? 'Group A' : 'No group values';
+        groupASelect.appendChild(emptyGroupA);
+        groupLevels.forEach(value => {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          groupASelect.appendChild(opt);
+        });
+        groupASelect.value = inferredGroupA;
+        groupASelect.addEventListener('change', () => {
+          guidedDatasetPresetOptions.groupA = groupASelect.value;
+          if (guidedDatasetPresetOptions.groupA === guidedDatasetPresetOptions.groupB) {
+            guidedDatasetPresetOptions.groupB = groupLevels.find(level => level !== guidedDatasetPresetOptions.groupA) || guidedDatasetPresetOptions.groupA || '';
+            renderGuidedWorkflow();
+          }
+        });
+        presetRow.appendChild(groupASelect);
+        const groupBSelect = document.createElement('select');
+        groupBSelect.className = 'form-select form-select-sm guided-filter';
+        const emptyGroupB = document.createElement('option');
+        emptyGroupB.value = '';
+        emptyGroupB.textContent = groupLevels.length ? 'Group B' : 'No group values';
+        groupBSelect.appendChild(emptyGroupB);
+        groupLevels.forEach(value => {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = value;
+          groupBSelect.appendChild(opt);
+        });
+        groupBSelect.value = inferredGroupB;
+        groupBSelect.addEventListener('change', () => {
+          guidedDatasetPresetOptions.groupB = groupBSelect.value;
+        });
+        presetRow.appendChild(groupBSelect);
+      }
+      const applyPresetButton = createGuidedActionButton('Apply second-level preset', 'btn btn-sm btn-outline-secondary', () => {
+        const result = applyDatasetNodePreset(datasetEntry.node, guidedDatasetPreset, {
+          groupVariable: guidedDatasetPresetOptions.groupVariable,
+          covariate: guidedDatasetPresetOptions.covariate,
+          groupA: guidedDatasetPresetOptions.groupA,
+          groupB: guidedDatasetPresetOptions.groupB
+        });
+        if (!datasetEntry.node.Name) datasetEntry.node.Name = getUniqueNodeName(result.suggestedName || 'dataset_level');
+        applyGuidedMutation(result.message, result.tone || 'success');
+      });
+      applyPresetButton.disabled = !(canApplyPreset && canApplyWithCovariate);
+      applyPresetButton.title = applyDisabledReason;
+      presetRow.appendChild(applyPresetButton);
+      presetRow.appendChild(createGuidedActionButton('Open dataset model', 'btn btn-sm btn-outline-secondary', () => openGuidedNodeField(datasetEntry.idx, 'Model', true)));
+      step3.body.appendChild(presetRow);
+      const participantsHint = document.createElement('div');
+      participantsHint.className = 'small text-muted';
+      participantsHint.textContent = applyDisabledReason
+        ? applyDisabledReason
+        : participantsInfo.sample_status !== 'present'
+        ? 'participants.tsv has not been loaded yet. Reload dataset hints to populate any grouping or covariate controls.'
+        : needsCovariate
+          ? 'This preset uses a numeric participants.tsv covariate.'
+          : needsGroupPair
+            ? 'This preset compares two levels from one categorical participants.tsv variable.'
+            : needsGroupVariable
+              ? 'This preset uses one categorical participants.tsv grouping variable.'
+              : 'This preset averages across all subjects and needs no extra participants.tsv selector.';
+      step3.body.appendChild(participantsHint);
+    }
+    stack.appendChild(step3.card);
+
+    const step4 = createGuidedStepCard('4', 'Review & Save', 'Keep validation and the live JSON preview as the final checkpoint before saving or running.');
+    const validationBadge = document.getElementById('model-preview-validation-badge');
+    const validationText = document.getElementById('model-preview-validation-text');
+    appendGuidedSummaryPillRow(step4.body, [
+      { text: validationBadge?.textContent?.trim() || 'idle', tone: /valid/i.test(validationBadge?.textContent || '') ? 'success' : (/invalid|error/i.test(validationBadge?.textContent || '') ? 'warning' : 'neutral') },
+      { text: `Top-level version ${activeModel.BIDSModelVersion || '<unset>'}`, tone: activeModel.BIDSModelVersion ? 'success' : 'warning' },
+      { text: `Description ${activeModel.Description ? 'set' : 'missing'}`, tone: activeModel.Description ? 'neutral' : 'warning' }
+    ]);
+    const validationMessage = document.createElement('div');
+    validationMessage.className = 'small text-muted';
+    validationMessage.textContent = validationText?.textContent?.trim() || 'Load a model to run live validation.';
+    step4.body.appendChild(validationMessage);
+    const reviewActions = document.createElement('div');
+    reviewActions.className = 'guided-toolbar';
+    reviewActions.appendChild(createGuidedActionButton('Save model', 'btn btn-sm btn-primary', () => document.getElementById('btn-save-model')?.click()));
+    reviewActions.appendChild(createGuidedActionButton('Open raw JSON', 'btn btn-sm btn-outline-secondary', () => document.getElementById('btn-toggle-raw')?.click()));
+    reviewActions.appendChild(createGuidedActionButton('Open advanced workflow', 'btn btn-sm btn-outline-secondary', () => {
+      if (editorMode !== 'full') document.getElementById('btn-open-full-editor')?.click();
+      document.getElementById('model-editor-shell')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+    step4.body.appendChild(reviewActions);
+    stack.appendChild(step4.card);
+
+    shell.appendChild(stack);
+  }
+
+  window.renderModelEditorGuidedWorkflow = renderGuidedWorkflow;
 
   function renderDatasetNodeModelFieldEditor(node, idx, modelObj){
     const wrapper = document.createElement('div');
@@ -2927,10 +3768,11 @@
       if (droppedValue) addModelXRegressor(droppedValue, targetIndex);
     }
 
-    const trialPoolCard = document.createElement('div');
-    trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
-    const trialPoolTitle = document.createElement('div');
-    trialPoolTitle.className = 'small fw-bold mb-1';
+    const trialPoolCard = document.createElement('details');
+    trialPoolCard.className = 'border rounded p-2 bg-light-subtle modelx-pool-section';
+    trialPoolCard.open = true;
+    const trialPoolTitle = document.createElement('summary');
+    trialPoolTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
     trialPoolTitle.textContent = 'Trial Types from events.tsv';
     trialPoolCard.appendChild(trialPoolTitle);
 
@@ -2994,11 +3836,12 @@
     }
 
     if (transformerRegressors.length || hasTransformerPipeline) {
-      const transformerCard = document.createElement('div');
-      transformerCard.className = 'border rounded p-2 bg-white';
+      const transformerCard = document.createElement('details');
+      transformerCard.className = 'border rounded p-2 bg-white modelx-pool-section';
+      transformerCard.open = false;
 
-      const transformerTitle = document.createElement('div');
-      transformerTitle.className = 'small fw-bold mb-1';
+      const transformerTitle = document.createElement('summary');
+      transformerTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
       transformerTitle.textContent = 'Transformer-generated regressors';
       transformerCard.appendChild(transformerTitle);
 
@@ -3036,10 +3879,11 @@
       xCard.appendChild(transformerCard);
     }
 
-    const nuisanceCard = document.createElement('div');
-    nuisanceCard.className = 'border rounded p-2';
-    const nuisanceTitle = document.createElement('div');
-    nuisanceTitle.className = 'small fw-bold mb-1';
+    const nuisanceCard = document.createElement('details');
+    nuisanceCard.className = 'border rounded p-2 modelx-pool-section';
+    nuisanceCard.open = false;
+    const nuisanceTitle = document.createElement('summary');
+    nuisanceTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
     nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
     nuisanceCard.appendChild(nuisanceTitle);
 
@@ -5677,6 +6521,22 @@
   function renderNodeContrastsPanel(container, node, idx) {
     const panel = createWorkspacePanel('Contrasts', 'Define named contrasts over the current node design matrix.');
     if (!Array.isArray(node.Contrasts)) node.Contrasts = [];
+
+    const builderHint = document.createElement('div');
+    builderHint.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
+    const builderText = document.createElement('span');
+    builderText.className = 'small text-muted me-auto';
+    builderText.textContent = 'Prefer a guided UI? The dedicated Contrast Builder is available on the Analysis page.';
+    builderHint.appendChild(builderText);
+    const builderBtn = document.createElement('a');
+    builderBtn.className = 'btn btn-sm btn-outline-primary';
+    builderBtn.target = '_blank';
+    builderBtn.rel = 'noopener';
+    builderBtn.href = '/analysis';
+    builderBtn.innerHTML = '<i class="fas fa-puzzle-piece me-1"></i>Open Contrast Builder';
+    builderHint.appendChild(builderBtn);
+    panel.body.appendChild(builderHint);
+
     const incomingContrastNames = getIncomingContrastNamesForNode(idx);
     const conditionSuggestions = getSuggestedConditionTermsForNode(idx);
     const conditionDatalistId = `node-${idx}-contrast-condition-suggestions`;
@@ -6593,10 +7453,11 @@
           renderModelAccordionEditor();
         }
 
-        const trialPoolCard = document.createElement('div');
-        trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
-        const trialPoolTitle = document.createElement('div');
-        trialPoolTitle.className = 'small fw-bold mb-1';
+        const trialPoolCard = document.createElement('details');
+        trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle modelx-pool-section';
+        trialPoolCard.open = true;
+        const trialPoolTitle = document.createElement('summary');
+        trialPoolTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
         trialPoolTitle.textContent = 'Trial Types from events.tsv';
         trialPoolCard.appendChild(trialPoolTitle);
 
@@ -6662,10 +7523,11 @@
         }
 
         if (transformerRegressors.length || hasTransformerPipeline) {
-          const transformerCard = document.createElement('div');
-          transformerCard.className = 'border rounded p-2 mb-2 bg-white';
-          const transformerTitle = document.createElement('div');
-          transformerTitle.className = 'small fw-bold mb-1';
+          const transformerCard = document.createElement('details');
+          transformerCard.className = 'border rounded p-2 mb-2 bg-white modelx-pool-section';
+          transformerCard.open = false;
+          const transformerTitle = document.createElement('summary');
+          transformerTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
           transformerTitle.textContent = 'Transformer-generated regressors';
           transformerCard.appendChild(transformerTitle);
 
@@ -6703,10 +7565,11 @@
           listWrap.appendChild(transformerCard);
         }
 
-        const nuisanceCard = document.createElement('div');
-        nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
-        const nuisanceTitle = document.createElement('div');
-        nuisanceTitle.className = 'small fw-bold mb-1';
+        const nuisanceCard = document.createElement('details');
+        nuisanceCard.className = 'border rounded p-2 mb-2 bg-white modelx-pool-section';
+        nuisanceCard.open = false;
+        const nuisanceTitle = document.createElement('summary');
+        nuisanceTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
         nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
         nuisanceCard.appendChild(nuisanceTitle);
 
@@ -7340,7 +8203,7 @@
       if (sel.field) modelEditorOpenPaths.add(`${nodePath}.${sel.field}`);
     }
   }
-  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); updateModelJsonPreview(); }
+  sectionsToRender.forEach(section => createModelSectionCard(editor, section)); updateModelJsonPreview(); if (typeof window.renderModelEditorGuidedWorkflow === 'function') window.renderModelEditorGuidedWorkflow(); }
 
   // expose saveModelEditor for the outer script
   async function saveModelEditor(){

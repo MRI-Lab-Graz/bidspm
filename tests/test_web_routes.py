@@ -120,12 +120,15 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
         self.assertIn('/static/css/model_editor.css', text)
+        self.assertIn('/static/js/analysis_model_presets.js', text)
         self.assertIn('/static/js/model_editor_launch.js', text)
         self.assertIn('/static/js/model_editor_launch_context.js', text)
         self.assertIn('/static/js/model_editor_transformer_payload.js', text)
         self.assertIn('/static/js/model_editor_transformer_apply.js', text)
         self.assertIn('/static/js/model_editor_transformer_events.js', text)
         self.assertIn('/static/js/model_editor_loading.js', text)
+        self.assertIn('Guided Workflow', text)
+        self.assertIn('Group variable', text)
 
     def test_api_create_project_requires_name(self):
         response = self.client.post("/api/projects", json={})
@@ -419,7 +422,6 @@ class TestWebRoutes(unittest.TestCase):
 
     def test_legacy_config_endpoints_roundtrip(self):
         folder = Path(self.temp_dir.name) / "legacy-configs"
-
         save_response = self.client.post(
             "/save_config",
             json={
