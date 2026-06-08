@@ -174,6 +174,32 @@ class TestCoreHelpers(unittest.TestCase):
             with self.assertRaises(ValueError):
                 core.build_container_command(ContainerConfig(container_type="unknown"), config, [], None)
 
+    def test_run_container_action_uses_raw_bids_root_for_smooth_and_preproc_dir_for_stats(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            pipeline = core.Pipeline(core.PipelineOptions(actions=["smooth", "stats"]))
+            pipeline.config = _make_config(root)
+            pipeline.container_config = ContainerConfig(container_type="apptainer", apptainer_image=str(root / "bidspm.sif"))
+            pipeline.model_file_path = root / "model.json"
+            pipeline.model_file_path.write_text("{}", encoding="utf-8")
+
+            recorded_args = []
+
+            def fake_build(container_config, config, args, model_file_path):
+                recorded_args.append(list(args))
+                return ["container"] + list(args), "/models/smdl.json"
+
+            with patch("lib.core.build_container_command", side_effect=fake_build), \
+                 patch("lib.core.run_command", return_value=True):
+                self.assertTrue(pipeline._run_container_action("smooth", "01", "motor"))
+                self.assertTrue(pipeline._run_container_action("stats", "01", "motor"))
+
+            self.assertEqual(recorded_args[0][:4], ["/raw", "/derivatives", "subject", "smooth"])
+            self.assertNotIn("/derivatives/fmriprep", recorded_args[0])
+            self.assertEqual(recorded_args[1][:4], ["/raw", "/derivatives", "subject", "stats"])
+            self.assertIn("--preproc_dir", recorded_args[1])
+            self.assertIn("/derivatives/bidspm-preproc", recorded_args[1])
+
     def test_discovery_helpers_and_check_subject_processed_cover_expected_shapes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

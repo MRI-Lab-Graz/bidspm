@@ -685,6 +685,44 @@
     });
   }
 
+  function getSuggestedEntityRegressorsForNode(node) {
+    const level = String(node?.Level || '').trim().toLowerCase();
+    if (!level || level === 'run') return [];
+
+    const currentGroupBy = new Set(normalizeStringArray(node?.GroupBy).map(value => value.toLowerCase()));
+    return Array.from(new Set(['task', ...normalizeStringArray(window.modelEditorGroupByOptions)]))
+      .filter(Boolean)
+      .filter(value => value.toLowerCase() !== 'contrast')
+      .filter(value => !currentGroupBy.has(value.toLowerCase()));
+  }
+
+  function getSuggestedRegressorsForModelXPath(arrayPath) {
+    const match = String(arrayPath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
+    if (!match) {
+      return Array.from(new Set(window.modelEditorInterestRegressors || [])).filter(Boolean);
+    }
+
+    const nodeIdx = Number(match[1]);
+    const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
+    const level = String(node?.Level || '').trim().toLowerCase();
+    const entityRegressors = getSuggestedEntityRegressorsForNode(node);
+
+    if (level === 'dataset') {
+      const participants = (window.modelEditorParticipantsInfo && typeof window.modelEditorParticipantsInfo === 'object')
+        ? window.modelEditorParticipantsInfo
+        : emptyParticipantsInfo();
+      const categorical = normalizeStringArray(participants.categorical_columns);
+      const numeric = normalizeStringArray(participants.numeric_columns);
+      return Array.from(new Set(['1', ...categorical, ...numeric, ...entityRegressors])).filter(Boolean);
+    }
+
+    return Array.from(new Set([
+      ...normalizeStringArray(window.modelEditorInterestRegressors),
+      ...getTransformerModelXRegressors(node),
+      ...entityRegressors
+    ])).filter(Boolean);
+  }
+
   window.getTransformerModelXRegressors = getTransformerModelXRegressors;
   const {
     consumeTransformerPayload,
@@ -2410,10 +2448,8 @@
     const transformerEntries = (typeof window.getTransformerModelXRegressors === 'function')
       ? window.getTransformerModelXRegressors(node).map(value => ({ name: value, kind: 'transformer', label: 'transformer output' }))
       : [];
-    const nuisanceEntries = normalizeStringArray(window.modelEditorConfoundColumns)
-      .map(value => ({ name: value, kind: 'nuisance', label: 'fMRIPrep confound' }));
     const map = new Map();
-    [...trialEntries, ...conditionEntries, ...transformerEntries, ...nuisanceEntries].forEach(entry => {
+    [...trialEntries, ...conditionEntries, ...transformerEntries].forEach(entry => {
       if (!entry.name || map.has(entry.name)) return;
       map.set(entry.name, entry);
     });
@@ -2544,7 +2580,7 @@
     step1.body.appendChild(taskWrap);
     stack.appendChild(step1.card);
 
-    const step2 = createGuidedStepCard('2', 'Subject-Level Model', 'Pick conditions, transformer outputs, and nuisance regressors close to the design matrix they affect.');
+    const step2 = createGuidedStepCard('2', 'Subject-Level Model', 'Pick conditions and transformer outputs here. Bulk fMRIPrep confounds stay in the advanced Model.X editor instead of auto-filling this guided list.');
     const runNodeIndex = getGuidedRunNodeIndex(activeModel);
     if (runNodeIndex < 0) {
       const empty = document.createElement('div');
@@ -2587,11 +2623,10 @@
       const filterSelect = document.createElement('select');
       filterSelect.className = 'form-select form-select-sm guided-filter';
       [
-        { value: 'all', label: 'All sources' },
+        { value: 'all', label: 'All guided sources' },
         { value: 'trial', label: 'Trial types' },
         { value: 'condition', label: 'Condition.*' },
-        { value: 'transformer', label: 'Transformer' },
-        { value: 'nuisance', label: 'Nuisance' }
+        { value: 'transformer', label: 'Transformer' }
       ].forEach(option => {
         const opt = document.createElement('option');
         opt.value = option.value;
@@ -4937,7 +4972,10 @@
     }
     if (/\.ConditionList$/.test(path)) return getDefaultConditionTokenForPath(path);
     if (/\.Weights$/.test(path)) return 0;
-    if (/\.X$/.test(path)) return modelEditorInterestRegressors[0] || 'trial_type';
+    if (/\.X$/.test(path)) {
+      const suggestions = getSuggestedRegressorsForModelXPath(path);
+      return suggestions[0] || modelEditorInterestRegressors[0] || 'trial_type';
+    }
     if (/\.GroupBy$/.test(path)) return 'run';
     if (/\.Variables$/.test(path)) return 'trial_type';
     return '';
@@ -4958,10 +4996,10 @@
     const keyEl = document.createElement('span'); keyEl.className='json-key fw-semibold'; keyEl.textContent = label; row.appendChild(keyEl);
     const inputWrap = document.createElement('div'); inputWrap.className='json-inline-value';
     const pathEl = document.createElement('div'); pathEl.className='json-path mb-1'; pathEl.textContent = path; pathEl.style.display = showModelTechnicalPaths ? 'block' : 'none'; inputWrap.appendChild(pathEl);
-    const isModelXEntry = isModelXPath(path); const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path); const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && modelEditorInterestRegressors.length>0;
+    const isModelXEntry = isModelXPath(path); const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path); const modelXPathMatch = String(path || '').match(/^(.*\.Model\.X)(?:\[\d+\])?$/); const suggestedModelXOptions = modelXPathMatch ? getSuggestedRegressorsForModelXPath(modelXPathMatch[1]) : []; const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && suggestedModelXOptions.length>0;
     let input;
     if (isGroupByEntry) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([...(modelEditorGroupByOptions||[]), value])); options.forEach(optVal=>{ const opt = document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value = String(value); }
-    else if (useInterestDropdown) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([value, ...modelEditorInterestRegressors])); options.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value=value; }
+    else if (useInterestDropdown) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([value, ...suggestedModelXOptions])); options.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value=value; }
     else if (typeof value === 'boolean') { input = document.createElement('select'); input.className='form-select form-select-sm'; input.innerHTML = '<option value="true">true</option><option value="false">false</option>'; input.value = value ? 'true' : 'false'; }
     else if (typeof value === 'number') { input = document.createElement('input'); input.type='number'; input.step='any'; input.className='form-control form-control-sm font-monospace'; input.value = String(value); }
     else { input = document.createElement('input'); input.type='text'; input.className='form-control form-control-sm font-monospace'; input.value = value===null ? '' : String(value); }
@@ -4970,7 +5008,7 @@
     inputWrap.appendChild(input); row.appendChild(inputWrap);
     if (locked) { const badge = document.createElement('span'); badge.className='badge text-bg-light border'; badge.textContent='Locked'; row.appendChild(badge); }
     else if (isModelXEntry && isNuisanceRegressor(value)) { const badge = document.createElement('span'); badge.className='badge text-bg-secondary'; badge.textContent='Nuisance'; row.appendChild(badge); }
-    else if (useInterestDropdown) { const badge = document.createElement('span'); badge.className='badge text-bg-success'; badge.textContent='Interest'; row.appendChild(badge); }
+    else if (useInterestDropdown) { const badge = document.createElement('span'); badge.className='badge text-bg-success'; badge.textContent='Suggested'; row.appendChild(badge); }
     if (isModelXEntry && !locked) { const match = path.match(/^(.*)\[(\d+)\]$/); if (match) { const arrayPath = match[1]; const index = Number(match[2]); const arr = getByPath(modelEditorDraft, arrayPath) || []; const actions = document.createElement('div'); actions.className='json-row-actions'; const upBtn = document.createElement('button'); upBtn.type='button'; upBtn.className='btn btn-sm btn-outline-secondary'; upBtn.title='Move up'; upBtn.innerHTML='<i class="fas fa-arrow-up"></i>'; upBtn.disabled = index===0; upBtn.addEventListener('click', ()=>{ moveArrayItem(path,'up'); renderModelAccordionEditor(); }); const downBtn = document.createElement('button'); downBtn.type='button'; downBtn.className='btn btn-sm btn-outline-secondary'; downBtn.title='Move down'; downBtn.innerHTML='<i class="fas fa-arrow-down"></i>'; downBtn.disabled = index===arr.length-1; downBtn.addEventListener('click', ()=>{ moveArrayItem(path,'down'); renderModelAccordionEditor(); }); const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='btn btn-sm btn-outline-danger'; delBtn.title='Remove regressor'; delBtn.innerHTML='<i class="fas fa-times"></i>'; delBtn.addEventListener('click', ()=>{ removeArrayItem(path); renderModelAccordionEditor(); }); actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn); row.appendChild(actions); } }
     if (isGroupByEntry && !locked) { const actions = document.createElement('div'); actions.className='json-row-actions'; const removeBtn = document.createElement('button'); removeBtn.type='button'; removeBtn.className='btn btn-sm btn-outline-danger'; removeBtn.title='Remove'; removeBtn.innerHTML='<i class="fas fa-trash"></i>'; removeBtn.addEventListener('click', ()=>{ removeArrayItem(path); renderModelAccordionEditor(); }); actions.appendChild(removeBtn); row.appendChild(actions); }
     if (!isModelXEntry && !isGroupByEntry && !locked && /\[\d+\]$/.test(path)) { const actions = document.createElement('div'); actions.className='json-row-actions'; const delBtn = document.createElement('button'); delBtn.type='button'; delBtn.className='btn btn-sm btn-outline-danger'; delBtn.title='Remove'; delBtn.innerHTML='<i class="fas fa-times"></i>'; delBtn.addEventListener('click', ()=>{ removeArrayItem(path); renderModelAccordionEditor(); }); actions.appendChild(delBtn); row.appendChild(actions); }
@@ -7294,6 +7332,7 @@
         const currentNode = nodeMatch && Array.isArray(modelEditorDraft?.Nodes)
           ? modelEditorDraft.Nodes[Number(nodeMatch[1])]
           : null;
+        const entityRegressors = getSuggestedEntityRegressorsForNode(currentNode);
         const transformerRegressors = typeof window.getTransformerModelXRegressors === 'function'
           ? window.getTransformerModelXRegressors(currentNode)
           : [];
@@ -7495,6 +7534,40 @@
         }
         trialPoolCard.appendChild(trialPool);
         listWrap.appendChild(trialPoolCard);
+
+        if (entityRegressors.length) {
+          const entityCard = document.createElement('details');
+          entityCard.className = 'border rounded p-2 mb-2 bg-white modelx-pool-section';
+          entityCard.open = true;
+          const entityTitle = document.createElement('summary');
+          entityTitle.className = 'small fw-bold mb-1 modelx-pool-summary';
+          entityTitle.textContent = 'Entity regressors';
+          entityCard.appendChild(entityTitle);
+
+          const entityHint = document.createElement('div');
+          entityHint.className = 'small text-muted mb-2';
+          entityHint.textContent = 'These BIDS entities vary at this node level and can be used in higher-level Model.X terms, for example run on a Subject node.';
+          entityCard.appendChild(entityHint);
+
+          const entityPool = document.createElement('div');
+          entityPool.className = 'modelx-pool';
+          entityRegressors.forEach(reg => {
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.className = 'btn btn-sm btn-outline-dark modelx-reg-badge';
+            badge.textContent = reg;
+            badge.draggable = true;
+            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+            badge.addEventListener('dragstart', (event)=>{
+              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.setData('application/x-modelx-regressor', reg);
+              event.dataTransfer.setData('text/plain', reg);
+            });
+            entityPool.appendChild(badge);
+          });
+          entityCard.appendChild(entityPool);
+          listWrap.appendChild(entityCard);
+        }
 
 
         if (conditionRegressors.length) {

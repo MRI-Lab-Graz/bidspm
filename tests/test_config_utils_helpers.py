@@ -77,6 +77,32 @@ class TestConfigHelpers(unittest.TestCase):
             self.assertTrue(config.SKIP_VALIDATION)
             self.assertEqual(config.SUBJECTS, ["01"])
 
+    def test_load_config_defaults_empty_derivatives_dir_to_wd(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config_path = root / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "WD": str(root / "work"),
+                        "BIDS_DIR": str(root / "bids"),
+                        "DERIVATIVES_DIR": "",
+                        "FMRIPREP_DIR": str(root / "work" / "fmriprep"),
+                        "SPACE": "MNI152NLin2009cAsym",
+                        "FWHM": 6,
+                        "MODELS_FILE": "",
+                        "TASKS": ["motor"],
+                        "VERBOSITY": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(str(config_path))
+
+            self.assertEqual(config.WD, root / "work")
+            self.assertEqual(config.DERIVATIVES_DIR, root / "work")
+
     def test_load_container_config_supports_valid_payload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "container.json"

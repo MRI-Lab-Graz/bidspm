@@ -270,6 +270,23 @@
         return reorderArrayItem(arrayPath, index, targetIndex);
     }
 
+    function getSuggestedEntityRegressorsForNode(node) {
+        const level = String(node?.Level || '').trim().toLowerCase();
+        if (!level || level === 'run') return [];
+
+        const currentGroupBy = new Set(
+            normalizeStringArray(node?.GroupBy).map((value) => value.toLowerCase())
+        );
+        const available = Array.isArray(window.modelEditorGroupByOptions)
+            ? window.modelEditorGroupByOptions
+            : [];
+
+        return Array.from(new Set(['task', ...available.map((value) => String(value || '').trim())]))
+            .filter(Boolean)
+            .filter((value) => value.toLowerCase() !== 'contrast')
+            .filter((value) => !currentGroupBy.has(value.toLowerCase()));
+    }
+
     function getSuggestedRegressorsForModelXPath(arrayPath) {
         const match = String(arrayPath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
         if (!match) {
@@ -279,17 +296,19 @@
         const nodeIdx = Number(match[1]);
         const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
         const level = String(node?.Level || '').trim().toLowerCase();
+        const entityRegressors = getSuggestedEntityRegressorsForNode(node);
         if (level === 'dataset') {
             const participants = getModelEditorParticipantsInfo();
             const categorical = normalizeStringArray(participants.categorical_columns);
             const numeric = normalizeStringArray(participants.numeric_columns);
-            return Array.from(new Set(['1', ...categorical, ...numeric])).filter(Boolean);
+            return Array.from(new Set(['1', ...categorical, ...numeric, ...entityRegressors])).filter(Boolean);
         }
 
         const transformerRegressors = getTransformerModelXRegressorsForNode(node);
         return Array.from(new Set([
             ...(modelEditorInterestRegressors || []),
-            ...transformerRegressors
+            ...transformerRegressors,
+            ...entityRegressors
         ])).filter(Boolean);
     }
 

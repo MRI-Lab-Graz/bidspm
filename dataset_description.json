@@ -1,0 +1,12 @@
+{
+  "Name": "Derivatives",
+  "BIDSVersion": "1.8.0",
+  "DatasetType": "derivative",
+  "GeneratedBy": [
+    {
+      "Name": "bidspm-runner",
+      "Version": "1.0.0",
+      "Description": "Minimal dataset description to satisfy BIDS validation"
+    }
+  ]
+}

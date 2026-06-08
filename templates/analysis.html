@@ -592,6 +592,7 @@
     let modelEditorConfoundColumns = [];
     let modelEditorTransRotConfounds = [];
     let modelEditorGroupByOptions = ['subject'];
+    window.modelEditorGroupByOptions = modelEditorGroupByOptions;
     let modelEditorParticipantsInfo = emptyParticipantsInfo();
     let showModelTechnicalPaths = false;
     let modelEditorOpenPaths = new Set(); // tracks which accordion panels are open across re-renders
@@ -1017,9 +1018,8 @@
             ? normalizeStringArray(modelEditorEventSamples.condition).map(value => ({ name: `condition.${value}`, kind: 'condition', label: 'events.tsv condition' }))
             : [];
         const transformerEntries = getTransformerModelXRegressorsForNode(node).map(value => ({ name: value, kind: 'transformer', label: 'transformer output' }));
-        const nuisanceEntries = normalizeStringArray(modelEditorConfoundColumns).map(value => ({ name: value, kind: 'nuisance', label: 'fMRIPrep confound' }));
         const unique = new Map();
-        [...trialEntries, ...conditionEntries, ...transformerEntries, ...nuisanceEntries].forEach(entry => {
+        [...trialEntries, ...conditionEntries, ...transformerEntries].forEach(entry => {
             if (!entry.name || unique.has(entry.name)) return;
             unique.set(entry.name, entry);
         });
@@ -1139,7 +1139,7 @@
 
         const step2 = document.createElement('section');
         step2.className = 'analysis-guided-card';
-        step2.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">2</span><div><div class="analysis-guided-step-title">Subject-Level Model</div><div class="analysis-guided-step-hint">Search one regressor library, then tune the current run-level design matrix inline.</div></div></div>';
+        step2.innerHTML = '<div class="analysis-guided-step-head"><span class="analysis-guided-badge">2</span><div><div class="analysis-guided-step-title">Subject-Level Model</div><div class="analysis-guided-step-hint">Pick task regressors and transformer outputs here. Bulk fMRIPrep confounds stay in the advanced Model.X editor instead of auto-filling this guided list.</div></div></div>';
         const step2Body = document.createElement('div');
         step2Body.className = 'analysis-guided-body';
         const runIdx = getAnalysisGuidedRunNodeIndex();
@@ -1174,11 +1174,10 @@
             const filter = document.createElement('select');
             filter.className = 'form-select form-select-sm analysis-guided-filter';
             [
-                { value: 'all', label: 'All sources' },
+                { value: 'all', label: 'All guided sources' },
                 { value: 'trial', label: 'Trial types' },
                 { value: 'condition', label: 'Condition.*' },
-                { value: 'transformer', label: 'Transformer' },
-                { value: 'nuisance', label: 'Nuisance' }
+                { value: 'transformer', label: 'Transformer' }
             ].forEach(option => {
                 const opt = document.createElement('option');
                 opt.value = option.value;
@@ -1997,7 +1996,9 @@
 
         const isModelXEntry = isModelXPath(path);
         const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path);
-        const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && modelEditorInterestRegressors.length > 0;
+        const modelXPathMatch = String(path || '').match(/^(.*\.Model\.X)(?:\[\d+\])?$/);
+        const suggestedModelXOptions = modelXPathMatch ? getSuggestedRegressorsForModelXPath(modelXPathMatch[1]) : [];
+        const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && suggestedModelXOptions.length > 0;
 
         if (isGroupByEntry) {
             row.classList.add('json-row-compact');
@@ -2019,7 +2020,7 @@
         } else if (useInterestDropdown) {
             input = document.createElement('select');
             input.className = 'form-select form-select-sm';
-            const options = Array.from(new Set([value, ...modelEditorInterestRegressors]));
+            const options = Array.from(new Set([value, ...suggestedModelXOptions]));
             options.forEach(optVal => {
                 const opt = document.createElement('option');
                 opt.value = optVal;
@@ -2088,7 +2089,7 @@
         } else if (useInterestDropdown) {
             const badge = document.createElement('span');
             badge.className = 'badge text-bg-success';
-            badge.textContent = 'Interest';
+            badge.textContent = 'Suggested';
             row.appendChild(badge);
         }
 
@@ -3141,6 +3142,7 @@
         const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim();
         if (!bidsDir) {
             modelEditorGroupByOptions = ['subject'];
+            window.modelEditorGroupByOptions = modelEditorGroupByOptions;
             return modelEditorGroupByOptions;
         }
 
@@ -3155,6 +3157,8 @@
         } catch (e) {
             modelEditorGroupByOptions = ['subject'];
         }
+
+        window.modelEditorGroupByOptions = modelEditorGroupByOptions;
 
         return modelEditorGroupByOptions;
     }
