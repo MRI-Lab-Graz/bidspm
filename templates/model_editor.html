@@ -4,6 +4,245 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/model_editor.css', v='20260527') }}">
+<style>
+.cb-modal-content { border: 0; box-shadow: 0 24px 50px rgba(14,30,55,.18); }
+.cb-modal-header {
+  background: linear-gradient(120deg, #edf4fb 0%, #f3f9ef 100%);
+  border-bottom: 1px solid #cfe0ee;
+}
+.cb-modal-body { background: #f7f9fc; overflow: hidden; }
+.cb-modal-footer { background: #f0f4f9; border-top: 1px solid #d9e4ef; }
+.cb-node-bar { background: #fff; }
+.cb-node-tab {
+  border: 1.5px solid #b0c8df;
+  border-radius: 999px;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3d5a74;
+  background: #eef5fc;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.cb-node-tab:hover { background: #d9eaf6; border-color: #7aadd1; }
+.cb-node-tab.active { background: #2a6fad; border-color: #2a6fad; color: #fff; }
+.cb-left-panel {
+  width: 260px;
+  min-width: 220px;
+  background: #fff;
+  border-right: 1.5px solid #dde8f2;
+  overflow-y: auto;
+}
+.cb-right-panel {
+  overflow-y: auto;
+  max-height: 520px;
+}
+.cb-divider { height: 1px; background: #e4ecf5; margin: 0 -0.25rem; }
+.cb-condition-pool {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 60px;
+}
+.cb-condition-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #25445f;
+  background: #eef5fc;
+  border: 1.5px solid #b8d4ec;
+  cursor: grab;
+  user-select: none;
+  transition: all .12s;
+}
+.cb-condition-chip:hover { background: #d9eaf6; border-color: #84b8dc; transform: translateX(2px); }
+.cb-condition-chip.dragging { opacity: .45; transform: rotate(-1deg) scale(.97); }
+.cb-condition-chip .cb-chip-icon { font-size: 0.65rem; color: #6c99bb; }
+.cb-contrast-card {
+  background: #fff;
+  border: 1.5px solid #dce8f5;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(20,50,90,.06);
+  transition: box-shadow .15s;
+}
+.cb-contrast-card.drag-over { border-color: #2a6fad; box-shadow: 0 0 0 3px rgba(42,111,173,.18); }
+.cb-contrast-card.cb-dragging-card { opacity: .5; }
+.cb-contrast-header {
+  background: linear-gradient(90deg, #f0f7ff 0%, #f8fbf8 100%);
+  border-bottom: 1px solid #dce8f4;
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.cb-contrast-grab {
+  cursor: grab;
+  color: #94adc5;
+  font-size: 0.85rem;
+  padding: 0 0.2rem;
+}
+.cb-contrast-name-input {
+  border: 1px solid #c8dbef;
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1d3f63;
+  background: #fff;
+  min-width: 140px;
+}
+.cb-contrast-name-input:focus { outline: 2px solid #7ab3e0; border-color: transparent; }
+.cb-test-type-select {
+  border: 1px solid #c8dbef;
+  border-radius: 0.4rem;
+  padding: 0.22rem 0.45rem;
+  font-size: 0.8rem;
+  color: #1d3f63;
+  background: #fff;
+  cursor: pointer;
+}
+.cb-contrast-actions { margin-left: auto; display: flex; gap: .4rem; }
+.cb-contrast-body { padding: 0.75rem 0.9rem; }
+.cb-drop-zone {
+  min-height: 64px;
+  border: 2px dashed #b8cfe8;
+  border-radius: 0.65rem;
+  background: #f5f9fd;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: all .15s;
+  position: relative;
+}
+.cb-drop-zone.drag-over {
+  border-color: #2a6fad;
+  background: #e8f2fc;
+}
+.cb-drop-zone-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #94b4cc;
+  font-size: 0.78rem;
+  font-style: italic;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.cb-condition-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fff;
+  border: 1px solid #dce8f5;
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  transition: all .1s;
+}
+.cb-condition-row[draggable="true"] { cursor: grab; }
+.cb-condition-row.drag-over-row { border-color: #2a6fad; background: #eef5fc; }
+.cb-cond-label {
+  flex: 1;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #253b54;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cb-weight-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.cb-weight-quick { display: flex; gap: 0.18rem; }
+.cb-wbtn {
+  border: 1.5px solid #b0c8df;
+  border-radius: 0.35rem;
+  padding: 0.12rem 0.42rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: #eef5fc;
+  color: #25445f;
+  transition: all .1s;
+  line-height: 1.4;
+}
+.cb-wbtn:hover { background: #d9eaf6; }
+.cb-wbtn.active-pos { background: #1f8b5c; border-color: #1f8b5c; color: #fff; }
+.cb-wbtn.active-neg { background: #c0392b; border-color: #c0392b; color: #fff; }
+.cb-wbtn.active-zero { background: #94a3b8; border-color: #94a3b8; color: #fff; }
+.cb-weight-input {
+  width: 54px;
+  border: 1px solid #b0c8df;
+  border-radius: 0.35rem;
+  padding: 0.12rem 0.3rem;
+  font-size: 0.78rem;
+  text-align: center;
+  color: #1d3f63;
+}
+.cb-weight-badge {
+  display: inline-block;
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.cb-w-pos { background: #d9f2e1; color: #1a5c38; border: 1px solid #9fd6b0; }
+.cb-w-neg { background: #fde8e6; color: #8b1c12; border: 1px solid #f5a49c; }
+.cb-w-zero { background: #e9ecef; color: #6c757d; border: 1px solid #ced4da; }
+.cb-remove-cond {
+  border: none;
+  background: none;
+  color: #b0bcc8;
+  cursor: pointer;
+  padding: 0 0.1rem;
+  font-size: 0.8rem;
+  transition: color .1s;
+}
+.cb-remove-cond:hover { color: #c0392b; }
+.cb-equation-preview {
+  background: #1e2d3d;
+  color: #a8d8f0;
+  border-radius: 0.65rem;
+  padding: 0.7rem 1rem;
+  font-family: monospace;
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+}
+.cb-weight-sum {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.3rem;
+  font-weight: 600;
+}
+.cb-weight-sum-ok { background: #d9f2e1; color: #1a5c38; }
+.cb-weight-sum-warn { background: #fff3cd; color: #856404; }
+.cb-legend { background: #f0f6fb; border-radius: 0.5rem; padding: 0.5rem 0.65rem; }
+.cb-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  color: #4a6478;
+  padding: 0.1rem 0;
+}
+.cb-empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #94adc5;
+  font-size: 0.85rem;
+}
+</style>
 {% endblock %}
 
 {% block content %}
@@ -74,6 +313,9 @@
             <div class="small text-muted" id="selected-node-meta"></div>
           </div>
           <div class="d-flex gap-2">
+            <button id="btn-open-contrast-builder" class="btn btn-outline-secondary btn-sm">
+              <i class="fas fa-puzzle-piece me-1"></i>Contrast Builder
+            </button>
             <button id="btn-save-model" class="btn btn-primary btn-sm">Save Model</button>
             <button id="btn-toggle-raw" class="btn btn-outline-secondary btn-sm">Raw JSON</button>
             <button id="btn-open-full-editor" class="btn btn-outline-info btn-sm">Field View</button>
@@ -147,6 +389,98 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="contrastBuilderModal" tabindex="-1" aria-labelledby="contrastBuilderModalLabel">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:1120px;">
+    <div class="modal-content cb-modal-content">
+      <div class="modal-header cb-modal-header">
+        <div class="d-flex flex-column">
+          <h5 class="modal-title mb-0" id="contrastBuilderModalLabel">
+            <i class="fas fa-puzzle-piece me-2"></i>Contrast Builder
+          </h5>
+          <small class="text-muted mt-1">Drag conditions onto contrasts · set weights · build your design</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="cb-node-bar px-4 pt-3 pb-2 border-bottom d-flex align-items-center gap-3 flex-wrap">
+        <span class="small fw-bold text-muted text-uppercase" style="white-space:nowrap;">Analysis Node:</span>
+        <div id="cb-node-tabs" class="d-flex flex-wrap gap-2"></div>
+        <div id="cb-no-nodes-msg" class="text-muted small d-none">No nodes in model - add a node first.</div>
+      </div>
+
+      <div class="modal-body cb-modal-body d-flex gap-0 p-0" style="min-height:520px;">
+        <aside class="cb-left-panel p-3 d-flex flex-column gap-3">
+          <div>
+            <div class="d-flex align-items-center justify-content-between mb-1">
+              <span class="x-small fw-bold text-uppercase text-muted">Available Conditions</span>
+              <span class="x-small text-muted">drag onto a contrast -&gt;</span>
+            </div>
+            <div id="cb-condition-pool" class="cb-condition-pool"></div>
+          </div>
+
+          <div class="cb-divider"></div>
+
+          <div>
+            <div class="x-small fw-bold text-uppercase text-muted mb-1">Add Custom Condition</div>
+            <div class="input-group input-group-sm">
+              <input type="text" id="cb-custom-condition" class="form-control" placeholder="e.g. trial_type.new">
+              <button class="btn btn-outline-secondary" id="cb-add-custom-btn" type="button">Add</button>
+            </div>
+          </div>
+
+          <div class="cb-divider"></div>
+
+          <div>
+            <div class="x-small fw-bold text-uppercase text-muted mb-2">Quick Presets</div>
+            <div class="d-flex flex-column gap-2">
+              <button class="btn btn-sm btn-outline-primary cb-preset-btn" data-preset="each-vs-rest">
+                <i class="fas fa-star-of-life me-1 small"></i>Each vs Rest
+              </button>
+              <button class="btn btn-sm btn-outline-primary cb-preset-btn" data-preset="each-vs-baseline">
+                <i class="fas fa-arrow-up me-1 small"></i>Each &gt; Baseline
+              </button>
+              <button class="btn btn-sm btn-outline-secondary cb-preset-btn" data-preset="all-active">
+                <i class="fas fa-layer-group me-1 small"></i>All Active (F-test)
+              </button>
+              <button class="btn btn-sm btn-outline-secondary cb-preset-btn" data-preset="clear-all">
+                <i class="fas fa-trash me-1 small"></i>Clear All Contrasts
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-auto">
+            <div class="cb-legend">
+              <div class="cb-legend-row"><span class="cb-weight-badge cb-w-pos">+1</span> <span>positive / active</span></div>
+              <div class="cb-legend-row"><span class="cb-weight-badge cb-w-neg">-1</span> <span>negative / baseline</span></div>
+              <div class="cb-legend-row"><span class="cb-weight-badge cb-w-zero">0</span> <span>not contrasted</span></div>
+            </div>
+          </div>
+        </aside>
+
+        <main class="cb-right-panel p-3 d-flex flex-column gap-3 flex-grow-1">
+          <div id="cb-contrast-list" class="d-flex flex-column gap-3"></div>
+
+          <button class="btn btn-outline-success btn-sm align-self-start" id="cb-add-contrast-btn">
+            <i class="fas fa-plus me-1"></i>Add Contrast
+          </button>
+
+          <div id="cb-equation-preview" class="cb-equation-preview d-none"></div>
+        </main>
+      </div>
+
+      <div class="modal-footer cb-modal-footer d-flex justify-content-between">
+        <div id="cb-status" class="small"></div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="cb-apply-btn">
+            <i class="fas fa-check me-1"></i>Apply to Model
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -156,6 +490,7 @@
 <script src="{{ url_for('static', filename='js/model_editor_transformer_apply.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/model_editor_transformer_events.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/model_editor_loading.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
 <script>
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
@@ -2849,8 +3184,12 @@
       };
     }
 
+    function isHrfAvailableForNode(){
+      return isFirstLevelNodeIndex(idx);
+    }
+
     function isHrfApplicableRegressor(regressor){
-      return String(regressor || '').trim() !== '1';
+      return isHrfAvailableForNode() && String(regressor || '').trim() !== '1';
     }
 
     function isFriendlyRegressorHrfEnabled(regressor){
@@ -2861,7 +3200,12 @@
       const normalized = String(regressor || '').trim();
       if (!normalized) return;
       if (!isHrfApplicableRegressor(normalized)) {
-        setStatus('Intercept is not HRF-convolved.', 'info');
+        setStatus(
+          isHrfAvailableForNode()
+            ? 'Intercept is not HRF-convolved.'
+            : 'HRF is only available for first-level design matrices.',
+          'info'
+        );
         return;
       }
 
@@ -3208,11 +3552,12 @@
 
         const hrfBtn = document.createElement('button');
         hrfBtn.type = 'button';
+        const hrfAllowed = isHrfAvailableForNode() && isHrfApplicableRegressor(reg);
         hrfBtn.className = isFriendlyRegressorHrfEnabled(reg)
           ? 'btn btn-sm btn-success'
           : 'btn btn-sm btn-outline-secondary';
         hrfBtn.textContent = isFriendlyRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
-        if (isHrfApplicableRegressor(reg)) {
+        if (hrfAllowed) {
           hrfBtn.addEventListener('click', (event)=>{
             event.stopPropagation();
             toggleFriendlyRegressorHrf(reg);
@@ -3220,6 +3565,9 @@
         } else {
           hrfBtn.disabled = true;
           hrfBtn.textContent = 'HRF n/a';
+          hrfBtn.title = isHrfAvailableForNode()
+            ? 'Intercept is not HRF-convolved'
+            : 'HRF is only available for first-level design matrices';
         }
 
         const removeBtn = document.createElement('button');
@@ -5937,22 +6285,32 @@
       panel.body.appendChild(card);
     });
 
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'btn btn-sm btn-outline-primary';
-    addBtn.textContent = 'Add Contrast';
-    addBtn.addEventListener('click', () => {
-      const defaultCondition = conditionSuggestions[0] || '';
-      node.Contrasts.push({
-        Name: '',
-        ConditionList: defaultCondition ? [defaultCondition] : [],
-        Weights: defaultCondition ? [1] : [],
-        Test: 't'
-      });
-      renderModelAccordionEditor();
-      setModelEditorStatus('Contrast added.', 'info');
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'btn btn-sm btn-outline-primary';
+    openBtn.innerHTML = '<i class="fas fa-puzzle-piece me-1"></i>Contrast Manager';
+    openBtn.addEventListener('click', () => {
+      if (typeof window.openContrastBuilder === 'function') {
+        window.openContrastBuilder(idx);
+        return;
+      }
+      selectNodeField(idx, 'Contrasts');
+      setModelEditorStatus('Contrast manager opened.', 'info');
     });
-    panel.actions.appendChild(addBtn);
+    panel.actions.appendChild(openBtn);
+
+    if (node.Contrasts.length) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'btn btn-sm btn-outline-danger';
+      clearBtn.textContent = 'Clear Contrasts';
+      clearBtn.addEventListener('click', () => {
+        node.Contrasts = [];
+        renderModelAccordionEditor();
+        setModelEditorStatus('Contrasts cleared.', 'info');
+      });
+      panel.actions.appendChild(clearBtn);
+    }
 
     container.appendChild(panel.panel);
   }
@@ -6642,8 +7000,12 @@
           modelObj.Software.SPM.ParametricModulations = normalizedEntries;
         }
 
+        function isHrfAvailableForCurrentNode(){
+          return isFirstLevelNodeIndex(nodeIndex);
+        }
+
         function isHrfApplicableRegressor(reg){
-          return String(reg || '').trim() !== '1';
+          return isHrfAvailableForCurrentNode() && String(reg || '').trim() !== '1';
         }
 
         function isRegressorHrfEnabled(reg){
@@ -6654,7 +7016,12 @@
           const normalized = String(reg || '').trim();
           if (!normalized) return;
           if (!isHrfApplicableRegressor(normalized)) {
-            setModelEditorStatus('Intercept is not HRF-convolved.', 'info');
+            setModelEditorStatus(
+              isHrfAvailableForCurrentNode()
+                ? 'Intercept is not HRF-convolved.'
+                : 'HRF is only available for first-level design matrices.',
+              'info'
+            );
             return;
           }
 
@@ -7041,11 +7408,12 @@
 
             const hrfBtn = document.createElement('button');
             hrfBtn.type = 'button';
+            const hrfAllowed = isHrfAvailableForCurrentNode() && isHrfApplicableRegressor(reg);
             hrfBtn.className = isRegressorHrfEnabled(reg)
               ? 'btn btn-sm btn-success'
               : 'btn btn-sm btn-outline-secondary';
             hrfBtn.textContent = isRegressorHrfEnabled(reg) ? 'HRF on' : 'HRF off';
-            if (isHrfApplicableRegressor(reg)) {
+            if (hrfAllowed) {
               hrfBtn.addEventListener('click', (event)=>{
                 event.stopPropagation();
                 toggleRegressorHrf(reg);
@@ -7053,6 +7421,9 @@
             } else {
               hrfBtn.disabled = true;
               hrfBtn.textContent = 'HRF n/a';
+              hrfBtn.title = isHrfAvailableForCurrentNode()
+                ? 'Intercept is not HRF-convolved'
+                : 'HRF is only available for first-level design matrices';
             }
 
             const delBtn = document.createElement('button');
@@ -7485,6 +7856,54 @@
       if (sel.field) modelEditorOpenPaths.add(`${nodePath}.${sel.field}`);
     }
   }
+    function getModelContentFromPath(modelPathValue) {
+      return fetch(`/file_content?path=${encodeURIComponent(modelPathValue)}`)
+        .then((response) => {
+          if (!response.ok) throw new Error('Model file not found');
+          return response.text();
+        })
+        .then((text) => {
+          const parsedModel = JSON.parse(text);
+          if (!Array.isArray(parsedModel.Nodes)) parsedModel.Nodes = [];
+          if (!Array.isArray(parsedModel.Edges)) parsedModel.Edges = [];
+          return parsedModel;
+        });
+    }
+
+    async function loadBidsTasksForModelEditor() {
+      await refreshInputEntityOptions(false);
+    }
+
+    async function loadInterestRegressorsForModelEditor(modelContent) {
+      await refreshModelEditorHintData(modelContent);
+    }
+
+    async function loadGroupByOptionsForModelEditor() {
+      return Promise.resolve();
+    }
+
+    const contrastBuilderController = window.BidspmAnalysisContrastBuilder?.createContrastBuilder({
+      alertImpl: window.alert.bind(window),
+      bootstrapImpl: window.bootstrap,
+      getElement: (id) => document.getElementById(id),
+      querySelectorAll: (selector) => document.querySelectorAll(selector),
+      nuisanceRegressorRx: NUISANCE_REGRESSOR_RX,
+      getModelDraft: () => modelEditorDraft,
+      setModelDraft: (draft) => {
+        modelEditorDraft = draft;
+      },
+      getInterestRegressors: () => window.modelEditorInterestRegressors || [],
+      getIncomingContrastNamesForNode,
+      getSuggestedConditionTermsForNode,
+      getModelPath: () => document.getElementById('model-path-input')?.value?.trim() || '',
+      getModelContentFromPath,
+      loadBidsTasksForModelEditor,
+      loadInterestRegressorsForModelEditor,
+      loadGroupByOptionsForModelEditor,
+      renderModelAccordionEditor
+    });
+    window.openContrastBuilder = contrastBuilderController?.openContrastBuilder;
+
   sectionsToRender.forEach(section => createModelSectionCard(editor, section)); updateModelJsonPreview(); }
 
   // expose saveModelEditor for the outer script

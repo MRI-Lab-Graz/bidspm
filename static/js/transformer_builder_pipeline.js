@@ -18,6 +18,7 @@
       loadModelForValidation,
       getSelectedModelPath,
       requiredOutputOps,
+      setSeedColumns,
     } = config || {};
 
     if (
@@ -231,6 +232,7 @@
         hint.innerHTML = '<i class="fas fa-plus-circle d-block mb-2" style="font-size:1.6rem;opacity:.4;"></i>Click an operation above to add it.<br>Drag columns from the left into the input fields.';
         pipeline.appendChild(hint);
       }
+      if (typeof setSeedColumns === 'function') setSeedColumns([]);
     }
 
     function setCardFieldValue(card, fieldName, value) {
@@ -368,6 +370,32 @@
         populateCardFromInstruction(card, instruction);
       });
 
+      if (typeof setSeedColumns === 'function') {
+        const sourceColSet = new Set(getSelectableColumns());
+        const seeded = [];
+        const seenSeeded = new Set();
+        const allNodes = Array.isArray(model?.Nodes) ? model.Nodes : [];
+        allNodes.forEach(node => {
+          const modelX = Array.isArray(node?.Model?.X) ? node.Model.X : [];
+          modelX.forEach(col => {
+            if (typeof col === 'string' && col !== '1' && col !== '0' && !sourceColSet.has(col) && !seenSeeded.has(col)) {
+              seenSeeded.add(col);
+              seeded.push({ name: col });
+            }
+          });
+          const contrasts = Array.isArray(node?.Contrasts) ? node.Contrasts : [];
+          contrasts.forEach(c => {
+            (Array.isArray(c?.ConditionList) ? c.ConditionList : []).forEach(cond => {
+              if (typeof cond === 'string' && !sourceColSet.has(cond) && !seenSeeded.has(cond)) {
+                seenSeeded.add(cond);
+                seeded.push({ name: cond });
+              }
+            });
+          });
+        });
+        setSeedColumns(seeded);
+      }
+
       updateGeneratedJSON();
 
       const nodeLabel = seed.nodeName
@@ -433,7 +461,7 @@
           <div>
             <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
             <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-            <div class="op-field-hint">Dummy-codes each column. Output names: <code>col_level</code>.</div>
+            <div class="op-field-hint">Dummy-codes each column. Output names: <code>level_col</code>.</div>
           </div>`;
         case 'Replace': return `
           <div>

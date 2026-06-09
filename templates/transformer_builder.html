@@ -417,6 +417,7 @@
     loadModelForValidation: (...args) => modelSelectionController.loadModelForValidation(...args),
     getSelectedModelPath: () => modelSelectionController.getSelectedModelPath(),
     requiredOutputOps: REQUIRED_OUTPUT_OPS,
+    setSeedColumns: columns => columnsController.setSeedColumns(columns),
   });
   modelSelectionController = modelSelectionFactory({
     projectModelsFile: PROJECT_MODELS_FILE,

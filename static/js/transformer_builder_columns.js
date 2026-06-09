@@ -101,6 +101,12 @@
       return combined;
     }
 
+    let seededGeneratedColumns = [];
+
+    function setSeedColumns(columns) {
+      seededGeneratedColumns = Array.isArray(columns) ? columns : [];
+    }
+
     function getGeneratedColumns() {
       const generated = [];
       const seen = new Set();
@@ -119,6 +125,13 @@
             derivedFrom: colInfo.derivedFrom || opType
           });
         });
+      });
+
+      seededGeneratedColumns.forEach(colInfo => {
+        const normalized = String(colInfo?.name || '').trim();
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        generated.push({ name: normalized, generated: true, sourceKind: 'model-existing', derivedFrom: 'loaded model' });
       });
 
       return generated;
@@ -199,7 +212,7 @@
 
       const col = columns[index];
       levelSets[index].forEach(level => {
-        buildFactorCombinations(columns, levelSets, index + 1, [...parts, col, level], names);
+        buildFactorCombinations(columns, levelSets, index + 1, [...parts, level, col], names);
       });
       return names;
     }
@@ -474,6 +487,7 @@
       normalizeColumnList,
       refreshPipelineColumnValues,
       renderColumnsPool,
+      setSeedColumns,
     });
   }
 
