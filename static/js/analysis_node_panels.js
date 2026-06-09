@@ -7,9 +7,32 @@
         const getParticipantsInfo = config.getParticipantsInfo || (() => ({ sample_values: {} }));
         const normalizeStringArray = config.normalizeStringArray || ((value) => Array.isArray(value) ? value : []);
         const applyDatasetNodePreset = config.applyDatasetNodePreset || (() => ({ message: 'Applied dataset preset.', tone: 'success' }));
+        const createTransformationsSchemaHint = config.createTransformationsSchemaHint || (() => null);
+        const createDummyContrastsSchemaHint = config.createDummyContrastsSchemaHint || (() => null);
+        const getIncomingContrastNamesForNode = config.getIncomingContrastNamesForNode || (() => []);
         const renderModelAccordionEditor = config.renderModelAccordionEditor || (() => {});
         const setModelEditorStatus = config.setModelEditorStatus || (() => {});
         const openTransformerBuilder = config.openTransformerBuilder || (() => {});
+        const openContrastBuilder = config.openContrastBuilder || (() => {});
+
+        function createPanelShell(title, helpText) {
+            const panel = document.createElement('div');
+            panel.className = 'd-flex flex-column gap-2 p-3 mb-2 border rounded bg-white';
+
+            const heading = document.createElement('div');
+            heading.className = 'fw-semibold';
+            heading.textContent = title;
+            panel.appendChild(heading);
+
+            if (helpText) {
+                const help = document.createElement('div');
+                help.className = 'small text-muted';
+                help.textContent = helpText;
+                panel.appendChild(help);
+            }
+
+            return panel;
+        }
 
         function createNodeMaskPicker(node) {
             const panel = document.createElement('div');
@@ -83,34 +106,232 @@
         }
 
         function createAddTransformationsPanel(node) {
-            const panel = document.createElement('div');
-            panel.className = 'd-flex flex-wrap gap-2 align-items-center p-2 mb-2 border rounded bg-white';
+            const panel = createPanelShell(
+                'Transformations',
+                'Use Transformer Builder to create and apply pipelines. Applying a pipeline does not auto-modify the Design Matrix; generated variables become selectable for Model.X.'
+            );
 
-            const hasTransformations = Boolean(
+            const transformations = (
                 node.Transformations
                 && typeof node.Transformations === 'object'
                 && !Array.isArray(node.Transformations)
-            );
+            ) ? node.Transformations : null;
 
-            const label = document.createElement('span');
-            label.className = 'small fw-bold text-muted me-1';
-            label.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Transformations:';
-            panel.appendChild(label);
+            if (!transformations) {
+                const empty = document.createElement('div');
+                empty.className = 'small text-muted';
+                empty.textContent = 'No transformer pipeline attached yet.';
+                panel.appendChild(empty);
+            } else {
+                const schemaHint = createTransformationsSchemaHint(transformations);
+                if (schemaHint) panel.appendChild(schemaHint);
 
-            const hint = document.createElement('span');
-            hint.className = 'small text-muted me-auto';
-            hint.textContent = hasTransformations
-                ? 'Transformer pipeline is attached to this node.'
-                : 'No transformer pipeline attached yet.';
-            panel.appendChild(hint);
+                const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
+                const explicitGenerated = normalizeStringArray(transformations.GeneratedColumns);
+                const generatedWrap = document.createElement('div');
+                generatedWrap.className = 'd-flex flex-wrap gap-2 align-items-center';
+
+                const transformerBadge = document.createElement('span');
+                transformerBadge.className = 'badge bg-success-subtle text-success-emphasis border';
+                transformerBadge.textContent = transformations.Transformer || 'bidspm';
+                generatedWrap.appendChild(transformerBadge);
+
+                const instructionBadge = document.createElement('span');
+                instructionBadge.className = 'badge bg-success-subtle text-success-emphasis border';
+                instructionBadge.textContent = `${instructionCount} instruction${instructionCount === 1 ? '' : 's'}`;
+                generatedWrap.appendChild(instructionBadge);
+
+                const generatedBadge = document.createElement('span');
+                generatedBadge.className = 'badge bg-warning-subtle text-warning-emphasis border';
+                generatedBadge.textContent = `${explicitGenerated.length} generated`;
+                generatedWrap.appendChild(generatedBadge);
+                panel.appendChild(generatedWrap);
+
+                if (explicitGenerated.length) {
+                    const pills = document.createElement('div');
+                    pills.className = 'd-flex flex-wrap gap-1';
+                    explicitGenerated.forEach((name) => {
+                        const pill = document.createElement('span');
+                        pill.className = 'badge bg-secondary-subtle text-secondary-emphasis border';
+                        pill.textContent = name;
+                        pills.appendChild(pill);
+                    });
+                    panel.appendChild(pills);
+                }
+            }
+
+            const actions = document.createElement('div');
+            actions.className = 'd-flex flex-wrap gap-2 align-items-center';
 
             const builderBtn = document.createElement('button');
             builderBtn.type = 'button';
-            builderBtn.className = 'btn btn-sm btn-outline-secondary';
-            builderBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Transformer Builder';
+            builderBtn.className = 'btn btn-sm btn-outline-primary';
+            builderBtn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Open Transformer Builder';
             builderBtn.title = 'Open the visual Transformer Builder';
             builderBtn.addEventListener('click', () => openTransformerBuilder(String(node?.Level || '').trim()));
-            panel.appendChild(builderBtn);
+            actions.appendChild(builderBtn);
+
+            if (transformations) {
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'btn btn-sm btn-outline-danger';
+                clearBtn.textContent = 'Remove Transformations';
+                clearBtn.addEventListener('click', () => {
+                    delete node.Transformations;
+                    renderModelAccordionEditor();
+                    setModelEditorStatus('Transformations removed.', 'info');
+                });
+                actions.appendChild(clearBtn);
+            }
+
+            panel.appendChild(actions);
+
+            return panel;
+        }
+
+        function createDummyContrastsPanel(node) {
+            const panel = createPanelShell(
+                'Dummy Contrasts',
+                'Generate simple baseline contrasts automatically when appropriate.'
+            );
+
+            const dummyContrasts = (
+                node.DummyContrasts
+                && typeof node.DummyContrasts === 'object'
+                && !Array.isArray(node.DummyContrasts)
+            ) ? node.DummyContrasts : null;
+
+            if (!dummyContrasts) {
+                const empty = document.createElement('div');
+                empty.className = 'small text-muted';
+                empty.textContent = 'No dummy contrasts configured for this node.';
+                panel.appendChild(empty);
+
+                const enableBtn = document.createElement('button');
+                enableBtn.type = 'button';
+                enableBtn.className = 'btn btn-sm btn-outline-secondary align-self-start';
+                enableBtn.textContent = 'Enable Dummy Contrasts';
+                enableBtn.addEventListener('click', () => {
+                    node.DummyContrasts = { Test: 't', Contrasts: [] };
+                    renderModelAccordionEditor();
+                    setModelEditorStatus('Dummy contrasts enabled.', 'info');
+                });
+                panel.appendChild(enableBtn);
+                return panel;
+            }
+
+            const schemaHint = createDummyContrastsSchemaHint(dummyContrasts);
+            if (schemaHint) panel.appendChild(schemaHint);
+
+            const row = document.createElement('div');
+            row.className = 'row g-2';
+
+            const testCol = document.createElement('div');
+            testCol.className = 'col-md-4';
+            const testLabel = document.createElement('label');
+            testLabel.className = 'form-label small mb-1';
+            testLabel.textContent = 'Test';
+            const testSelect = document.createElement('select');
+            testSelect.className = 'form-select form-select-sm';
+            ['pass', 't', 'F'].forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                testSelect.appendChild(option);
+            });
+            testSelect.value = dummyContrasts.Test || 't';
+            testSelect.addEventListener('change', () => {
+                dummyContrasts.Test = testSelect.value;
+                setModelEditorStatus('Dummy contrasts updated.', 'info');
+            });
+            testCol.appendChild(testLabel);
+            testCol.appendChild(testSelect);
+            row.appendChild(testCol);
+
+            const listCol = document.createElement('div');
+            listCol.className = 'col-md-8';
+            const listLabel = document.createElement('label');
+            listLabel.className = 'form-label small mb-1';
+            listLabel.textContent = 'Contrasts';
+            const listInput = document.createElement('input');
+            listInput.type = 'text';
+            listInput.className = 'form-control form-control-sm';
+            listInput.placeholder = 'trial_type.go, trial_type.stop';
+            listInput.value = normalizeStringArray(dummyContrasts.Contrasts).join(', ');
+            listInput.addEventListener('change', () => {
+                dummyContrasts.Contrasts = String(listInput.value || '')
+                    .split(',')
+                    .map((value) => value.trim())
+                    .filter(Boolean);
+                renderModelAccordionEditor();
+                setModelEditorStatus('Dummy contrasts updated.', 'info');
+            });
+            listCol.appendChild(listLabel);
+            listCol.appendChild(listInput);
+            row.appendChild(listCol);
+            panel.appendChild(row);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'btn btn-sm btn-outline-danger align-self-start';
+            removeBtn.textContent = 'Remove Dummy Contrasts';
+            removeBtn.addEventListener('click', () => {
+                delete node.DummyContrasts;
+                renderModelAccordionEditor();
+                setModelEditorStatus('Dummy contrasts removed.', 'info');
+            });
+            panel.appendChild(removeBtn);
+
+            return panel;
+        }
+
+        function createContrastManagerPanel(node, nodeIndex) {
+            const panel = createPanelShell(
+                'Contrasts',
+                'Define named contrasts over the current node design matrix.'
+            );
+
+            const contrastCount = Array.isArray(node.Contrasts) ? node.Contrasts.length : 0;
+            const incomingContrastNames = getIncomingContrastNamesForNode(nodeIndex);
+
+            const summary = document.createElement('div');
+            summary.className = 'small text-muted';
+            summary.textContent = contrastCount
+                ? `${contrastCount} explicit contrast${contrastCount === 1 ? '' : 's'} configured.`
+                : 'No explicit contrasts defined yet.';
+            panel.appendChild(summary);
+
+            if (incomingContrastNames.length) {
+                const incoming = document.createElement('div');
+                incoming.className = 'small text-muted';
+                incoming.textContent = `Incoming contrasts from upstream nodes: ${incomingContrastNames.join(', ')}`;
+                panel.appendChild(incoming);
+            }
+
+            const actions = document.createElement('div');
+            actions.className = 'd-flex flex-wrap gap-2 align-items-center';
+
+            const openBtn = document.createElement('button');
+            openBtn.type = 'button';
+            openBtn.className = 'btn btn-sm btn-outline-primary';
+            openBtn.innerHTML = '<i class="fas fa-puzzle-piece me-1"></i>Open Contrast Manager';
+            openBtn.addEventListener('click', () => openContrastBuilder(nodeIndex));
+            actions.appendChild(openBtn);
+
+            if (contrastCount) {
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'btn btn-sm btn-outline-danger';
+                clearBtn.textContent = 'Clear Contrasts';
+                clearBtn.addEventListener('click', () => {
+                    node.Contrasts = [];
+                    renderModelAccordionEditor();
+                    setModelEditorStatus('Contrasts cleared.', 'info');
+                });
+                actions.appendChild(clearBtn);
+            }
+
+            panel.appendChild(actions);
 
             return panel;
         }
@@ -341,7 +562,9 @@
 
         return {
             createAddTransformationsPanel,
+            createContrastManagerPanel,
             createDatasetModelPresetPanel,
+            createDummyContrastsPanel,
             createNodeMaskPicker
         };
     }

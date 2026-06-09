@@ -923,15 +923,21 @@
 
     const {
         createAddTransformationsPanel,
+        createContrastManagerPanel,
         createDatasetModelPresetPanel,
+        createDummyContrastsPanel,
         createNodeMaskPicker
     } = window.BidspmAnalysisNodePanels.createNodePanelBuilders({
         alertImpl: window.alert.bind(window),
         fetchImpl: window.fetch.bind(window),
+        createDummyContrastsSchemaHint,
+        createTransformationsSchemaHint,
         getByPath: (path) => getByPath(modelEditorDraft, path),
         getElement: (id) => document.getElementById(id),
+        getIncomingContrastNamesForNode,
         getParticipantsInfo: () => getModelEditorParticipantsInfo(),
         normalizeStringArray,
+        openContrastBuilder,
         applyDatasetNodePreset,
         renderModelAccordionEditor,
         setModelEditorStatus,
@@ -2417,14 +2423,20 @@
             // Mask quick-set panel for Node objects
             if (/^Nodes\[\d+\]$/.test(basePath)) {
                 container.appendChild(createNodeMaskPicker(node));
-                // Builder launch panel is always available for transformer workflows.
                 container.appendChild(createAddTransformationsPanel(node, basePath));
+                container.appendChild(createDummyContrastsPanel(node, basePath));
+                const nodeMatch = String(basePath).match(/^Nodes\[(\d+)\]$/);
+                const nodeIdx = nodeMatch ? Number(nodeMatch[1]) : -1;
+                container.appendChild(createContrastManagerPanel(node, nodeIdx));
             }
 
             const objWrap = document.createElement('div');
             objWrap.className = 'accordion';
             Object.entries(node).forEach(([key, value]) => {
                 if (/^Nodes\[\d+\]$/.test(basePath) && (key === 'Level' || key === 'Name')) {
+                    return;
+                }
+                if (/^Nodes\[\d+\]$/.test(basePath) && ['Transformations', 'DummyContrasts', 'Contrasts'].includes(key)) {
                     return;
                 }
                 if (isManagedHrfObject && key === 'Variables') {
