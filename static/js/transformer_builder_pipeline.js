@@ -461,7 +461,7 @@
           <div>
             <div class="op-field-label">Input Column(s) <span class="text-danger">*</span></div>
             <div class="col-drop-zone" data-field="Input" data-mode="multi"></div>
-            <div class="op-field-hint">Dummy-codes each column. Output names: <code>level_col</code>.</div>
+            <div class="op-field-hint">Dummy-codes each column. Output names: <code>col_level</code>.</div>
           </div>`;
         case 'Replace': return `
           <div>

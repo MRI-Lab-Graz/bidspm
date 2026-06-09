@@ -14,6 +14,7 @@
         const setModelEditorStatus = config.setModelEditorStatus || (() => {});
         const openTransformerBuilder = config.openTransformerBuilder || (() => {});
         const openContrastBuilder = config.openContrastBuilder || (() => {});
+        const getModelEdges = config.getModelEdges || (() => []);
 
         function createPanelShell(title, helpText) {
             const panel = document.createElement('div');
@@ -560,11 +561,82 @@
             return panel;
         }
 
+        function createNodeIdentityEditor(node) {
+            const panel = document.createElement('div');
+            panel.className = 'd-flex flex-wrap gap-3 align-items-end p-2 mb-2 border rounded bg-white';
+
+            const LEVELS = ['Run', 'Session', 'Subject', 'Dataset'];
+
+            const levelGroup = document.createElement('div');
+            levelGroup.className = 'd-flex flex-column gap-1';
+            const levelLabel = document.createElement('label');
+            levelLabel.className = 'small fw-bold text-muted mb-0';
+            levelLabel.textContent = 'Level';
+            const levelSel = document.createElement('select');
+            levelSel.className = 'form-select form-select-sm';
+            LEVELS.forEach(lvl => {
+                const opt = document.createElement('option');
+                opt.value = lvl;
+                opt.textContent = lvl;
+                opt.selected = String(node.Level || '').toLowerCase() === lvl.toLowerCase();
+                levelSel.appendChild(opt);
+            });
+            levelSel.addEventListener('change', () => {
+                node.Level = levelSel.value;
+                renderModelAccordionEditor();
+                setModelEditorStatus('Node Level updated.', 'info');
+            });
+            levelGroup.appendChild(levelLabel);
+            levelGroup.appendChild(levelSel);
+            panel.appendChild(levelGroup);
+
+            const nameGroup = document.createElement('div');
+            nameGroup.className = 'd-flex flex-column gap-1 flex-grow-1';
+            const nameLabel = document.createElement('label');
+            nameLabel.className = 'small fw-bold text-muted mb-0';
+            nameLabel.textContent = 'Name';
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'form-control form-control-sm';
+            nameInput.value = node.Name || '';
+            nameInput.placeholder = 'Node name (e.g. subject_level_2)';
+            nameInput.addEventListener('change', () => {
+                const val = nameInput.value.trim();
+                if (!val) return;
+                const oldName = node.Name;
+                node.Name = val;
+                if (oldName && oldName !== val) {
+                    let edgeUpdates = 0;
+                    getModelEdges().forEach(edge => {
+                        if (edge && typeof edge === 'object') {
+                            if (edge.Source === oldName) { edge.Source = val; edgeUpdates++; }
+                            if (edge.Destination === oldName) { edge.Destination = val; edgeUpdates++; }
+                        }
+                    });
+                    setModelEditorStatus(
+                        edgeUpdates > 0
+                            ? `Node renamed to "${val}". Updated ${edgeUpdates} edge reference${edgeUpdates === 1 ? '' : 's'}.`
+                            : `Node renamed to "${val}".`,
+                        'info'
+                    );
+                } else {
+                    setModelEditorStatus('Node Name updated.', 'info');
+                }
+                renderModelAccordionEditor();
+            });
+            nameGroup.appendChild(nameLabel);
+            nameGroup.appendChild(nameInput);
+            panel.appendChild(nameGroup);
+
+            return panel;
+        }
+
         return {
             createAddTransformationsPanel,
             createContrastManagerPanel,
             createDatasetModelPresetPanel,
             createDummyContrastsPanel,
+            createNodeIdentityEditor,
             createNodeMaskPicker
         };
     }

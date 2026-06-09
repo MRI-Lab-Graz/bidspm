@@ -926,6 +926,7 @@
         createContrastManagerPanel,
         createDatasetModelPresetPanel,
         createDummyContrastsPanel,
+        createNodeIdentityEditor,
         createNodeMaskPicker
     } = window.BidspmAnalysisNodePanels.createNodePanelBuilders({
         alertImpl: window.alert.bind(window),
@@ -941,7 +942,8 @@
         applyDatasetNodePreset,
         renderModelAccordionEditor,
         setModelEditorStatus,
-        openTransformerBuilder
+        openTransformerBuilder,
+        getModelEdges: () => Array.isArray(modelEditorDraft?.Edges) ? modelEditorDraft.Edges : []
     });
 
     function getBranchBadgeDescriptors(path, value) {
@@ -1513,10 +1515,8 @@
                 setByPath(modelEditorDraft, path, newValue);
                 if (isModelXEntry) {
                     syncModelXHrfVariables(path);
-                    renderModelAccordionEditor();
-                    return;
                 }
-                updateModelJsonPreview();
+                renderModelAccordionEditor();
             });
         }
 
@@ -2422,6 +2422,7 @@
 
             // Mask quick-set panel for Node objects
             if (/^Nodes\[\d+\]$/.test(basePath)) {
+                container.appendChild(createNodeIdentityEditor(node));
                 container.appendChild(createNodeMaskPicker(node));
                 container.appendChild(createAddTransformationsPanel(node, basePath));
                 container.appendChild(createDummyContrastsPanel(node, basePath));

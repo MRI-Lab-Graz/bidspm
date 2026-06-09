@@ -212,7 +212,7 @@
 
       const col = columns[index];
       levelSets[index].forEach(level => {
-        buildFactorCombinations(columns, levelSets, index + 1, [...parts, level, col], names);
+        buildFactorCombinations(columns, levelSets, index + 1, [...parts, col, level], names);
       });
       return names;
     }
