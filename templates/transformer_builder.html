@@ -310,12 +310,12 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/transformer_builder_path_utils.js') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_model_selection.js') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_browser.js') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_scan_preview.js') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_columns.js') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_pipeline.js') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_path_utils.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_model_selection.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_browser.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_scan_preview.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_columns.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_pipeline.js', v='20260609a') }}"></script>
 <script>
 (function () {
   'use strict';
@@ -465,6 +465,10 @@
     renderColumnsPool: () => columnsController.renderColumnsPool(),
     refreshPipelineColumnValues: () => columnsController.refreshPipelineColumnValues(),
     scheduleLiveModelValidation,
+    launchContext,
+    getTargetLevels,
+    loadModelForValidation: (...args) => modelSelectionController.loadModelForValidation(...args),
+    getSelectedModelPath: () => modelSelectionController.getSelectedModelPath(),
   });
 
   if (!document.getElementById('input-bids-dir').value.trim() && launchContext?.bidsDir) {

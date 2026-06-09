@@ -150,12 +150,12 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_launch_context.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_transformer_apply.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_transformer_events.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_loading.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_launch_context.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_apply.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_events.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_loading.js', v='20260609a') }}"></script>
 <script>
 (function(){
   const $ = (sel,root=document)=>root.querySelector(sel);
@@ -672,6 +672,10 @@
   }
 
   window.getTransformerModelXRegressors = getTransformerModelXRegressors;
+  function getTransformerModelXRegressorsForNode(node) {
+    return getTransformerModelXRegressors(node);
+  }
+  window.getTransformerModelXRegressorsForNode = getTransformerModelXRegressorsForNode;
   const {
     consumeTransformerPayload,
     consumePendingTransformerPayload
@@ -873,6 +877,13 @@
     }
     return model;
   }
+
+  function refreshRawEditorFromSelection(){
+    if (!rawEditor) return;
+    const value = getCurrentSelectionValue();
+    rawEditor.value = JSON.stringify(value === undefined ? null : value, null, 2);
+  }
+  window.refreshRawEditorFromSelection = refreshRawEditorFromSelection;
 
   async function refreshInputEntityOptions(showStatusMessage = false){
     await refreshDatasetInputEntities(false);
@@ -2139,10 +2150,10 @@
     }
 
     const node = cloneJson(defaultArrayItemForPath('Nodes'));
-    node.Name = getUniqueNodeName('run_level');
+    node.Name = getUniqueNodeName(String(node.Level || '').trim() === 'Run' ? 'run_level' : 'subject_level');
     return {
       node,
-      message: 'Added run-level node.',
+      message: String(node.Level || '').trim() === 'Run' ? 'Added run-level node.' : 'Added higher-level node.',
       tone: 'success',
       selectField: 'Model'
     };
@@ -2730,9 +2741,17 @@
     xTitle.textContent = 'Design Matrix Regressors (Model.X)';
     xCard.appendChild(xTitle);
 
+    const xHint = document.createElement('div');
+    xHint.className = 'small text-muted';
+    xHint.textContent = isFirstLevelNodeIndex(idx)
+      ? 'First node: use event-derived regressors, transformer outputs, and nuisance confounds as needed.'
+      : 'Downstream nodes: use incoming contrasts, grouping variables such as run/session/subject, and participants.tsv variables.';
+    xCard.appendChild(xHint);
+
     const eventSamples = (window.modelEditorEventSamples && typeof window.modelEditorEventSamples === 'object')
       ? window.modelEditorEventSamples
       : { trial_type: [], condition: [] };
+    const isFirstLevelNode = isFirstLevelNodeIndex(idx);
     const selectedTasks = normalizeStringArray(modelEditorDraft?.Input?.task);
     const hasSingleSelectedTask = selectedTasks.length === 1;
     const trialTypeRegressors = hasSingleSelectedTask
@@ -2745,6 +2764,7 @@
     const hasTransformerPipeline = Boolean(node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations));
     const confoundColumns = normalizeStringArray(window.modelEditorConfoundColumns);
     const transRotConfounds = normalizeStringArray(window.modelEditorTransRotConfounds);
+    const higherLevelRegressors = getHigherLevelRegressorTermsForNode(idx, false);
 
     function getRunConditionRegressorsForModulation(){
       return normalizeStringArray(modelObj.X)
@@ -2927,100 +2947,35 @@
       if (droppedValue) addModelXRegressor(droppedValue, targetIndex);
     }
 
-    const trialPoolCard = document.createElement('div');
-    trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
-    const trialPoolTitle = document.createElement('div');
-    trialPoolTitle.className = 'small fw-bold mb-1';
-    trialPoolTitle.textContent = 'Trial Types from events.tsv';
-    trialPoolCard.appendChild(trialPoolTitle);
+    if (isFirstLevelNode) {
+      const trialPoolCard = document.createElement('div');
+      trialPoolCard.className = 'border rounded p-2 bg-light-subtle';
+      const trialPoolTitle = document.createElement('div');
+      trialPoolTitle.className = 'small fw-bold mb-1';
+      trialPoolTitle.textContent = 'Trial Types from events.tsv';
+      trialPoolCard.appendChild(trialPoolTitle);
 
-    const trialPoolHint = document.createElement('div');
-    trialPoolHint.className = 'small text-muted mb-2';
-    trialPoolHint.textContent = hasSingleSelectedTask
-      ? 'Drag or click badges into the Design Matrix space below. Use arrow buttons to reorder quickly.'
-      : 'Select exactly one task in Input.task to load task-specific trial types.';
-    trialPoolCard.appendChild(trialPoolHint);
+      const trialPoolHint = document.createElement('div');
+      trialPoolHint.className = 'small text-muted mb-2';
+      trialPoolHint.textContent = hasSingleSelectedTask
+        ? 'Drag or click badges into the Design Matrix space below. Use arrow buttons to reorder quickly.'
+        : 'Select exactly one task in Input.task to load task-specific trial types.';
+      trialPoolCard.appendChild(trialPoolHint);
 
-    const trialPool = document.createElement('div');
-    trialPool.className = 'modelx-pool';
-    if (!trialTypeRegressors.length) {
-      const empty = document.createElement('div');
-      empty.className = 'small text-muted';
-      empty.textContent = hasSingleSelectedTask
-        ? 'No trial_type values detected. Check BIDS folder and events files.'
-        : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
-      trialPool.appendChild(empty);
-    } else {
-      trialTypeRegressors.forEach(reg => {
-        const badge = document.createElement('button');
-        badge.type = 'button';
-        badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
-        badge.textContent = reg;
-        badge.draggable = true;
-        badge.addEventListener('click', ()=> addModelXRegressor(reg));
-        badge.addEventListener('dragstart', (event)=>{
-          event.dataTransfer.effectAllowed = 'copy';
-          event.dataTransfer.setData('application/x-modelx-regressor', reg);
-          event.dataTransfer.setData('text/plain', reg);
-        });
-        trialPool.appendChild(badge);
-      });
-    }
-    trialPoolCard.appendChild(trialPool);
-    xCard.appendChild(trialPoolCard);
-
-    if (conditionRegressors.length) {
-      const condPool = document.createElement('div');
-      condPool.className = 'modelx-pool';
-      const condLabel = document.createElement('div');
-      condLabel.className = 'small text-muted w-100';
-      condLabel.textContent = 'Optional condition.* regressors';
-      condPool.appendChild(condLabel);
-      conditionRegressors.forEach(reg => {
-        const badge = document.createElement('button');
-        badge.type = 'button';
-        badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
-        badge.textContent = reg;
-        badge.draggable = true;
-        badge.addEventListener('click', ()=> addModelXRegressor(reg));
-        badge.addEventListener('dragstart', (event)=>{
-          event.dataTransfer.effectAllowed = 'copy';
-          event.dataTransfer.setData('application/x-modelx-regressor', reg);
-          event.dataTransfer.setData('text/plain', reg);
-        });
-        condPool.appendChild(badge);
-      });
-      xCard.appendChild(condPool);
-    }
-
-    if (transformerRegressors.length || hasTransformerPipeline) {
-      const transformerCard = document.createElement('div');
-      transformerCard.className = 'border rounded p-2 bg-white';
-
-      const transformerTitle = document.createElement('div');
-      transformerTitle.className = 'small fw-bold mb-1';
-      transformerTitle.textContent = 'Transformer-generated regressors';
-      transformerCard.appendChild(transformerTitle);
-
-      const transformerHint = document.createElement('div');
-      transformerHint.className = 'small text-muted mb-2';
-      transformerHint.textContent = transformerRegressors.length
-        ? 'Outputs from the attached transformer pipeline. Drag or click badges into the Design Matrix space.'
-        : 'No generated transformer columns detected yet. Define Output names in Transformer Builder to reuse them in Model.X.';
-      transformerCard.appendChild(transformerHint);
-
-      const transformerPool = document.createElement('div');
-      transformerPool.className = 'modelx-pool';
-      if (!transformerRegressors.length) {
+      const trialPool = document.createElement('div');
+      trialPool.className = 'modelx-pool';
+      if (!trialTypeRegressors.length) {
         const empty = document.createElement('div');
         empty.className = 'small text-muted';
-        empty.textContent = 'Transformer outputs will appear here after you define generated columns.';
-        transformerPool.appendChild(empty);
+        empty.textContent = hasSingleSelectedTask
+          ? 'No trial_type values detected. Check BIDS folder and events files.'
+          : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
+        trialPool.appendChild(empty);
       } else {
-        transformerRegressors.forEach(reg => {
+        trialTypeRegressors.forEach(reg => {
           const badge = document.createElement('button');
           badge.type = 'button';
-          badge.className = 'btn btn-sm btn-outline-success modelx-reg-badge';
+          badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
           badge.textContent = reg;
           badge.draggable = true;
           badge.addEventListener('click', ()=> addModelXRegressor(reg));
@@ -3029,60 +2984,126 @@
             event.dataTransfer.setData('application/x-modelx-regressor', reg);
             event.dataTransfer.setData('text/plain', reg);
           });
-          transformerPool.appendChild(badge);
+          trialPool.appendChild(badge);
         });
       }
-      transformerCard.appendChild(transformerPool);
-      xCard.appendChild(transformerCard);
-    }
+      trialPoolCard.appendChild(trialPool);
+      xCard.appendChild(trialPoolCard);
 
-    const nuisanceCard = document.createElement('div');
-    nuisanceCard.className = 'border rounded p-2';
-    const nuisanceTitle = document.createElement('div');
-    nuisanceTitle.className = 'small fw-bold mb-1';
-    nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
-    nuisanceCard.appendChild(nuisanceTitle);
-
-    const nuisanceHint = document.createElement('div');
-    nuisanceHint.className = 'small text-muted mb-2';
-    nuisanceHint.textContent = confoundColumns.length
-      ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
-      : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
-    nuisanceCard.appendChild(nuisanceHint);
-
-    const nuisanceInModelX = normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor);
-    if (nuisanceInModelX.length) {
-      const warning = document.createElement('div');
-      warning.className = 'alert alert-warning py-1 small mb-2';
-      warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
-      nuisanceCard.appendChild(warning);
-
-      const removeNuisanceBtn = document.createElement('button');
-      removeNuisanceBtn.type = 'button';
-      removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
-      removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
-      removeNuisanceBtn.addEventListener('click', ()=>{
-        modelObj.X = normalizeStringArray(modelObj.X).filter(reg => !isLikelyNuisanceRegressor(reg));
-        rerenderModelX('Removed nuisance regressors from Model.X.', 'info');
-      });
-      nuisanceCard.appendChild(removeNuisanceBtn);
-    }
-
-    const nuisancePicker = buildNuisanceRegressorPicker({
-      confoundColumns,
-      curatedColumns: transRotConfounds.length ? transRotConfounds : DEFAULT_TRANS_ROT_REGRESSORS,
-      getSelectedSet: () => new Set(normalizeStringArray(modelObj.X)),
-      onAdd: (reg) => addModelXRegressor(reg),
-      onRemove: (reg) => {
-        if (!Array.isArray(modelObj.X)) return;
-        const next = modelObj.X.filter(value => value !== reg);
-        if (next.length === modelObj.X.length) return;
-        modelObj.X = next;
-        rerenderModelX(`Removed ${reg} from Model.X`, 'info');
+      if (conditionRegressors.length) {
+        const condPool = document.createElement('div');
+        condPool.className = 'modelx-pool';
+        const condLabel = document.createElement('div');
+        condLabel.className = 'small text-muted w-100';
+        condLabel.textContent = 'Optional condition.* regressors';
+        condPool.appendChild(condLabel);
+        conditionRegressors.forEach(reg => {
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
+          badge.textContent = reg;
+          badge.draggable = true;
+          badge.addEventListener('click', ()=> addModelXRegressor(reg));
+          badge.addEventListener('dragstart', (event)=>{
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+            event.dataTransfer.setData('text/plain', reg);
+          });
+          condPool.appendChild(badge);
+        });
+        xCard.appendChild(condPool);
       }
-    });
-    nuisanceCard.appendChild(nuisancePicker);
-    xCard.appendChild(nuisanceCard);
+    } else {
+      const higherLevelCard = document.createElement('div');
+      higherLevelCard.className = 'border rounded p-2 bg-light-subtle';
+      const higherLevelTitle = document.createElement('div');
+      higherLevelTitle.className = 'small fw-bold mb-1';
+      higherLevelTitle.textContent = 'Higher-level regressors';
+      higherLevelCard.appendChild(higherLevelTitle);
+
+      const higherLevelHint = document.createElement('div');
+      higherLevelHint.className = 'small text-muted mb-2';
+      higherLevelHint.textContent = 'Downstream nodes expose grouping variables such as run/session/subject, upstream contrasts, and participants.tsv covariates.';
+      higherLevelCard.appendChild(higherLevelHint);
+
+      const higherLevelPool = document.createElement('div');
+      higherLevelPool.className = 'modelx-pool';
+      if (!higherLevelRegressors.length) {
+        const empty = document.createElement('div');
+        empty.className = 'small text-muted';
+        empty.textContent = 'No higher-level regressors detected yet. Add GroupBy entries, upstream contrasts, or participants.tsv columns.';
+        higherLevelPool.appendChild(empty);
+      } else {
+        higherLevelRegressors.forEach(reg => {
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
+          badge.textContent = reg;
+          badge.draggable = true;
+          badge.addEventListener('click', ()=> addModelXRegressor(reg));
+          badge.addEventListener('dragstart', (event)=>{
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-modelx-regressor', reg);
+            event.dataTransfer.setData('text/plain', reg);
+          });
+          higherLevelPool.appendChild(badge);
+        });
+      }
+      higherLevelCard.appendChild(higherLevelPool);
+      xCard.appendChild(higherLevelCard);
+    }
+
+    if (transformerRegressors.length || hasTransformerPipeline) {
+      const transformerCard = document.createElement('div');
+      transformerCard.className = 'border rounded p-2 bg-white';
+
+      if (isFirstLevelNode) {
+        const nuisanceCard = document.createElement('div');
+        nuisanceCard.className = 'border rounded p-2';
+        const nuisanceTitle = document.createElement('div');
+        nuisanceTitle.className = 'small fw-bold mb-1';
+        nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
+        nuisanceCard.appendChild(nuisanceTitle);
+
+        const nuisanceHint = document.createElement('div');
+        nuisanceHint.className = 'small text-muted mb-2';
+        nuisanceHint.textContent = confoundColumns.length
+          ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
+          : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
+        nuisanceCard.appendChild(nuisanceHint);
+
+        const nuisanceInModelX = normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor);
+        if (nuisanceInModelX.length) {
+          const warning = document.createElement('div');
+          warning.className = 'alert alert-warning py-1 small mb-2';
+          warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+          nuisanceCard.appendChild(warning);
+
+          const removeNuisanceBtn = document.createElement('button');
+          removeNuisanceBtn.type = 'button';
+          removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+          removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+          removeNuisanceBtn.addEventListener('click', ()=>{
+            modelObj.X = normalizeStringArray(modelObj.X).filter(reg => !isLikelyNuisanceRegressor(reg));
+            rerenderModelX('Removed nuisance regressors from Model.X.', 'info');
+          });
+          nuisanceCard.appendChild(removeNuisanceBtn);
+        }
+
+        const nuisancePicker = buildNuisanceRegressorPicker({
+          confoundColumns,
+          curatedColumns: transRotConfounds,
+          getSelectedSet: ()=> new Set(normalizeStringArray(modelObj.X)),
+          onAdd: reg => addModelXRegressor(reg),
+          onRemove: reg => {
+            modelObj.X = normalizeStringArray(modelObj.X).filter(value => value !== reg);
+            rerenderModelX(`Removed ${reg} from Model.X`, 'info');
+          }
+        });
+        nuisanceCard.appendChild(nuisancePicker);
+        xCard.appendChild(nuisanceCard);
+      }
+    }
 
     const xListTitle = document.createElement('div');
     xListTitle.className = 'small fw-bold';
@@ -4080,7 +4101,13 @@
   function isNuisanceRegressor(value) { if (typeof value !== 'string') return false; return NUISANCE_REGRESSOR_RX.test(value.trim()); }
 
   function defaultArrayItemForPath(path) {
-    if (path === 'Nodes') return { Level: 'Run', Name: 'subject_level', GroupBy: ['run','subject'], Model: { X: ['trial_type'], HRF: { Variables: ['trial_type'], Model: 'spm' }, Type: 'glm' }, Contrasts: [] };
+    if (path === 'Nodes') {
+      const existingNodeCount = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes.length : 0;
+      if (existingNodeCount > 0) {
+        return { Level: 'Subject', Name: 'subject_level', GroupBy: ['contrast','subject'], Model: { X: ['1'], Type: 'glm' }, DummyContrasts: { Test: 't' }, Contrasts: [] };
+      }
+      return { Level: 'Run', Name: 'run_level', GroupBy: ['run','subject'], Model: { X: ['trial_type'], HRF: { Variables: ['trial_type'], Model: 'spm' }, Type: 'glm' }, Contrasts: [] };
+    }
     if (path === 'Edges') return getEdgeDefaultValue();
     if (/\.Contrasts$/.test(path)) {
       const defaultCondition = getDefaultConditionTokenForPath(path);
@@ -4093,7 +4120,10 @@
     }
     if (/\.ConditionList$/.test(path)) return getDefaultConditionTokenForPath(path);
     if (/\.Weights$/.test(path)) return 0;
-    if (/\.X$/.test(path)) return modelEditorInterestRegressors[0] || 'trial_type';
+    if (/\.X$/.test(path)) {
+      const suggestedRegressors = getSuggestedRegressorsForModelXPath(path);
+      return suggestedRegressors[0] || 'trial_type';
+    }
     if (/\.GroupBy$/.test(path)) return 'run';
     if (/\.Variables$/.test(path)) return 'trial_type';
     return '';
@@ -4114,10 +4144,10 @@
     const keyEl = document.createElement('span'); keyEl.className='json-key fw-semibold'; keyEl.textContent = label; row.appendChild(keyEl);
     const inputWrap = document.createElement('div'); inputWrap.className='json-inline-value';
     const pathEl = document.createElement('div'); pathEl.className='json-path mb-1'; pathEl.textContent = path; pathEl.style.display = showModelTechnicalPaths ? 'block' : 'none'; inputWrap.appendChild(pathEl);
-    const isModelXEntry = isModelXPath(path); const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path); const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && modelEditorInterestRegressors.length>0;
+    const isModelXEntry = isModelXPath(path); const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path); const modelXPathMatch = path.match(/^(.*)\[\d+\]$/); const modelXArrayPath = modelXPathMatch ? modelXPathMatch[1] : ''; const scopedInterestRegressors = isModelXEntry ? getSuggestedRegressorsForModelXPath(modelXArrayPath) : []; const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && scopedInterestRegressors.length>0;
     let input;
     if (isGroupByEntry) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([...(modelEditorGroupByOptions||[]), value])); options.forEach(optVal=>{ const opt = document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value = String(value); }
-    else if (useInterestDropdown) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([value, ...modelEditorInterestRegressors])); options.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value=value; }
+    else if (useInterestDropdown) { input = document.createElement('select'); input.className='form-select form-select-sm'; const options = Array.from(new Set([value, ...scopedInterestRegressors])); options.forEach(optVal=>{ const opt=document.createElement('option'); opt.value=optVal; opt.textContent=optVal; input.appendChild(opt); }); input.value=value; }
     else if (typeof value === 'boolean') { input = document.createElement('select'); input.className='form-select form-select-sm'; input.innerHTML = '<option value="true">true</option><option value="false">false</option>'; input.value = value ? 'true' : 'false'; }
     else if (typeof value === 'number') { input = document.createElement('input'); input.type='number'; input.step='any'; input.className='form-control form-control-sm font-monospace'; input.value = String(value); }
     else { input = document.createElement('input'); input.type='text'; input.className='form-control form-control-sm font-monospace'; input.value = value===null ? '' : String(value); }
@@ -5252,13 +5282,80 @@
     return Array.from(new Set(incoming));
   }
 
+  function getParticipantRegressorTerms(includeIntercept = true) {
+    const participantsInfo = getModelEditorParticipantsInfo();
+    const categoricalColumns = normalizeEditorStringArray(participantsInfo.categorical_columns);
+    const numericColumns = normalizeEditorStringArray(participantsInfo.numeric_columns);
+    const baseTerms = includeIntercept ? ['1'] : [];
+    return Array.from(new Set([...baseTerms, ...categoricalColumns, ...numericColumns])).filter(Boolean);
+  }
+
+  function isFirstLevelNodeIndex(nodeIdx) {
+    return Number(nodeIdx) === 0;
+  }
+
+  function getHigherLevelMetadataTerms(node) {
+    const sharedInputEntityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
+      ? window.modelEditorInputEntityValues
+      : {};
+    const knownEntityTerms = Object.entries(sharedInputEntityValues)
+      .filter(([key, values]) => key !== 'space' && Array.isArray(values) && values.length)
+      .map(([key]) => key);
+    const groupByTerms = normalizeEditorStringArray(node?.GroupBy).filter(term => term && term !== 'contrast');
+    return Array.from(new Set([...groupByTerms, ...knownEntityTerms])).filter(Boolean);
+  }
+
+  function getHigherLevelRegressorTermsForNode(nodeIdx, includeIntercept = true) {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const node = nodes[nodeIdx] || {};
+    const baseTerms = includeIntercept ? ['1'] : [];
+    return Array.from(new Set([
+      ...baseTerms,
+      ...getHigherLevelMetadataTerms(node),
+      ...getParticipantRegressorTerms(false),
+      ...getIncomingContrastNamesForNode(nodeIdx)
+    ])).filter(Boolean);
+  }
+
+  function getSuggestedModelTermsForNode(nodeIdx) {
+    const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
+    const node = nodes[nodeIdx] || {};
+    const level = String(node?.Level || '').trim().toLowerCase();
+    const transformerRegressors = getTransformerModelXRegressorsForNode(node);
+
+    if (level === 'dataset') {
+      return getParticipantRegressorTerms(true);
+    }
+
+    if (isFirstLevelNodeIndex(nodeIdx)) {
+      return Array.from(new Set([
+        ...normalizeEditorStringArray(modelEditorInterestRegressors),
+        ...transformerRegressors
+      ])).filter(Boolean);
+    }
+
+    return Array.from(new Set([
+      ...getHigherLevelRegressorTermsForNode(nodeIdx, true),
+      ...transformerRegressors
+    ])).filter(Boolean);
+  }
+
   function getSuggestedConditionTermsForNode(nodeIdx) {
     const nodes = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [];
     const node = nodes[nodeIdx] || {};
     const incomingContrasts = getIncomingContrastNamesForNode(nodeIdx);
     const modelTerms = normalizeEditorStringArray(node.Model?.X).filter(term => term !== '1');
-    const localFallback = normalizeEditorStringArray(modelEditorInterestRegressors);
+    const localFallback = getSuggestedModelTermsForNode(nodeIdx).filter(term => term !== '1');
     return Array.from(new Set([...incomingContrasts, ...modelTerms, ...localFallback]));
+  }
+
+  function getSuggestedRegressorsForModelXPath(arrayPath) {
+    const match = String(arrayPath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
+    if (!match) {
+      return Array.from(new Set(modelEditorInterestRegressors || [])).filter(Boolean);
+    }
+
+    return getSuggestedModelTermsForNode(Number(match[1]));
   }
 
   function getDefaultConditionTokenForPath(path) {
@@ -5418,7 +5515,10 @@
     }).filter(Boolean);
 
     const fromTransformGenerated = normalizeEditorStringArray(node?.Transformations?.GeneratedColumns);
-    const fromGlobalPool = normalizeEditorStringArray(window.modelEditorInterestRegressors)
+    const nodeIdx = Array.isArray(modelEditorDraft?.Nodes)
+      ? modelEditorDraft.Nodes.findIndex(candidate => candidate === node)
+      : -1;
+    const fromScopedPool = (nodeIdx >= 0 ? getSuggestedModelTermsForNode(nodeIdx) : normalizeEditorStringArray(window.modelEditorInterestRegressors))
       .map(value => {
         if (value.startsWith('trial_type.')) return 'trial_type';
         if (value.startsWith('condition.')) return 'condition';
@@ -5430,7 +5530,7 @@
       ...inferredEventColumns,
       ...fromModelX,
       ...fromTransformGenerated,
-      ...fromGlobalPool
+      ...fromScopedPool
     ])).sort((a, b) => a.localeCompare(b));
   }
 
@@ -6431,8 +6531,9 @@
           ? normalizeList(eventSamples.condition).map(v => `condition.${v}`)
           : [];
         const nodeMatch = String(basePath || '').match(/^Nodes\[(\d+)\]\.Model\.X$/);
+        const nodeIndex = nodeMatch ? Number(nodeMatch[1]) : -1;
         const currentNode = nodeMatch && Array.isArray(modelEditorDraft?.Nodes)
-          ? modelEditorDraft.Nodes[Number(nodeMatch[1])]
+          ? modelEditorDraft.Nodes[nodeIndex]
           : null;
         const transformerRegressors = typeof window.getTransformerModelXRegressors === 'function'
           ? window.getTransformerModelXRegressors(currentNode)
@@ -6593,72 +6694,114 @@
           renderModelAccordionEditor();
         }
 
-        const trialPoolCard = document.createElement('div');
-        trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
-        const trialPoolTitle = document.createElement('div');
-        trialPoolTitle.className = 'small fw-bold mb-1';
-        trialPoolTitle.textContent = 'Trial Types from events.tsv';
-        trialPoolCard.appendChild(trialPoolTitle);
+        const isFirstLevelNode = isFirstLevelNodeIndex(nodeIndex);
+        const higherLevelRegressors = getHigherLevelRegressorTermsForNode(nodeIndex, false);
 
-        const trialPoolHint = document.createElement('div');
-        trialPoolHint.className = 'small text-muted mb-2';
-        trialPoolHint.textContent = hasSingleSelectedTask
-          ? 'Drag or click badges into the Design Matrix space below.'
-          : 'Select exactly one task in Input.task to load task-specific trial types.';
-        trialPoolCard.appendChild(trialPoolHint);
+        if (isFirstLevelNode) {
+          const trialPoolCard = document.createElement('div');
+          trialPoolCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
+          const trialPoolTitle = document.createElement('div');
+          trialPoolTitle.className = 'small fw-bold mb-1';
+          trialPoolTitle.textContent = 'Trial Types from events.tsv';
+          trialPoolCard.appendChild(trialPoolTitle);
 
-        const trialPool = document.createElement('div');
-        trialPool.className = 'modelx-pool';
-        if (!trialTypeRegressors.length) {
-          const empty = document.createElement('div');
-          empty.className = 'small text-muted';
-          empty.textContent = hasSingleSelectedTask
-            ? 'No trial_type values detected for the current BIDS/task selection.'
-            : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
-          trialPool.appendChild(empty);
+          const trialPoolHint = document.createElement('div');
+          trialPoolHint.className = 'small text-muted mb-2';
+          trialPoolHint.textContent = hasSingleSelectedTask
+            ? 'Drag or click badges into the Design Matrix space below.'
+            : 'Select exactly one task in Input.task to load task-specific trial types.';
+          trialPoolCard.appendChild(trialPoolHint);
+
+          const trialPool = document.createElement('div');
+          trialPool.className = 'modelx-pool';
+          if (!trialTypeRegressors.length) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = hasSingleSelectedTask
+              ? 'No trial_type values detected for the current BIDS/task selection.'
+              : 'Task-specific trial types are hidden while zero or multiple tasks are selected.';
+            trialPool.appendChild(empty);
+          } else {
+            trialTypeRegressors.forEach(reg => {
+              const badge = document.createElement('button');
+              badge.type = 'button';
+              badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
+              badge.textContent = reg;
+              badge.draggable = true;
+              badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+              badge.addEventListener('dragstart', (event)=>{
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                event.dataTransfer.setData('text/plain', reg);
+              });
+              trialPool.appendChild(badge);
+            });
+          }
+          trialPoolCard.appendChild(trialPool);
+          listWrap.appendChild(trialPoolCard);
+
+          if (conditionRegressors.length) {
+            const condPool = document.createElement('div');
+            condPool.className = 'modelx-pool mb-2';
+            const condLabel = document.createElement('div');
+            condLabel.className = 'small text-muted w-100';
+            condLabel.textContent = 'Optional condition.* regressors';
+            condPool.appendChild(condLabel);
+
+            conditionRegressors.forEach(reg => {
+              const badge = document.createElement('button');
+              badge.type = 'button';
+              badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
+              badge.textContent = reg;
+              badge.draggable = true;
+              badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+              badge.addEventListener('dragstart', (event)=>{
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                event.dataTransfer.setData('text/plain', reg);
+              });
+              condPool.appendChild(badge);
+            });
+            listWrap.appendChild(condPool);
+          }
         } else {
-          trialTypeRegressors.forEach(reg => {
-            const badge = document.createElement('button');
-            badge.type = 'button';
-            badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
-            badge.textContent = reg;
-            badge.draggable = true;
-            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
-            badge.addEventListener('dragstart', (event)=>{
-              event.dataTransfer.effectAllowed = 'copy';
-              event.dataTransfer.setData('application/x-modelx-regressor', reg);
-              event.dataTransfer.setData('text/plain', reg);
+          const higherLevelCard = document.createElement('div');
+          higherLevelCard.className = 'border rounded p-2 mb-2 bg-light-subtle';
+          const higherLevelTitle = document.createElement('div');
+          higherLevelTitle.className = 'small fw-bold mb-1';
+          higherLevelTitle.textContent = 'Higher-level regressors';
+          higherLevelCard.appendChild(higherLevelTitle);
+
+          const higherLevelHint = document.createElement('div');
+          higherLevelHint.className = 'small text-muted mb-2';
+          higherLevelHint.textContent = 'Downstream nodes expose grouping variables such as run/session/subject, upstream contrasts, and participants.tsv covariates.';
+          higherLevelCard.appendChild(higherLevelHint);
+
+          const higherLevelPool = document.createElement('div');
+          higherLevelPool.className = 'modelx-pool';
+          if (!higherLevelRegressors.length) {
+            const empty = document.createElement('div');
+            empty.className = 'small text-muted';
+            empty.textContent = 'No higher-level regressors detected yet. Add GroupBy entries, upstream contrasts, or participants.tsv columns.';
+            higherLevelPool.appendChild(empty);
+          } else {
+            higherLevelRegressors.forEach(reg => {
+              const badge = document.createElement('button');
+              badge.type = 'button';
+              badge.className = 'btn btn-sm btn-outline-primary modelx-reg-badge';
+              badge.textContent = reg;
+              badge.draggable = true;
+              badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+              badge.addEventListener('dragstart', (event)=>{
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                event.dataTransfer.setData('text/plain', reg);
+              });
+              higherLevelPool.appendChild(badge);
             });
-            trialPool.appendChild(badge);
-          });
-        }
-        trialPoolCard.appendChild(trialPool);
-        listWrap.appendChild(trialPoolCard);
-
-
-        if (conditionRegressors.length) {
-          const condPool = document.createElement('div');
-          condPool.className = 'modelx-pool mb-2';
-          const condLabel = document.createElement('div');
-          condLabel.className = 'small text-muted w-100';
-          condLabel.textContent = 'Optional condition.* regressors';
-          condPool.appendChild(condLabel);
-
-          conditionRegressors.forEach(reg => {
-            const badge = document.createElement('button');
-            badge.type = 'button';
-            badge.className = 'btn btn-sm btn-outline-secondary modelx-reg-badge';
-            badge.textContent = reg;
-            badge.draggable = true;
-            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
-            badge.addEventListener('dragstart', (event)=>{
-              event.dataTransfer.effectAllowed = 'copy';
-              event.dataTransfer.setData('application/x-modelx-regressor', reg);
-              event.dataTransfer.setData('text/plain', reg);
-            });
-            condPool.appendChild(badge);
-          });
-          listWrap.appendChild(condPool);
+          }
+          higherLevelCard.appendChild(higherLevelPool);
+          listWrap.appendChild(higherLevelCard);
         }
 
         if (transformerRegressors.length || hasTransformerPipeline) {
@@ -6703,93 +6846,95 @@
           listWrap.appendChild(transformerCard);
         }
 
-        const nuisanceCard = document.createElement('div');
-        nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
-        const nuisanceTitle = document.createElement('div');
-        nuisanceTitle.className = 'small fw-bold mb-1';
-        nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
-        nuisanceCard.appendChild(nuisanceTitle);
+        if (isFirstLevelNode) {
+          const nuisanceCard = document.createElement('div');
+          nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
+          const nuisanceTitle = document.createElement('div');
+          nuisanceTitle.className = 'small fw-bold mb-1';
+          nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
+          nuisanceCard.appendChild(nuisanceTitle);
 
-        const nuisanceHint = document.createElement('div');
-        nuisanceHint.className = 'small text-muted mb-2';
-        nuisanceHint.textContent = confoundColumns.length
-          ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
-          : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
-        nuisanceCard.appendChild(nuisanceHint);
+          const nuisanceHint = document.createElement('div');
+          nuisanceHint.className = 'small text-muted mb-2';
+          nuisanceHint.textContent = confoundColumns.length
+            ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
+            : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
+          nuisanceCard.appendChild(nuisanceHint);
 
-        const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
-        if (nuisanceInModelX.length) {
-          const warning = document.createElement('div');
-          warning.className = 'alert alert-warning py-1 small mb-2';
-          warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
-          nuisanceCard.appendChild(warning);
+          const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
+          if (nuisanceInModelX.length) {
+            const warning = document.createElement('div');
+            warning.className = 'alert alert-warning py-1 small mb-2';
+            warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
+            nuisanceCard.appendChild(warning);
 
-          const removeNuisanceBtn = document.createElement('button');
-          removeNuisanceBtn.type = 'button';
-          removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
-          removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
-          removeNuisanceBtn.addEventListener('click', () => {
-            const arr = getByPath(modelEditorDraft, basePath);
-            if (!Array.isArray(arr)) return;
-            const filtered = arr.filter(reg => !isNuisanceRegressor(reg));
-            setByPath(modelEditorDraft, basePath, filtered);
-            syncHrfVariablesWithModelX();
-            setModelEditorStatus('Removed nuisance regressors from Model.X.', 'info');
-            renderModelAccordionEditor();
-          });
-          nuisanceCard.appendChild(removeNuisanceBtn);
-        }
-
-        const nuisancePickerFactory = typeof window.buildBidspmNuisanceRegressorPicker === 'function'
-          ? window.buildBidspmNuisanceRegressorPicker
-          : null;
-        if (nuisancePickerFactory) {
-          const nuisancePicker = nuisancePickerFactory({
-            confoundColumns,
-            curatedColumns: transRotConfounds.length ? transRotConfounds : defaultTransRot,
-            getSelectedSet: () => new Set(normalizeList(getByPath(modelEditorDraft, basePath))),
-            onAdd: (reg) => addRegressorToModelX(basePath, reg),
-            onRemove: (reg) => {
+            const removeNuisanceBtn = document.createElement('button');
+            removeNuisanceBtn.type = 'button';
+            removeNuisanceBtn.className = 'btn btn-sm btn-outline-danger mb-2';
+            removeNuisanceBtn.textContent = 'Remove nuisance regressors from Model.X';
+            removeNuisanceBtn.addEventListener('click', () => {
               const arr = getByPath(modelEditorDraft, basePath);
               if (!Array.isArray(arr)) return;
-              const filtered = arr.filter(value => String(value || '').trim() !== reg);
-              if (filtered.length === arr.length) return;
+              const filtered = arr.filter(reg => !isNuisanceRegressor(reg));
               setByPath(modelEditorDraft, basePath, filtered);
               syncHrfVariablesWithModelX();
-              setModelEditorStatus(`Removed ${reg} from Model.X`, 'info');
+              setModelEditorStatus('Removed nuisance regressors from Model.X.', 'info');
               renderModelAccordionEditor();
-            }
-          });
-          nuisanceCard.appendChild(nuisancePicker);
-        } else {
-          const nuisanceOptions = Array.from(new Set([
-            ...defaultTransRot,
-            'framewise_displacement',
-            ...transRotConfounds
-          ]));
-          const nuisanceGrid = document.createElement('div');
-          nuisanceGrid.className = 'modelx-pool';
-
-          nuisanceOptions.forEach(reg => {
-            const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
-            const badge = document.createElement('button');
-            badge.type = 'button';
-            badge.className = presentInConfounds
-              ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
-              : 'btn btn-sm btn-outline-danger modelx-reg-badge';
-            badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
-            badge.draggable = true;
-            badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
-            badge.addEventListener('dragstart', (event)=>{
-              event.dataTransfer.effectAllowed = 'copy';
-              event.dataTransfer.setData('application/x-modelx-regressor', reg);
-              event.dataTransfer.setData('text/plain', reg);
             });
-            nuisanceGrid.appendChild(badge);
-          });
-          nuisanceCard.appendChild(nuisanceGrid);
+            nuisanceCard.appendChild(removeNuisanceBtn);
+          }
+
+          const nuisancePickerFactory = typeof window.buildBidspmNuisanceRegressorPicker === 'function'
+            ? window.buildBidspmNuisanceRegressorPicker
+            : null;
+          if (nuisancePickerFactory) {
+            const nuisancePicker = nuisancePickerFactory({
+              confoundColumns,
+              curatedColumns: transRotConfounds.length ? transRotConfounds : defaultTransRot,
+              getSelectedSet: () => new Set(normalizeList(getByPath(modelEditorDraft, basePath))),
+              onAdd: (reg) => addRegressorToModelX(basePath, reg),
+              onRemove: (reg) => {
+                const arr = getByPath(modelEditorDraft, basePath);
+                if (!Array.isArray(arr)) return;
+                const filtered = arr.filter(value => String(value || '').trim() !== reg);
+                if (filtered.length === arr.length) return;
+                setByPath(modelEditorDraft, basePath, filtered);
+                syncHrfVariablesWithModelX();
+                setModelEditorStatus(`Removed ${reg} from Model.X`, 'info');
+                renderModelAccordionEditor();
+              }
+            });
+            nuisanceCard.appendChild(nuisancePicker);
+          } else {
+            const nuisanceOptions = Array.from(new Set([
+              ...defaultTransRot,
+              'framewise_displacement',
+              ...transRotConfounds
+            ]));
+            const nuisanceGrid = document.createElement('div');
+            nuisanceGrid.className = 'modelx-pool';
+
+            nuisanceOptions.forEach(reg => {
+              const presentInConfounds = hasConfoundColumn(confoundColumns, reg) || transRotConfounds.includes(reg);
+              const badge = document.createElement('button');
+              badge.type = 'button';
+              badge.className = presentInConfounds
+                ? 'btn btn-sm btn-outline-secondary modelx-reg-badge'
+                : 'btn btn-sm btn-outline-danger modelx-reg-badge';
+              badge.textContent = presentInConfounds ? reg : `${reg} (missing)`;
+              badge.draggable = true;
+              badge.addEventListener('click', ()=> addRegressorToModelX(basePath, reg));
+              badge.addEventListener('dragstart', (event)=>{
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-modelx-regressor', reg);
+                event.dataTransfer.setData('text/plain', reg);
+              });
+              nuisanceGrid.appendChild(badge);
+            });
+            nuisanceCard.appendChild(nuisanceGrid);
+          }
+          listWrap.appendChild(nuisanceCard);
         }
-        listWrap.appendChild(nuisanceCard);
 
         const dropZoneTitle = document.createElement('div');
         dropZoneTitle.className = 'small fw-bold mb-1';

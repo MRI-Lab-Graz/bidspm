@@ -36,7 +36,7 @@
         }
 
         function buildConditions() {
-            const pool = new Set(config.getInterestRegressors?.() || []);
+            const pool = new Set(config.getSuggestedConditionTermsForNode?.(cbNodeIdx) || config.getInterestRegressors?.() || []);
             const node = currentNode();
             const incomingContrastNames = config.getIncomingContrastNamesForNode?.(cbNodeIdx) || [];
             incomingContrastNames.forEach((name) => pool.add(name));

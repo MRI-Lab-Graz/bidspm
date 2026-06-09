@@ -21,6 +21,7 @@
         const getModelDraft = config.getModelDraft || (() => null);
         const getInterestRegressors = config.getInterestRegressors || (() => []);
         const getParticipantsInfo = config.getParticipantsInfo || emptyParticipantsInfo;
+        const getInputEntityValues = config.getInputEntityValues || (() => ({}));
 
         function slugifyNodeToken(value) {
             return String(value || '')
@@ -124,14 +125,94 @@
             return Array.from(new Set(incoming));
         }
 
+        function getParticipantRegressorTerms(includeIntercept = true) {
+            const participantsInfo = getParticipantsInfo();
+            const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+            const numericColumns = normalizeStringArray(participantsInfo.numeric_columns);
+            const baseTerms = includeIntercept ? ['1'] : [];
+            return Array.from(new Set([...baseTerms, ...categoricalColumns, ...numericColumns])).filter(Boolean);
+        }
+
+        function isFirstLevelNodeIndex(nodeIdx) {
+            return Number(nodeIdx) === 0;
+        }
+
+        function getHigherLevelMetadataTerms(node) {
+            return Array.from(new Set(
+                normalizeStringArray(node?.GroupBy)
+                    .filter((term) => term && term !== 'contrast')
+            )).filter(Boolean);
+        }
+
+        function getFactorLevelTermsForNode(nodeIdx) {
+            const draft = getModelDraft();
+            const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
+            const node = nodes[nodeIdx] || {};
+            const participantsInfo = getParticipantsInfo();
+            const participantSampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+                ? participantsInfo.sample_values
+                : {};
+            const inputEntityValues = getInputEntityValues() || {};
+            const metadataTerms = getHigherLevelMetadataTerms(node);
+            const expanded = [];
+
+            metadataTerms.forEach((term) => {
+                const inputLevels = normalizeStringArray(inputEntityValues[term]);
+                const participantLevels = normalizeStringArray(participantSampleValues[term]);
+                Array.from(new Set([...inputLevels, ...participantLevels])).forEach((level) => {
+                    expanded.push(`${term}.${level}`);
+                });
+            });
+
+            return Array.from(new Set(expanded)).filter(Boolean);
+        }
+
+        function getHigherLevelRegressorTermsForNode(nodeIdx, includeIntercept = true) {
+            const draft = getModelDraft();
+            const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
+            const node = nodes[nodeIdx] || {};
+            const baseTerms = includeIntercept ? ['1'] : [];
+            return Array.from(new Set([
+                ...baseTerms,
+                ...getHigherLevelMetadataTerms(node),
+                ...getParticipantRegressorTerms(false),
+                ...getIncomingContrastNamesForNode(nodeIdx)
+            ])).filter(Boolean);
+        }
+
+        function getSuggestedModelTermsForNode(nodeIdx) {
+            const draft = getModelDraft();
+            const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
+            const node = nodes[nodeIdx] || {};
+            const level = String(node?.Level || '').trim().toLowerCase();
+            const transformerRegressors = getTransformerModelXRegressorsForNode(node);
+
+            if (level === 'dataset') {
+                return getParticipantRegressorTerms(true);
+            }
+
+            if (isFirstLevelNodeIndex(nodeIdx)) {
+                return Array.from(new Set([
+                    ...normalizeStringArray(getInterestRegressors()),
+                    ...transformerRegressors
+                ])).filter(Boolean);
+            }
+
+            return Array.from(new Set([
+                ...getHigherLevelRegressorTermsForNode(nodeIdx, true),
+                ...transformerRegressors
+            ])).filter(Boolean);
+        }
+
         function getSuggestedConditionTermsForNode(nodeIdx) {
             const draft = getModelDraft();
             const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
             const node = nodes[nodeIdx] || {};
             const incomingContrasts = getIncomingContrastNamesForNode(nodeIdx);
             const modelTerms = normalizeStringArray(node.Model?.X).filter((term) => term !== '1');
-            const localFallback = normalizeStringArray(getInterestRegressors());
-            return Array.from(new Set([...incomingContrasts, ...modelTerms, ...localFallback]));
+            const localFallback = getSuggestedModelTermsForNode(nodeIdx).filter((term) => term !== '1');
+            const factorLevels = getFactorLevelTermsForNode(nodeIdx);
+            return Array.from(new Set([...incomingContrasts, ...modelTerms, ...localFallback, ...factorLevels]));
         }
 
         function getDefaultConditionTokenForPath(path) {
@@ -338,6 +419,24 @@
                 return { node, message: result.message, tone: result.tone || 'success' };
             }
 
+            const draft = getModelDraft();
+            const existingNodeCount = Array.isArray(draft?.Nodes) ? draft.Nodes.length : 0;
+
+            if (existingNodeCount > 0) {
+                return {
+                    node: {
+                        Level: 'Subject',
+                        Name: getUniqueModelNodeName('subject_level'),
+                        GroupBy: ['contrast', 'subject'],
+                        Model: { Type: 'glm', X: ['1'] },
+                        DummyContrasts: { Test: 't' },
+                        Contrasts: []
+                    },
+                    message: 'Added higher-level node.',
+                    tone: 'success'
+                };
+            }
+
             return {
                 node: {
                     Level: 'Run',
@@ -361,6 +460,7 @@
             buildNodeFromPreset,
             getDefaultConditionTokenForPath,
             getIncomingContrastNamesForNode,
+            getSuggestedModelTermsForNode,
             getSuggestedConditionTermsForNode,
             getTransformerModelXRegressorsForNode
         };

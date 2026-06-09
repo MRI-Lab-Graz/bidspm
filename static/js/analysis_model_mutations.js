@@ -40,11 +40,85 @@
         return NUISANCE_REGRESSOR_RX.test(value.trim());
     }
 
+    function getParticipantRegressorTerms(includeIntercept = true) {
+        const participants = getModelEditorParticipantsInfo();
+        const categorical = normalizeStringArray(participants.categorical_columns);
+        const numeric = normalizeStringArray(participants.numeric_columns);
+        const baseTerms = includeIntercept ? ['1'] : [];
+        return Array.from(new Set([...baseTerms, ...categorical, ...numeric])).filter(Boolean);
+    }
+
+    function isFirstLevelNodeIndex(nodeIdx) {
+        return Number(nodeIdx) === 0;
+    }
+
+    function getHigherLevelMetadataTerms(node) {
+        return Array.from(new Set(
+            normalizeStringArray(node?.GroupBy)
+                .filter((term) => term && term !== 'contrast')
+        )).filter(Boolean);
+    }
+
+    function inferGeneratedColumnsFromInstruction(instruction) {
+        if (!instruction || typeof instruction !== 'object') return [];
+
+        const opName = String(instruction.Name || '').trim();
+        const outputValues = normalizeStringArray(instruction.Output);
+
+        if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
+            if (outputValues.length) return outputValues;
+            return normalizeStringArray(instruction.Input).map((name) => `${name}_label`);
+        }
+
+        return outputValues;
+    }
+
+    function getTransformerModelXRegressorsForNode(node) {
+        const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
+            ? node.Transformations
+            : null;
+        const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
+        const inferredGenerated = Array.isArray(transformations?.Instructions)
+            ? Array.from(new Set(transformations.Instructions.flatMap((instruction) => inferGeneratedColumnsFromInstruction(instruction))))
+            : [];
+
+        return Array.from(new Set([...explicitGenerated, ...inferredGenerated])).filter((name) => {
+            if (!name || name === '1') return false;
+            if (name.startsWith('trial_type.') || name.startsWith('condition.')) return false;
+            return true;
+        });
+    }
+
+    function getHigherLevelRegressorTermsForNode(nodeIdx, includeIntercept = true) {
+        const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
+        const baseTerms = includeIntercept ? ['1'] : [];
+        return Array.from(new Set([
+            ...baseTerms,
+            ...getHigherLevelMetadataTerms(node),
+            ...getParticipantRegressorTerms(false),
+            ...getIncomingContrastNamesForNode(nodeIdx)
+        ])).filter(Boolean);
+    }
+
     function defaultArrayItemForPath(path) {
         if (path === 'Nodes') {
+            const existingNodeCount = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes.length : 0;
+            if (existingNodeCount > 0) {
+                return {
+                    Level: 'Subject',
+                    Name: 'subject_level',
+                    GroupBy: ['contrast', 'subject'],
+                    Model: {
+                        X: ['1'],
+                        Type: 'glm'
+                    },
+                    DummyContrasts: { Test: 't' },
+                    Contrasts: []
+                };
+            }
             return {
                 Level: 'Run',
-                Name: 'subject_level',
+                Name: 'run_level',
                 GroupBy: ['run', 'subject'],
                 Model: {
                     X: ['trial_type'],
@@ -73,7 +147,10 @@
         }
         if (/\.ConditionList$/.test(path)) return getDefaultConditionTokenForPath(path);
         if (/\.Weights$/.test(path)) return 0;
-        if (/\.X$/.test(path)) return modelEditorInterestRegressors[0] || 'trial_type';
+        if (/\.X$/.test(path)) {
+            const suggestedRegressors = getSuggestedRegressorsForModelXPath(path);
+            return suggestedRegressors[0] || 'trial_type';
+        }
         if (/\.GroupBy$/.test(path)) return 'run';
         if (/\.Variables$/.test(path)) return 'trial_type';
         return '';
@@ -280,15 +357,19 @@
         const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
         const level = String(node?.Level || '').trim().toLowerCase();
         if (level === 'dataset') {
-            const participants = getModelEditorParticipantsInfo();
-            const categorical = normalizeStringArray(participants.categorical_columns);
-            const numeric = normalizeStringArray(participants.numeric_columns);
-            return Array.from(new Set(['1', ...categorical, ...numeric])).filter(Boolean);
+            return getParticipantRegressorTerms(true);
         }
 
         const transformerRegressors = getTransformerModelXRegressorsForNode(node);
+        if (isFirstLevelNodeIndex(nodeIdx)) {
+            return Array.from(new Set([
+                ...(modelEditorInterestRegressors || []),
+                ...transformerRegressors
+            ])).filter(Boolean);
+        }
+
         return Array.from(new Set([
-            ...(modelEditorInterestRegressors || []),
+            ...getHigherLevelRegressorTermsForNode(nodeIdx, true),
             ...transformerRegressors
         ])).filter(Boolean);
     }

@@ -546,18 +546,18 @@
 {% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css', v='20260527') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css', v='20260609a') }}">
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_hints.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_browser.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v='20260527') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260527') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_hints.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_browser.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260609a') }}"></script>
 <script>
     // Project context
     const currentProjectId = '{{ current_project_id or "" }}';
@@ -588,6 +588,7 @@
     let modelEditorConfoundColumns = [];
     let modelEditorTransRotConfounds = [];
     let modelEditorGroupByOptions = ['subject'];
+    let modelEditorInputEntityValues = {};
     let modelEditorParticipantsInfo = emptyParticipantsInfo();
     let showModelTechnicalPaths = false;
     let modelEditorOpenPaths = new Set(); // tracks which accordion panels are open across re-renders
@@ -861,8 +862,10 @@
     } = createModelHelperApi({
         getModelDraft: () => modelEditorDraft,
         getInterestRegressors: () => modelEditorInterestRegressors,
-        getParticipantsInfo: () => getModelEditorParticipantsInfo()
+        getParticipantsInfo: () => getModelEditorParticipantsInfo(),
+        getInputEntityValues: () => modelEditorInputEntityValues
     });
+    window.getTransformerModelXRegressorsForNode = getTransformerModelXRegressorsForNode;
 
     const { openBrowser } = window.BidspmAnalysisBrowser.createBrowserController({
         fetchImpl: window.fetch.bind(window),
@@ -898,6 +901,7 @@
         },
         getInterestRegressors: () => modelEditorInterestRegressors,
         getIncomingContrastNamesForNode,
+        getSuggestedConditionTermsForNode,
         getModelPath: () => document.getElementById('input-MODELS_FILE')?.value,
         getModelContentFromPath,
         loadBidsTasksForModelEditor,
@@ -1432,7 +1436,10 @@
 
         const isModelXEntry = isModelXPath(path);
         const isGroupByEntry = /\.GroupBy\[\d+\]$/.test(path);
-        const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && modelEditorInterestRegressors.length > 0;
+        const modelXPathMatch = path.match(/^(.*)\[\d+\]$/);
+        const modelXArrayPath = modelXPathMatch ? modelXPathMatch[1] : '';
+        const scopedInterestRegressors = isModelXEntry ? getSuggestedRegressorsForModelXPath(modelXArrayPath) : [];
+        const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && scopedInterestRegressors.length > 0;
 
         if (isGroupByEntry) {
             row.classList.add('json-row-compact');
@@ -1454,7 +1461,7 @@
         } else if (useInterestDropdown) {
             input = document.createElement('select');
             input.className = 'form-select form-select-sm';
-            const options = Array.from(new Set([value, ...modelEditorInterestRegressors]));
+            const options = Array.from(new Set([value, ...scopedInterestRegressors]));
             options.forEach(optVal => {
                 const opt = document.createElement('option');
                 opt.value = optVal;
@@ -1862,11 +1869,13 @@
 
                 const uniqueRegs = getSuggestedRegressorsForModelXPath(basePath);
                 const pathMatch = String(basePath).match(/^Nodes\[(\d+)\]\.Model\.X$/);
+                const nodeIdx = pathMatch ? Number(pathMatch[1]) : -1;
                 const nodeForPath = pathMatch && Array.isArray(modelEditorDraft?.Nodes)
-                    ? modelEditorDraft.Nodes[Number(pathMatch[1])]
+                    ? modelEditorDraft.Nodes[nodeIdx]
                     : null;
                 const isDatasetModelX = String(nodeForPath?.Level || '').trim().toLowerCase() === 'dataset';
-                const isRunModelX = String(nodeForPath?.Level || '').trim().toLowerCase() === 'run';
+                const isFirstLevelModelX = nodeIdx === 0;
+                const isRunModelX = isFirstLevelModelX && String(nodeForPath?.Level || '').trim().toLowerCase() === 'run';
                 const transformerRegressors = getTransformerModelXRegressorsForNode(nodeForPath);
                 const hasTransformerPipeline = Boolean(nodeForPath?.Transformations && typeof nodeForPath.Transformations === 'object' && !Array.isArray(nodeForPath.Transformations));
                 const modelPathForX = String(basePath || '').replace(/\.X$/, '');
@@ -2047,7 +2056,7 @@
                     controls.appendChild(transformerCard);
                 }
 
-                if (!isDatasetModelX) {
+                if (!isDatasetModelX && isFirstLevelModelX) {
                     const nuisanceCard = document.createElement('div');
                     nuisanceCard.className = 'border rounded p-2 mb-2 bg-white w-100';
                     const nuisanceTitle = document.createElement('div');
@@ -2575,6 +2584,7 @@
         const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim();
         if (!bidsDir) {
             modelEditorGroupByOptions = ['subject'];
+            modelEditorInputEntityValues = {};
             return modelEditorGroupByOptions;
         }
 
@@ -2586,8 +2596,10 @@
             } else {
                 modelEditorGroupByOptions = ['subject'];
             }
+            modelEditorInputEntityValues = (data && data.values && typeof data.values === 'object') ? data.values : {};
         } catch (e) {
             modelEditorGroupByOptions = ['subject'];
+            modelEditorInputEntityValues = {};
         }
 
         return modelEditorGroupByOptions;
@@ -3197,12 +3209,47 @@
         return '';
     }
 
+    function inferTransformerLaunchNodeIndex() {
+        const collectNodePaths = (paths) => {
+            const list = Array.isArray(paths) ? paths : Array.from(paths || []);
+            return list
+                .map(path => String(path || '').trim())
+                .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
+        };
+
+        const openPaths = collectNodePaths(modelEditorOpenPaths);
+        const pendingPaths = collectNodePaths(modelEditorPendingOpenPaths);
+        const domOpenPaths = Array.from(document.querySelectorAll('#model-editor-accordion .accordion-collapse.show'))
+            .map(el => String(el.dataset.jsonPath || '').trim())
+            .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
+
+        const orderedCandidates = [...pendingPaths, ...openPaths, ...domOpenPaths].reverse();
+        for (const path of orderedCandidates) {
+            const match = path.match(/^Nodes\[(\d+)\]/);
+            if (!match) continue;
+            const nodeIdx = Number(match[1]);
+            if (Number.isInteger(nodeIdx) && nodeIdx >= 0) return nodeIdx;
+        }
+
+        const configuredNodeName = String(document.getElementById('input-NODE_NAME')?.value || '').trim();
+        if (configuredNodeName && Array.isArray(modelEditorDraft?.Nodes)) {
+            const configuredNodeIdx = modelEditorDraft.Nodes.findIndex(node => String(node?.Name || '').trim() === configuredNodeName);
+            if (configuredNodeIdx >= 0) return configuredNodeIdx;
+        }
+
+        return null;
+    }
+
     function persistTransformerLaunchContext(nodeLevel = '') {
         try {
             const inferredNodeLevel = inferTransformerLaunchNodeLevel();
+            const inferredNodeIndex = inferTransformerLaunchNodeIndex();
             const normalizedNodeLevel = ['Run', 'Session', 'Subject', 'Dataset']
                 .find(level => level.toLowerCase() === String(nodeLevel || '').trim().toLowerCase()) || '';
             const effectiveNodeLevel = normalizedNodeLevel || inferredNodeLevel;
+            const launchNode = Number.isInteger(inferredNodeIndex) && Array.isArray(modelEditorDraft?.Nodes)
+                ? modelEditorDraft.Nodes[inferredNodeIndex]
+                : null;
             const selectedTasks = Array.isArray(modelEditorDraft?.Input?.task)
                 ? Array.from(new Set(modelEditorDraft.Input.task.map(task => String(task || '').trim()).filter(Boolean)))
                 : [];
@@ -3217,6 +3264,8 @@
                 fmriprepDir: document.getElementById('input-FMRIPREP_DIR')?.value?.trim() || '',
                 modelSnapshot: launchSnapshotSource ? structuredClone(launchSnapshotSource) : null,
                 launchAt: Date.now(),
+                nodeIndex: Number.isInteger(inferredNodeIndex) ? inferredNodeIndex : null,
+                nodeName: String(launchNode?.Name || '').trim() || null,
                 inputTasks: selectedTasks,
                 taskFilter: selectedTasks.length === 1 ? selectedTasks[0] : '',
                 nodeLevel: effectiveNodeLevel || null,

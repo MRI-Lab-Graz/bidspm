@@ -20,6 +20,10 @@
       renderColumnsPool,
       refreshPipelineColumnValues,
       scheduleLiveModelValidation,
+      launchContext,
+      getTargetLevels,
+      loadModelForValidation,
+      getSelectedModelPath,
     } = config || {};
 
     if (
@@ -39,7 +43,10 @@
       typeof escHtml !== 'function' ||
       typeof renderColumnsPool !== 'function' ||
       typeof refreshPipelineColumnValues !== 'function' ||
-      typeof scheduleLiveModelValidation !== 'function'
+      typeof scheduleLiveModelValidation !== 'function' ||
+      typeof getTargetLevels !== 'function' ||
+      typeof loadModelForValidation !== 'function' ||
+      typeof getSelectedModelPath !== 'function'
     ) {
       throw new Error('Transformer Builder scan/preview dependencies are incomplete.');
     }
@@ -81,6 +88,137 @@
         valuesMap,
         sampleStatus: String(info.sample_status || 'missing-file').trim() || 'missing-file',
       };
+    }
+
+    function normalizeLaunchStringArray(value) {
+      return normalizeStringArray(value).filter(Boolean);
+    }
+
+    async function resolveContextModel() {
+      if (launchContext?.modelSnapshot && typeof launchContext.modelSnapshot === 'object' && !Array.isArray(launchContext.modelSnapshot)) {
+        return launchContext.modelSnapshot;
+      }
+
+      const modelPath = String(getSelectedModelPath() || '').trim();
+      if (!modelPath) return null;
+
+      try {
+        return await loadModelForValidation(modelPath);
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function getLaunchNode(nodes) {
+      const nodeIndex = Number.isInteger(launchContext?.nodeIndex)
+        ? launchContext.nodeIndex
+        : Number.isInteger(Number(launchContext?.nodeIndex))
+          ? Number(launchContext.nodeIndex)
+          : -1;
+      if (nodeIndex >= 0) return nodes[nodeIndex] || null;
+
+      const nodeName = String(launchContext?.nodeName || '').trim();
+      if (!nodeName) return null;
+      return nodes.find((node) => String(node?.Name || '').trim() === nodeName) || null;
+    }
+
+    function getIncomingContrastNamesForNode(draft, node) {
+      const destinationName = String(node?.Name || '').trim();
+      if (!destinationName || !draft || typeof draft !== 'object') return [];
+
+      const nodes = Array.isArray(draft.Nodes) ? draft.Nodes : [];
+      const getNodeByName = (name) => {
+        const normalized = String(name || '').trim();
+        if (!normalized) return null;
+        return nodes.find((entry) => String(entry?.Name || '').trim() === normalized) || null;
+      };
+      const getNodeContrastNames = (entry) => {
+        if (!entry || typeof entry !== 'object') return [];
+        const explicit = Array.isArray(entry.Contrasts)
+          ? entry.Contrasts.map((contrast) => String(contrast?.Name || '').trim()).filter(Boolean)
+          : [];
+        const dummy = normalizeLaunchStringArray(entry?.DummyContrasts?.Contrasts);
+        return Array.from(new Set([...explicit, ...dummy]));
+      };
+
+      const edges = Array.isArray(draft.Edges) ? draft.Edges : [];
+      const incoming = [];
+      edges.forEach((edge) => {
+        if (String(edge?.Destination || '').trim() !== destinationName) return;
+        const sourceNode = getNodeByName(edge?.Source);
+        const available = getNodeContrastNames(sourceNode);
+        const filterValues = normalizeLaunchStringArray(edge?.Filter?.contrast);
+        const selected = filterValues.length
+          ? available.filter((name) => filterValues.includes(name))
+          : available;
+        selected.forEach((name) => incoming.push(name));
+      });
+
+      if (!incoming.length) {
+        const nodeIndex = Number.isInteger(launchContext?.nodeIndex)
+          ? launchContext.nodeIndex
+          : Number(launchContext?.nodeIndex);
+        if (Number.isInteger(nodeIndex) && nodeIndex > 0) {
+          getNodeContrastNames(nodes[nodeIndex - 1]).forEach((name) => incoming.push(name));
+        }
+      }
+
+      return Array.from(new Set(incoming));
+    }
+
+    async function resolveTargetNodesForHigherLevelColumns() {
+      const draft = await resolveContextModel();
+      const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
+      const launchNode = getLaunchNode(nodes);
+      if (launchNode) {
+        return { draft, nodes: [launchNode] };
+      }
+
+      const targetLevels = new Set(normalizeLaunchStringArray(getTargetLevels()).map((level) => String(level || '').trim().toLowerCase()));
+      if (!targetLevels.size) {
+        return { draft, nodes: [] };
+      }
+
+      return {
+        draft,
+        nodes: nodes.filter((node) => targetLevels.has(String(node?.Level || '').trim().toLowerCase()))
+      };
+    }
+
+    async function buildHigherLevelSourceColumns(scanData) {
+      const { draft, nodes } = await resolveTargetNodesForHigherLevelColumns();
+      const higherLevelNodes = nodes.filter((node) => String(node?.Level || '').trim().toLowerCase() !== 'run');
+      if (!higherLevelNodes.length) {
+        return { columns: [], valuesMap: {} };
+      }
+
+      const entityValues = (scanData && scanData.values && typeof scanData.values === 'object')
+        ? scanData.values
+        : {};
+      const valuesMap = {};
+
+      higherLevelNodes.forEach((node) => {
+        const metadataTerms = normalizeLaunchStringArray(node.GroupBy)
+          .filter((term) => term && term !== 'subject');
+
+        metadataTerms.forEach((term) => {
+          if (term === 'contrast') {
+            valuesMap.contrast = Array.from(new Set([
+              ...normalizeLaunchStringArray(valuesMap.contrast),
+              ...getIncomingContrastNamesForNode(draft, node)
+            ]));
+            return;
+          }
+
+          valuesMap[term] = Array.from(new Set([
+            ...normalizeLaunchStringArray(valuesMap[term]),
+            ...normalizeLaunchStringArray(entityValues[term])
+          ]));
+        });
+      });
+
+      const columns = Object.keys(valuesMap).filter((name) => name && (name === 'contrast' || valuesMap[name].length > 0));
+      return { columns, valuesMap };
     }
 
     function applyEventsScanResult(data, selectedTask = '') {
@@ -174,8 +312,9 @@
       }
 
       const participantsResult = buildParticipantsColumnResult(data.participants || {});
-      setAvailableColumns(participantsResult.columns);
-      setColumnValues(participantsResult.valuesMap);
+      const higherLevelColumns = await buildHigherLevelSourceColumns(data);
+      setAvailableColumns(Array.from(new Set([...participantsResult.columns, ...higherLevelColumns.columns])));
+      setColumnValues(mergeColumnValueMaps(participantsResult.valuesMap, higherLevelColumns.valuesMap));
       refreshPipelineColumnValues();
       setLastScanData(null);
       setCurrentPreviewFile(null);
@@ -186,9 +325,13 @@
       taskSel.innerHTML = '<option value="">— not used for participants scope —</option>';
 
       if (participantsResult.sampleStatus === 'present') {
-        setStatus(`Found ${getAvailableColumns().length} participants.tsv column(s).`, 'success');
+        const addedCount = higherLevelColumns.columns.length;
+        const suffix = addedCount ? ` plus ${addedCount} node metadata/contrast column(s).` : '.';
+        setStatus(`Found ${participantsResult.columns.length} participants.tsv column(s)${suffix}`, 'success');
       } else {
-        setStatus(`participants.tsv status: ${participantsResult.sampleStatus}. Found ${getAvailableColumns().length} usable column(s).`, 'warning');
+        const addedCount = higherLevelColumns.columns.length;
+        const suffix = addedCount ? ` Added ${addedCount} node metadata/contrast column(s).` : '';
+        setStatus(`participants.tsv status: ${participantsResult.sampleStatus}. Found ${getAvailableColumns().length} usable column(s).${suffix}`, 'warning');
       }
       scheduleLiveModelValidation();
     }
@@ -240,9 +383,10 @@
       const eventColumns = [...getAvailableColumns()];
       const eventValuesMap = { ...getColumnValues() };
       const participantsResult = buildParticipantsColumnResult(participantsData.participants || {});
+      const higherLevelColumns = await buildHigherLevelSourceColumns(participantsData);
 
-      setAvailableColumns(Array.from(new Set([...eventColumns, ...participantsResult.columns])));
-      setColumnValues(mergeColumnValueMaps(eventValuesMap, participantsResult.valuesMap));
+      setAvailableColumns(Array.from(new Set([...eventColumns, ...participantsResult.columns, ...higherLevelColumns.columns])));
+      setColumnValues(mergeColumnValueMaps(eventValuesMap, participantsResult.valuesMap, higherLevelColumns.valuesMap));
       refreshPipelineColumnValues();
       renderColumnsPool();
 
@@ -250,7 +394,7 @@
         ? `for task "${effectiveTask}"`
         : `across ${(eventsData.tasks || []).length} task(s)`;
       setStatus(
-        `Found ${getAvailableColumns().length} combined columns (${eventColumns.length} events + ${participantsResult.columns.length} participants) ${scopeText}.`,
+        `Found ${getAvailableColumns().length} combined columns (${eventColumns.length} events + ${participantsResult.columns.length} participants + ${higherLevelColumns.columns.length} node metadata/contrast) ${scopeText}.`,
         'success'
       );
       scheduleLiveModelValidation();
