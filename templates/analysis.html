@@ -557,7 +557,7 @@
 <script src="{{ url_for('static', filename='js/analysis_browser.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260610a') }}"></script>
 <script>
     // Project context
     const currentProjectId = '{{ current_project_id or "" }}';
@@ -2065,16 +2065,39 @@
                 if (!isDatasetModelX && isFirstLevelModelX) {
                     const nuisanceCard = document.createElement('div');
                     nuisanceCard.className = 'border rounded p-2 mb-2 bg-white w-100';
+
+                    const NUISANCE_COLLAPSED_KEY = 'bidspm_nuisance_card_collapsed';
+                    const isCollapsed = localStorage.getItem(NUISANCE_COLLAPSED_KEY) === '1';
+
+                    const nuisanceHeader = document.createElement('div');
+                    nuisanceHeader.className = 'd-flex justify-content-between align-items-center';
+                    nuisanceHeader.style.cursor = 'pointer';
+                    nuisanceHeader.setAttribute('role', 'button');
+                    nuisanceHeader.setAttribute('title', 'Click to collapse / expand');
+
                     const nuisanceTitle = document.createElement('div');
-                    nuisanceTitle.className = 'small fw-bold mb-1';
+                    nuisanceTitle.className = 'small fw-bold';
                     nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds)';
-                    nuisanceCard.appendChild(nuisanceTitle);
+
+                    const nuisanceChevron = document.createElement('span');
+                    nuisanceChevron.className = 'ms-2 text-muted';
+                    nuisanceChevron.style.fontSize = '0.75rem';
+                    nuisanceChevron.textContent = isCollapsed ? '▶' : '▼';
+
+                    nuisanceHeader.appendChild(nuisanceTitle);
+                    nuisanceHeader.appendChild(nuisanceChevron);
+                    nuisanceCard.appendChild(nuisanceHeader);
+
+                    const nuisanceBody = document.createElement('div');
+                    nuisanceBody.style.display = isCollapsed ? 'none' : '';
+
                     const nuisanceHint = document.createElement('div');
-                    nuisanceHint.className = 'small text-muted mb-2';
+                    nuisanceHint.className = 'small text-muted mb-2 mt-1';
                     nuisanceHint.textContent = modelEditorConfoundColumns.length
                         ? `Detected ${modelEditorConfoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
                         : 'No confounds file detected yet. Set the fMRIPrep folder above and reload the model.';
-                    nuisanceCard.appendChild(nuisanceHint);
+                    nuisanceBody.appendChild(nuisanceHint);
+
                     const defaultTransRot = ['trans_x', 'trans_y', 'trans_z', 'rot_x', 'rot_y', 'rot_z'];
                     const nuisancePicker = buildNuisanceRegressorPicker({
                         confoundColumns: modelEditorConfoundColumns,
@@ -2091,7 +2114,16 @@
                             renderModelAccordionEditor();
                         }
                     });
-                    nuisanceCard.appendChild(nuisancePicker);
+                    nuisanceBody.appendChild(nuisancePicker);
+                    nuisanceCard.appendChild(nuisanceBody);
+
+                    nuisanceHeader.addEventListener('click', () => {
+                        const nowHidden = nuisanceBody.style.display !== 'none';
+                        nuisanceBody.style.display = nowHidden ? 'none' : '';
+                        nuisanceChevron.textContent = nowHidden ? '▶' : '▼';
+                        localStorage.setItem(NUISANCE_COLLAPSED_KEY, nowHidden ? '1' : '0');
+                    });
+
                     controls.appendChild(nuisanceCard);
                 }
 

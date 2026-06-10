@@ -3404,24 +3404,42 @@
       if (isFirstLevelNode) {
         const nuisanceCard = document.createElement('div');
         nuisanceCard.className = 'border rounded p-2';
-        const nuisanceTitle = document.createElement('div');
-        nuisanceTitle.className = 'small fw-bold mb-1';
+
+        const NUISANCE_KEY = 'bidspm_nuisance_card_collapsed';
+        const nuisanceCollapsed = localStorage.getItem(NUISANCE_KEY) === '1';
+
+        const nuisanceHeader = document.createElement('div');
+        nuisanceHeader.className = 'd-flex justify-content-between align-items-center';
+        nuisanceHeader.style.cursor = 'pointer';
+        nuisanceHeader.setAttribute('role', 'button');
+        nuisanceHeader.setAttribute('title', 'Click to collapse / expand');
+        const nuisanceTitle = document.createElement('span');
+        nuisanceTitle.className = 'small fw-bold';
         nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
-        nuisanceCard.appendChild(nuisanceTitle);
+        const nuisanceChevron = document.createElement('span');
+        nuisanceChevron.className = 'text-muted ms-2';
+        nuisanceChevron.style.fontSize = '0.75rem';
+        nuisanceChevron.textContent = nuisanceCollapsed ? '▶' : '▼';
+        nuisanceHeader.appendChild(nuisanceTitle);
+        nuisanceHeader.appendChild(nuisanceChevron);
+        nuisanceCard.appendChild(nuisanceHeader);
+
+        const nuisanceBody = document.createElement('div');
+        nuisanceBody.style.display = nuisanceCollapsed ? 'none' : '';
 
         const nuisanceHint = document.createElement('div');
-        nuisanceHint.className = 'small text-muted mb-2';
+        nuisanceHint.className = 'small text-muted mb-2 mt-1';
         nuisanceHint.textContent = confoundColumns.length
           ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
           : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
-        nuisanceCard.appendChild(nuisanceHint);
+        nuisanceBody.appendChild(nuisanceHint);
 
         const nuisanceInModelX = normalizeStringArray(modelObj.X).filter(isLikelyNuisanceRegressor);
         if (nuisanceInModelX.length) {
           const warning = document.createElement('div');
           warning.className = 'alert alert-warning py-1 small mb-2';
           warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
-          nuisanceCard.appendChild(warning);
+          nuisanceBody.appendChild(warning);
 
           const removeNuisanceBtn = document.createElement('button');
           removeNuisanceBtn.type = 'button';
@@ -3431,7 +3449,7 @@
             modelObj.X = normalizeStringArray(modelObj.X).filter(reg => !isLikelyNuisanceRegressor(reg));
             rerenderModelX('Removed nuisance regressors from Model.X.', 'info');
           });
-          nuisanceCard.appendChild(removeNuisanceBtn);
+          nuisanceBody.appendChild(removeNuisanceBtn);
         }
 
         const nuisancePicker = buildNuisanceRegressorPicker({
@@ -3444,7 +3462,16 @@
             rerenderModelX(`Removed ${reg} from Model.X`, 'info');
           }
         });
-        nuisanceCard.appendChild(nuisancePicker);
+        nuisanceBody.appendChild(nuisancePicker);
+        nuisanceCard.appendChild(nuisanceBody);
+
+        nuisanceHeader.addEventListener('click', () => {
+          const nowHidden = nuisanceBody.style.display !== 'none';
+          nuisanceBody.style.display = nowHidden ? 'none' : '';
+          nuisanceChevron.textContent = nowHidden ? '▶' : '▼';
+          localStorage.setItem(NUISANCE_KEY, nowHidden ? '1' : '0');
+        });
+
         xCard.appendChild(nuisanceCard);
       }
     }
@@ -7216,24 +7243,42 @@
         if (isFirstLevelNode) {
           const nuisanceCard = document.createElement('div');
           nuisanceCard.className = 'border rounded p-2 mb-2 bg-white';
-          const nuisanceTitle = document.createElement('div');
-          nuisanceTitle.className = 'small fw-bold mb-1';
+
+          const NUISANCE_KEY = 'bidspm_nuisance_card_collapsed';
+          const nuisanceCollapsed = localStorage.getItem(NUISANCE_KEY) === '1';
+
+          const nuisanceHeader = document.createElement('div');
+          nuisanceHeader.className = 'd-flex justify-content-between align-items-center';
+          nuisanceHeader.style.cursor = 'pointer';
+          nuisanceHeader.setAttribute('role', 'button');
+          nuisanceHeader.setAttribute('title', 'Click to collapse / expand');
+          const nuisanceTitle = document.createElement('span');
+          nuisanceTitle.className = 'small fw-bold';
           nuisanceTitle.textContent = 'Regressors of No Interest (fMRIPrep confounds check)';
-          nuisanceCard.appendChild(nuisanceTitle);
+          const nuisanceChevron = document.createElement('span');
+          nuisanceChevron.className = 'text-muted ms-2';
+          nuisanceChevron.style.fontSize = '0.75rem';
+          nuisanceChevron.textContent = nuisanceCollapsed ? '▶' : '▼';
+          nuisanceHeader.appendChild(nuisanceTitle);
+          nuisanceHeader.appendChild(nuisanceChevron);
+          nuisanceCard.appendChild(nuisanceHeader);
+
+          const nuisanceBody = document.createElement('div');
+          nuisanceBody.style.display = nuisanceCollapsed ? 'none' : '';
 
           const nuisanceHint = document.createElement('div');
-          nuisanceHint.className = 'small text-muted mb-2';
+          nuisanceHint.className = 'small text-muted mb-2 mt-1';
           nuisanceHint.textContent = confoundColumns.length
             ? `Detected ${confoundColumns.length} confound columns. Use presets, search or per-group "+ all" to add to Design Matrix.`
             : 'No confounds file detected yet. Set fMRIPrep folder to load discovered confound columns.';
-          nuisanceCard.appendChild(nuisanceHint);
+          nuisanceBody.appendChild(nuisanceHint);
 
           const nuisanceInModelX = currentRegs.filter(isNuisanceRegressor);
           if (nuisanceInModelX.length) {
             const warning = document.createElement('div');
             warning.className = 'alert alert-warning py-1 small mb-2';
             warning.textContent = `${nuisanceInModelX.length} nuisance regressor(s) are currently inside Model.X.`;
-            nuisanceCard.appendChild(warning);
+            nuisanceBody.appendChild(warning);
 
             const removeNuisanceBtn = document.createElement('button');
             removeNuisanceBtn.type = 'button';
@@ -7248,7 +7293,7 @@
               setModelEditorStatus('Removed nuisance regressors from Model.X.', 'info');
               renderModelAccordionEditor();
             });
-            nuisanceCard.appendChild(removeNuisanceBtn);
+            nuisanceBody.appendChild(removeNuisanceBtn);
           }
 
           const nuisancePickerFactory = typeof window.buildBidspmNuisanceRegressorPicker === 'function'
@@ -7271,7 +7316,7 @@
                 renderModelAccordionEditor();
               }
             });
-            nuisanceCard.appendChild(nuisancePicker);
+            nuisanceBody.appendChild(nuisancePicker);
           } else {
             const nuisanceOptions = Array.from(new Set([
               ...defaultTransRot,
@@ -7298,8 +7343,18 @@
               });
               nuisanceGrid.appendChild(badge);
             });
-            nuisanceCard.appendChild(nuisanceGrid);
+            nuisanceBody.appendChild(nuisanceGrid);
           }
+
+          nuisanceCard.appendChild(nuisanceBody);
+
+          nuisanceHeader.addEventListener('click', () => {
+            const nowHidden = nuisanceBody.style.display !== 'none';
+            nuisanceBody.style.display = nowHidden ? 'none' : '';
+            nuisanceChevron.textContent = nowHidden ? '▶' : '▼';
+            localStorage.setItem(NUISANCE_KEY, nowHidden ? '1' : '0');
+          });
+
           listWrap.appendChild(nuisanceCard);
         }
 

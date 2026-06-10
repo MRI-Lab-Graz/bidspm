@@ -16,23 +16,54 @@
         const openContrastBuilder = config.openContrastBuilder || (() => {});
         const getModelEdges = config.getModelEdges || (() => []);
 
-        function createPanelShell(title, helpText) {
+        function createPanelShell(title, helpText, storageKey = null) {
             const panel = document.createElement('div');
             panel.className = 'd-flex flex-column gap-2 p-3 mb-2 border rounded bg-white';
 
+            const isCollapsed = storageKey ? localStorage.getItem(storageKey) === '1' : false;
+
             const heading = document.createElement('div');
-            heading.className = 'fw-semibold';
-            heading.textContent = title;
+            if (storageKey) {
+                heading.className = 'fw-semibold d-flex justify-content-between align-items-center';
+                heading.style.cursor = 'pointer';
+                heading.setAttribute('role', 'button');
+                heading.setAttribute('title', 'Click to collapse / expand');
+                const titleSpan = document.createElement('span');
+                titleSpan.textContent = title;
+                const chevron = document.createElement('span');
+                chevron.className = 'text-muted ms-2';
+                chevron.style.fontSize = '0.75rem';
+                chevron.textContent = isCollapsed ? '▶' : '▼';
+                heading.appendChild(titleSpan);
+                heading.appendChild(chevron);
+            } else {
+                heading.className = 'fw-semibold';
+                heading.textContent = title;
+            }
             panel.appendChild(heading);
+
+            const body = document.createElement('div');
+            body.className = 'd-flex flex-column gap-2';
+            if (storageKey && isCollapsed) body.style.display = 'none';
 
             if (helpText) {
                 const help = document.createElement('div');
                 help.className = 'small text-muted';
                 help.textContent = helpText;
-                panel.appendChild(help);
+                body.appendChild(help);
             }
 
-            return panel;
+            if (storageKey) {
+                heading.addEventListener('click', () => {
+                    const nowHidden = body.style.display !== 'none';
+                    body.style.display = nowHidden ? 'none' : '';
+                    heading.querySelector('span:last-child').textContent = nowHidden ? '▶' : '▼';
+                    localStorage.setItem(storageKey, nowHidden ? '1' : '0');
+                });
+            }
+
+            panel.appendChild(body);
+            return { panel, body };
         }
 
         function createNodeMaskPicker(node) {
@@ -107,9 +138,10 @@
         }
 
         function createAddTransformationsPanel(node) {
-            const panel = createPanelShell(
+            const { panel, body } = createPanelShell(
                 'Transformations',
-                'Use Transformer Builder to create and apply pipelines. Applying a pipeline does not auto-modify the Design Matrix; generated variables become selectable for Model.X.'
+                'Use Transformer Builder to create and apply pipelines. Applying a pipeline does not auto-modify the Design Matrix; generated variables become selectable for Model.X.',
+                'bidspm_panel_transformations'
             );
 
             const transformations = (
@@ -122,10 +154,10 @@
                 const empty = document.createElement('div');
                 empty.className = 'small text-muted';
                 empty.textContent = 'No transformer pipeline attached yet.';
-                panel.appendChild(empty);
+                body.appendChild(empty);
             } else {
                 const schemaHint = createTransformationsSchemaHint(transformations);
-                if (schemaHint) panel.appendChild(schemaHint);
+                if (schemaHint) body.appendChild(schemaHint);
 
                 const instructionCount = Array.isArray(transformations.Instructions) ? transformations.Instructions.length : 0;
                 const explicitGenerated = normalizeStringArray(transformations.GeneratedColumns);
@@ -146,7 +178,7 @@
                 generatedBadge.className = 'badge bg-warning-subtle text-warning-emphasis border';
                 generatedBadge.textContent = `${explicitGenerated.length} generated`;
                 generatedWrap.appendChild(generatedBadge);
-                panel.appendChild(generatedWrap);
+                body.appendChild(generatedWrap);
 
                 if (explicitGenerated.length) {
                     const pills = document.createElement('div');
@@ -157,7 +189,7 @@
                         pill.textContent = name;
                         pills.appendChild(pill);
                     });
-                    panel.appendChild(pills);
+                    body.appendChild(pills);
                 }
             }
 
@@ -185,15 +217,16 @@
                 actions.appendChild(clearBtn);
             }
 
-            panel.appendChild(actions);
+            body.appendChild(actions);
 
             return panel;
         }
 
         function createDummyContrastsPanel(node) {
-            const panel = createPanelShell(
+            const { panel, body } = createPanelShell(
                 'Dummy Contrasts',
-                'Generate simple baseline contrasts automatically when appropriate.'
+                'Generate simple baseline contrasts automatically when appropriate.',
+                'bidspm_panel_dummy_contrasts'
             );
 
             const dummyContrasts = (
@@ -206,7 +239,7 @@
                 const empty = document.createElement('div');
                 empty.className = 'small text-muted';
                 empty.textContent = 'No dummy contrasts configured for this node.';
-                panel.appendChild(empty);
+                body.appendChild(empty);
 
                 const enableBtn = document.createElement('button');
                 enableBtn.type = 'button';
@@ -217,12 +250,12 @@
                     renderModelAccordionEditor();
                     setModelEditorStatus('Dummy contrasts enabled.', 'info');
                 });
-                panel.appendChild(enableBtn);
+                body.appendChild(enableBtn);
                 return panel;
             }
 
             const schemaHint = createDummyContrastsSchemaHint(dummyContrasts);
-            if (schemaHint) panel.appendChild(schemaHint);
+            if (schemaHint) body.appendChild(schemaHint);
 
             const row = document.createElement('div');
             row.className = 'row g-2';
@@ -270,7 +303,7 @@
             listCol.appendChild(listLabel);
             listCol.appendChild(listInput);
             row.appendChild(listCol);
-            panel.appendChild(row);
+            body.appendChild(row);
 
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
@@ -281,15 +314,16 @@
                 renderModelAccordionEditor();
                 setModelEditorStatus('Dummy contrasts removed.', 'info');
             });
-            panel.appendChild(removeBtn);
+            body.appendChild(removeBtn);
 
             return panel;
         }
 
         function createContrastManagerPanel(node, nodeIndex) {
-            const panel = createPanelShell(
+            const { panel, body } = createPanelShell(
                 'Contrasts',
-                'Define named contrasts over the current node design matrix.'
+                'Define named contrasts over the current node design matrix.',
+                'bidspm_panel_contrasts'
             );
 
             const contrastCount = Array.isArray(node.Contrasts) ? node.Contrasts.length : 0;
@@ -300,13 +334,13 @@
             summary.textContent = contrastCount
                 ? `${contrastCount} explicit contrast${contrastCount === 1 ? '' : 's'} configured.`
                 : 'No explicit contrasts defined yet.';
-            panel.appendChild(summary);
+            body.appendChild(summary);
 
             if (incomingContrastNames.length) {
                 const incoming = document.createElement('div');
                 incoming.className = 'small text-muted';
                 incoming.textContent = `Incoming contrasts from upstream nodes: ${incomingContrastNames.join(', ')}`;
-                panel.appendChild(incoming);
+                body.appendChild(incoming);
             }
 
             const actions = document.createElement('div');
@@ -332,7 +366,7 @@
                 actions.appendChild(clearBtn);
             }
 
-            panel.appendChild(actions);
+            body.appendChild(actions);
 
             return panel;
         }

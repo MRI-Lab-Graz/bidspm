@@ -12,22 +12,49 @@ from .config import Config
 from .logging_utils import log_debug, log_error_non_fatal, log
 
 
+_BIDSPM_ERROR_PATTERN = "bidspm - ERROR"
+
 def run_command(cmd_list, capture_output=False):
     """Execute a command and return success status."""
     log_debug(f"Running command: {' '.join(cmd_list)}")
-    
+
+    bidspm_error_seen = False
+
     try:
-        result = subprocess.run(cmd_list, check=True, text=True,
-                                stdout=subprocess.PIPE if capture_output else None,
-                                stderr=subprocess.STDOUT)
+        # Stream output line-by-line so the user sees live progress and we can
+        # detect bidspm-level errors that don't set a non-zero exit code.
+        proc = subprocess.Popen(
+            cmd_list,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        output_lines = []
+        for line in proc.stdout:
+            line_stripped = line.rstrip()
+            print(line_stripped, flush=True)
+            output_lines.append(line_stripped)
+            if _BIDSPM_ERROR_PATTERN in line_stripped:
+                bidspm_error_seen = True
+        proc.wait()
+
         if capture_output:
-            log(result.stdout)
-        return True  # Success
-    except subprocess.CalledProcessError as e:
-        log_error_non_fatal(f"Command failed with exit code {e.returncode}: {' '.join(cmd_list)}")
-        if e.stdout:
-            log(f"Command output: {e.stdout}")
-        return False  # Failure
+            log('\n'.join(output_lines))
+
+        if proc.returncode != 0:
+            log_error_non_fatal(f"Command failed with exit code {proc.returncode}: {' '.join(cmd_list)}")
+            return False
+
+        if bidspm_error_seen:
+            log_error_non_fatal(f"bidspm reported an ERROR during execution (exit code was 0): {' '.join(cmd_list[:3])}")
+            return False
+
+        return True
+
+    except Exception as e:
+        log_error_non_fatal(f"Command failed: {e}: {' '.join(cmd_list)}")
+        return False
 
 
 def get_container_model_path(model_file_path: Path, derivatives_dir: Path) -> str:
