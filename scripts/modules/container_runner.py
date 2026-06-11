@@ -52,6 +52,7 @@ def _build_docker_command(container_config: ContainerConfig, config: Config, arg
     cmd = [
         "docker", "run", "--rm",
         "-v", f"{config.BIDS_DIR}:/raw",
+        "-v", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
         "-v", f"{config.DERIVATIVES_DIR}:/derivatives"
     ]
     
@@ -99,6 +100,7 @@ def _build_apptainer_command(container_config: ContainerConfig, config: Config, 
         "apptainer", "run",
         "--writable-tmpfs",  # Allow writing to /tmp and other temp locations
         "--bind", f"{config.BIDS_DIR}:/raw",
+        "--bind", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
         "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
     ]
     
