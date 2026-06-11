@@ -492,6 +492,10 @@ def build_apptainer_command(
             _ov / "src" / "stats" / "subject_level" / "specifySubLvlContrasts.m",
             "/home/neuro/bidspm/src/stats/subject_level/specifySubLvlContrasts.m",
         ),
+        (
+            _ov / "src" / "workflows" / "stats" / "bidsResults.m",
+            "/home/neuro/bidspm/src/workflows/stats/bidsResults.m",
+        ),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
