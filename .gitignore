@@ -14,7 +14,6 @@ build/uv
 build/uvx
 cleanup_disk.sh
 error_logs/
-studies/
 external/
 local_src/
 logs/
@@ -52,7 +51,6 @@ container_*_debug*.json
 container_*_fix*.json
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
