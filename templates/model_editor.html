@@ -4072,12 +4072,17 @@
 
       const help = document.createElement('div');
       help.className = 'small text-muted';
-      help.textContent = 'Reserved options: run, session, subject, contrast. Additional metadata fields are also allowed.';
+      const _gbNodeLevel = (node.Level || 'Run').toLowerCase();
+      const _gbAllowRun = _gbNodeLevel === 'run';
+      help.textContent = _gbAllowRun
+        ? 'Reserved options: run, session, subject, contrast. Additional metadata fields are also allowed.'
+        : 'Reserved options: session, subject, contrast. Additional metadata fields are also allowed. (run is only valid at the Run level)';
       wrapper.appendChild(help);
 
+      const _gbReserved = _gbAllowRun ? GROUPBY_RESERVED_OPTIONS : GROUPBY_RESERVED_OPTIONS.filter(o => o !== 'run');
       const allOptions = Array.from(new Set([
-        ...GROUPBY_RESERVED_OPTIONS,
-        ...normalizeStringArray(window.modelEditorGroupByOptions),
+        ..._gbReserved,
+        ...normalizeStringArray(window.modelEditorGroupByOptions).filter(o => _gbAllowRun || o !== 'run'),
         ...node.GroupBy
       ]));
       const select = document.createElement('select');
@@ -5826,7 +5831,9 @@
 
     const quick = document.createElement('div');
     quick.className = 'd-flex flex-wrap gap-2';
-    Array.from(new Set([...(modelEditorGroupByOptions || []), 'run', 'session', 'subject', 'contrast'])).forEach(option => {
+    const _gbAllowRun2 = (node.Level || 'Run').toLowerCase() === 'run';
+    const _gbBase = _gbAllowRun2 ? ['run', 'session', 'subject', 'contrast'] : ['session', 'subject', 'contrast'];
+    Array.from(new Set([...(modelEditorGroupByOptions || []).filter(o => _gbAllowRun2 || o !== 'run'), ..._gbBase])).forEach(option => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn btn-sm btn-outline-secondary';
