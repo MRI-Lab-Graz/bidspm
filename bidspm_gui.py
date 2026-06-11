@@ -50,8 +50,8 @@ from lib import (
 )
 from lib.config import auto_select_container_config
 from lib.project_manager import project_manager
-from web_config_fs_api import register_config_fs_routes
-from web_discovery_model_api import (
+from webapp.web_config_fs_api import register_config_fs_routes
+from webapp.web_discovery_model_api import (
     _build_model_warnings,
     _discover_confound_info,
     _discover_event_info,
@@ -59,10 +59,10 @@ from web_discovery_model_api import (
     _extract_model_hints,
     register_discovery_model_routes,
 )
-from web_execution_api import ExecutionRegistry, register_execution_routes
-from web_pages import register_page_routes
-from web_projects_api import register_project_routes
-from web_utility_stats_api import register_utility_stats_routes
+from webapp.web_execution_api import ExecutionRegistry, register_execution_routes
+from webapp.web_pages import register_page_routes
+from webapp.web_projects_api import register_project_routes
+from webapp.web_utility_stats_api import register_utility_stats_routes
 
 
 # =============================================================================
