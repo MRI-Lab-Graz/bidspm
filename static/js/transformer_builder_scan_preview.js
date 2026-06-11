@@ -197,9 +197,30 @@
         : {};
       const valuesMap = {};
 
+      const allEdges = Array.isArray(draft?.Edges) ? draft.Edges : [];
+      const nodesByName = Object.fromEntries(
+        nodes.map((n) => [String(n?.Name || '').trim(), n])
+      );
+
       higherLevelNodes.forEach((node) => {
-        const metadataTerms = normalizeLaunchStringArray(node.GroupBy)
+        const nodeName = String(node?.Name || '').trim();
+        const ownTerms = normalizeLaunchStringArray(node.GroupBy)
           .filter((term) => term && term !== 'subject');
+
+        // Also include GroupBy terms from source nodes — these are entity
+        // columns (e.g. "run", "session") that bidspm carries forward as
+        // metadata when building the higher-level design table.
+        const sourceTerms = [];
+        allEdges.forEach((edge) => {
+          if (String(edge?.Destination || '').trim() !== nodeName) return;
+          const src = nodesByName[String(edge?.Source || '').trim()];
+          if (!src) return;
+          normalizeLaunchStringArray(src.GroupBy)
+            .filter((t) => t && t !== 'subject' && !ownTerms.includes(t))
+            .forEach((t) => { if (!sourceTerms.includes(t)) sourceTerms.push(t); });
+        });
+
+        const metadataTerms = [...ownTerms, ...sourceTerms];
 
         metadataTerms.forEach((term) => {
           if (term === 'contrast') {
