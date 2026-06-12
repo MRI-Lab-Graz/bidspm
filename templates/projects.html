@@ -953,7 +953,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let importSelectedPath = '';
     
     document.getElementById('btn-import-config')?.addEventListener('click', function() {
-        loadImportBrowser(process.cwd || '/');
+        loadImportBrowser('/');
         new bootstrap.Modal(document.getElementById('importConfigModal')).show();
     });
     

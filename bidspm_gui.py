@@ -32,6 +32,7 @@ import threading
 import time
 import re
 import shlex
+import shutil
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -188,12 +189,32 @@ def print_startup_preflight_report(app_root: Path = APP_ROOT) -> bool:
 
 
 def open_browser_when_ready(url: str) -> tuple[bool, str]:
-    """Wait for the server URL to respond, then try to open it in a browser."""
-    import webbrowser
+    """Wait for the server URL to respond, then try to open it in a browser.
 
+    When running under VS Code Remote SSH the $BROWSER env var points to VS Code's
+    browser.sh helper, which opens URLs in the Simple Browser panel rather than in
+    Firefox.  Simple Browser is too restricted for a full Flask app (it renders
+    blank), so we prefer a real browser (Firefox) and fall back to webbrowser.open
+    only if no real browser is found.
+    """
     if not wait_for_http_ready(url):
         return False, f"Server did not become ready within the browser-open timeout. Open manually: {url}"
 
+    # Prefer a real browser; avoid the VS Code browser.sh wrapper.
+    for browser_cmd in ('firefox', 'chromium-browser', 'google-chrome', 'xdg-open'):
+        if shutil.which(browser_cmd):
+            try:
+                vscode_browser = os.environ.get('BROWSER', '')
+                env = {**os.environ}
+                if 'vscode' in vscode_browser.lower() or 'code' in vscode_browser.lower():
+                    env.pop('BROWSER', None)   # let the real browser take over
+                subprocess.Popen([browser_cmd, url], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True, f'Browser opened automatically ({browser_cmd})'
+            except Exception:
+                continue
+
+    import webbrowser
     try:
         opened = webbrowser.open(url)
     except Exception as exc:
