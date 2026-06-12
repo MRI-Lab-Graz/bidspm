@@ -1291,6 +1291,7 @@
                     }
 
                     modelEditorPendingOpenPaths.add(section.statePath);
+                    modelEditorPendingOpenPaths.add(`${section.path}[${newIndex}]`);
                     if (edgeCreated) modelEditorPendingOpenPaths.add('Edges');
                     renderModelAccordionEditor();
                     const edgeNote = edgeCreated ? ' Added linking edge.' : '';
@@ -2874,6 +2875,8 @@
         // Models file change triggers model workspace reload and background validation/sync
         const modelInput = document.getElementById('input-MODELS_FILE');
         if (modelInput) modelInput.addEventListener('change', async () => {
+            // Persist the new path so it survives page reloads (e.g. returning from transformer builder).
+            if (hasProject && currentProjectId) await saveProjectConfig();
             await openModelEditor({ scrollIntoView: false, showStatus: false });
             await refreshExecutionNodeOptions();
             refreshModelTasks();

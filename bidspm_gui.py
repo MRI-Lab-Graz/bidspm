@@ -189,30 +189,16 @@ def print_startup_preflight_report(app_root: Path = APP_ROOT) -> bool:
 
 
 def open_browser_when_ready(url: str) -> tuple[bool, str]:
-    """Wait for the server URL to respond, then try to open it in a browser.
+    """Wait for the server URL to respond, then open it via $BROWSER / webbrowser.
 
-    When running under VS Code Remote SSH the $BROWSER env var points to VS Code's
-    browser.sh helper, which opens URLs in the Simple Browser panel rather than in
-    Firefox.  Simple Browser is too restricted for a full Flask app (it renders
-    blank), so we prefer a real browser (Firefox) and fall back to webbrowser.open
-    only if no real browser is found.
+    Under VS Code Remote SSH, $BROWSER points to browser.sh which calls
+    `code --openExternal <url>` — this forwards the URL to the Mac client and
+    opens it in the system browser (Safari).  We must NOT call xdg-open or any
+    other Linux-native launcher first, because they silently do nothing on a
+    headless server yet report success, preventing the VS Code path from running.
     """
     if not wait_for_http_ready(url):
         return False, f"Server did not become ready within the browser-open timeout. Open manually: {url}"
-
-    # Prefer a real browser; avoid the VS Code browser.sh wrapper.
-    for browser_cmd in ('firefox', 'chromium-browser', 'google-chrome', 'xdg-open'):
-        if shutil.which(browser_cmd):
-            try:
-                vscode_browser = os.environ.get('BROWSER', '')
-                env = {**os.environ}
-                if 'vscode' in vscode_browser.lower() or 'code' in vscode_browser.lower():
-                    env.pop('BROWSER', None)   # let the real browser take over
-                subprocess.Popen([browser_cmd, url], env=env,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return True, f'Browser opened automatically ({browser_cmd})'
-            except Exception:
-                continue
 
     import webbrowser
     try:
@@ -444,12 +430,9 @@ if __name__ == '__main__':
     print()
     print(f"Running with Waitress server on 0.0.0.0:{port}")
 
-    if not args.no_browser:
-        def launch_browser() -> None:
-            opened, message = open_browser_when_ready(url)
-            prefix = '✅' if opened else '⚠️'
-            print(f"{prefix} {message}")
-
-        threading.Timer(1, launch_browser).start()
+    # VS Code Remote SSH intercepts localhost URLs and opens them in its Simple
+    # Browser (a stripped-down WebView) instead of Safari.  Suppress auto-open
+    # and let the user open the URL in their real browser.
+    print(f"\n  👉  Open in Safari: {url}\n")
 
     serve(app, host='0.0.0.0', port=port, threads=10)

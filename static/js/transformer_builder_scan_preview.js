@@ -198,8 +198,11 @@
       const valuesMap = {};
 
       const allEdges = Array.isArray(draft?.Edges) ? draft.Edges : [];
+      // Build lookup from ALL draft nodes so edge source lookups (run-level → subject-level)
+      // can find the source node even when nodes[] only contains the launch node.
+      const allDraftNodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
       const nodesByName = Object.fromEntries(
-        nodes.map((n) => [String(n?.Name || '').trim(), n])
+        allDraftNodes.map((n) => [String(n?.Name || '').trim(), n])
       );
 
       higherLevelNodes.forEach((node) => {

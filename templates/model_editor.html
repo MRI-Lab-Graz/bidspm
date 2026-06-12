@@ -5575,6 +5575,124 @@
     return wrap;
   }
 
+  function createModelInputFilterPicker() {
+    if (!modelEditorDraft || typeof modelEditorDraft !== 'object') return null;
+    if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {};
+
+    const entityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
+      ? window.modelEditorInputEntityValues : {};
+    const availableSessions = Array.isArray(entityValues.session) ? entityValues.session.map(String).filter(Boolean) : [];
+    const availableRuns = Array.isArray(entityValues.run) ? entityValues.run.map(String).filter(Boolean) : [];
+
+    if (!availableSessions.length && !availableRuns.length) return null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'border rounded p-2 mb-2 bg-white d-flex flex-column gap-2';
+
+    function buildInputFilterField(filterKey, availableValues) {
+      const fieldWrap = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'small fw-bold mb-1';
+      title.textContent = `Input.${filterKey} (optional)`;
+      fieldWrap.appendChild(title);
+
+      const hint = document.createElement('div');
+      hint.className = 'small text-muted mb-1';
+      hint.textContent = `Restrict the pipeline to specific ${filterKey}s. Leave empty to include all.`;
+      fieldWrap.appendChild(hint);
+
+      const current = Array.isArray(modelEditorDraft.Input[filterKey])
+        ? modelEditorDraft.Input[filterKey].map(String).filter(Boolean)
+        : [];
+
+      const suggestionsId = `input-filter-${filterKey}-suggestions`;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'form-control form-control-sm mb-1';
+      input.placeholder = availableValues.join(', ') || `${filterKey}_1, ${filterKey}_2`;
+      input.setAttribute('list', suggestionsId);
+
+      const datalist = document.createElement('datalist');
+      datalist.id = suggestionsId;
+      availableValues.forEach(val => {
+        const option = document.createElement('option');
+        option.value = val;
+        datalist.appendChild(option);
+      });
+      fieldWrap.appendChild(datalist);
+      fieldWrap.appendChild(input);
+
+      const chipRow = document.createElement('div');
+      chipRow.className = 'd-flex flex-wrap gap-1 mb-1';
+
+      function refreshChips() {
+        chipRow.innerHTML = '';
+        const active = Array.isArray(modelEditorDraft.Input[filterKey])
+          ? modelEditorDraft.Input[filterKey].map(String).filter(Boolean)
+          : [];
+        active.forEach(val => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'btn btn-sm btn-primary';
+          chip.innerHTML = `${val} <i class="fas fa-times ms-1"></i>`;
+          chip.addEventListener('click', () => {
+            modelEditorDraft.Input[filterKey] = active.filter(v => v !== val);
+            if (!modelEditorDraft.Input[filterKey].length) delete modelEditorDraft.Input[filterKey];
+            renderModelAccordionEditor();
+            setModelEditorStatus(`Input.${filterKey} updated.`, 'info');
+          });
+          chipRow.appendChild(chip);
+        });
+        if (!active.length) {
+          const none = document.createElement('span');
+          none.className = 'small text-muted';
+          none.textContent = `All ${filterKey}s included`;
+          chipRow.appendChild(none);
+        }
+      }
+      refreshChips();
+      fieldWrap.appendChild(chipRow);
+
+      const quickRow = document.createElement('div');
+      quickRow.className = 'd-flex flex-wrap gap-1';
+      availableValues.forEach(val => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'btn btn-sm btn-outline-secondary';
+        chip.textContent = val;
+        chip.addEventListener('click', () => {
+          if (!Array.isArray(modelEditorDraft.Input[filterKey])) modelEditorDraft.Input[filterKey] = [];
+          if (!modelEditorDraft.Input[filterKey].includes(val)) {
+            modelEditorDraft.Input[filterKey].push(val);
+            renderModelAccordionEditor();
+            setModelEditorStatus(`Input.${filterKey} updated.`, 'info');
+          }
+        });
+        quickRow.appendChild(chip);
+      });
+      fieldWrap.appendChild(quickRow);
+
+      input.addEventListener('change', () => {
+        const val = input.value.trim();
+        if (!val) return;
+        if (!Array.isArray(modelEditorDraft.Input[filterKey])) modelEditorDraft.Input[filterKey] = [];
+        if (!modelEditorDraft.Input[filterKey].includes(val)) {
+          modelEditorDraft.Input[filterKey].push(val);
+          renderModelAccordionEditor();
+          setModelEditorStatus(`Input.${filterKey} updated.`, 'info');
+        }
+        input.value = '';
+      });
+
+      return fieldWrap;
+    }
+
+    if (availableSessions.length) wrap.appendChild(buildInputFilterField('session', availableSessions));
+    if (availableRuns.length) wrap.appendChild(buildInputFilterField('run', availableRuns));
+
+    return wrap;
+  }
+
   function getModelEditorSections(model) {
     const sections = [
       { id:'__section_overview', label:'Model Overview', path:'', statePath:'__section_overview', value: getOverviewSectionValue(model), kind:'overview', icon:'fa-file-lines', stats: getOverviewSectionStats(model) },
@@ -6600,71 +6718,108 @@
       bodyWrap.appendChild(grid);
 
       const filterWrap = document.createElement('div');
-      const filterLabel = document.createElement('label');
-      filterLabel.className = 'form-label small mb-1';
-      filterLabel.textContent = 'Filter.contrast (optional)';
-      const availableContrastNames = getEdgeAvailableContrastNames(edge);
-      const filterSuggestionsId = `edge-${idx}-filter-contrast-suggestions`;
-      const filterInput = document.createElement('input');
-      filterInput.type = 'text';
-      filterInput.className = 'form-control form-control-sm';
-      filterInput.placeholder = availableContrastNames.length ? availableContrastNames.join(', ') : 'contrast_a, contrast_b';
-      if (availableContrastNames.length) filterInput.setAttribute('list', filterSuggestionsId);
-      filterInput.value = normalizeEditorStringArray(edge.Filter?.contrast).join(', ');
-      filterInput.addEventListener('change', () => {
-        const values = parseCsvValues(filterInput.value);
-        if (!values.length) {
-          if (edge.Filter && typeof edge.Filter === 'object') {
-            delete edge.Filter.contrast;
-            if (!Object.keys(edge.Filter).length) delete edge.Filter;
-          }
-        } else {
-          if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
-          edge.Filter.contrast = values;
-        }
-        renderModelAccordionEditor();
-        setModelEditorStatus('Edge updated.', 'info');
-      });
-      filterWrap.appendChild(filterLabel);
-      filterWrap.appendChild(filterInput);
 
-      if (availableContrastNames.length) {
-        const datalist = document.createElement('datalist');
-        datalist.id = filterSuggestionsId;
-        availableContrastNames.forEach(name => {
-          const option = document.createElement('option');
-          option.value = name;
-          datalist.appendChild(option);
-        });
-        filterWrap.appendChild(datalist);
-
-        const quickRow = document.createElement('div');
-        quickRow.className = 'd-flex flex-wrap gap-1 mt-1';
-        availableContrastNames.slice(0, 10).forEach(name => {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.className = 'btn btn-sm btn-outline-secondary';
-          chip.textContent = name;
-          chip.addEventListener('click', () => {
+      function buildEdgeFilterField(filterKey, availableValues, hintText) {
+        const fieldWrap = document.createElement('div');
+        fieldWrap.className = 'mt-2';
+        const label = document.createElement('label');
+        label.className = 'form-label small mb-1';
+        label.textContent = `Filter.${filterKey} (optional)`;
+        const suggestionsId = `edge-${idx}-filter-${filterKey}-suggestions`;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm';
+        input.placeholder = availableValues.length ? availableValues.join(', ') : `${filterKey}_a, ${filterKey}_b`;
+        if (availableValues.length) input.setAttribute('list', suggestionsId);
+        input.value = normalizeEditorStringArray(edge.Filter?.[filterKey]).join(', ');
+        input.addEventListener('change', () => {
+          const values = parseCsvValues(input.value);
+          if (!values.length) {
+            if (edge.Filter && typeof edge.Filter === 'object') {
+              delete edge.Filter[filterKey];
+              if (!Object.keys(edge.Filter).length) delete edge.Filter;
+            }
+          } else {
             if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
-            edge.Filter.contrast = Array.from(new Set([
-              ...normalizeEditorStringArray(edge.Filter.contrast),
-              name
-            ]));
-            renderModelAccordionEditor();
-            setModelEditorStatus('Edge updated.', 'info');
-          });
-          quickRow.appendChild(chip);
+            edge.Filter[filterKey] = values;
+          }
+          renderModelAccordionEditor();
+          setModelEditorStatus('Edge updated.', 'info');
         });
-        filterWrap.appendChild(quickRow);
+        fieldWrap.appendChild(label);
+        fieldWrap.appendChild(input);
+
+        if (availableValues.length) {
+          const datalist = document.createElement('datalist');
+          datalist.id = suggestionsId;
+          availableValues.forEach(val => {
+            const option = document.createElement('option');
+            option.value = val;
+            datalist.appendChild(option);
+          });
+          fieldWrap.appendChild(datalist);
+
+          const quickRow = document.createElement('div');
+          quickRow.className = 'd-flex flex-wrap gap-1 mt-1';
+          availableValues.slice(0, 10).forEach(val => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'btn btn-sm btn-outline-secondary';
+            chip.textContent = val;
+            chip.addEventListener('click', () => {
+              if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
+              edge.Filter[filterKey] = Array.from(new Set([
+                ...normalizeEditorStringArray(edge.Filter[filterKey]),
+                val
+              ]));
+              renderModelAccordionEditor();
+              setModelEditorStatus('Edge updated.', 'info');
+            });
+            quickRow.appendChild(chip);
+          });
+          fieldWrap.appendChild(quickRow);
+        }
+
+        if (hintText) {
+          const hint = document.createElement('div');
+          hint.className = 'small text-muted mt-1';
+          hint.textContent = hintText;
+          fieldWrap.appendChild(hint);
+        }
+
+        return fieldWrap;
       }
 
-      const filterHint = document.createElement('div');
-      filterHint.className = 'small text-muted mt-1';
-      filterHint.textContent = availableContrastNames.length
-        ? `Available from source node ${edge.Source || '?'}: ${availableContrastNames.join(', ')}`
-        : 'No named source contrasts were found yet. Define source Node.Contrasts first.';
-      filterWrap.appendChild(filterHint);
+      const availableContrastNames = getEdgeAvailableContrastNames(edge);
+      filterWrap.appendChild(buildEdgeFilterField(
+        'contrast',
+        availableContrastNames,
+        availableContrastNames.length
+          ? `Available from source node ${edge.Source || '?'}: ${availableContrastNames.join(', ')}`
+          : 'No named source contrasts were found yet. Define source Node.Contrasts first.'
+      ));
+
+      const entityValues = (window.modelEditorInputEntityValues && typeof window.modelEditorInputEntityValues === 'object')
+        ? window.modelEditorInputEntityValues
+        : {};
+      const availableSessions = Array.isArray(entityValues.session) ? entityValues.session.map(String).filter(Boolean) : [];
+      const availableRuns = Array.isArray(entityValues.run) ? entityValues.run.map(String).filter(Boolean) : [];
+
+      filterWrap.appendChild(buildEdgeFilterField(
+        'session',
+        availableSessions,
+        availableSessions.length
+          ? `Sessions in dataset: ${availableSessions.join(', ')}`
+          : 'No sessions discovered yet. Set the BIDS folder in Input to load values.'
+      ));
+
+      filterWrap.appendChild(buildEdgeFilterField(
+        'run',
+        availableRuns,
+        availableRuns.length
+          ? `Runs in dataset: ${availableRuns.join(', ')}`
+          : 'No runs discovered yet. Set the BIDS folder in Input to load values.'
+      ));
 
       const knownNodeNames = nodes
         .map(node => String(node?.Name || '').trim())
@@ -6698,7 +6853,7 @@
   }
 
   function renderModelSectionContent(body, section) {
-    if (section.kind === 'input') { body.appendChild(createModelTaskPicker()); const extraInput = section.value && typeof section.value === 'object' ? Object.fromEntries(Object.entries(section.value).filter(([key])=>key!=='task')) : {}; if (Object.keys(extraInput).length > 0) { renderJsonEditor(body, extraInput, 'Input', false, 0); } else { body.appendChild(createInlineNote('Additional input properties will appear here if the model defines them.')); } return; }
+    if (section.kind === 'input') { body.appendChild(createModelTaskPicker()); const filterPicker = createModelInputFilterPicker(); if (filterPicker) body.appendChild(filterPicker); const MANAGED_INPUT_KEYS = new Set(['task', 'session', 'run']); const extraInput = section.value && typeof section.value === 'object' ? Object.fromEntries(Object.entries(section.value).filter(([key])=>!MANAGED_INPUT_KEYS.has(key))) : {}; if (Object.keys(extraInput).length > 0) { renderJsonEditor(body, extraInput, 'Input', false, 0); } else { body.appendChild(createInlineNote('Additional input properties will appear here if the model defines them.')); } return; }
     if (section.kind === 'overview') { body.appendChild(createTopLevelSchemaHint(modelEditorDraft)); renderJsonEditor(body, section.value, '', false, 0); return; }
     if (section.kind === 'nodes') { renderNodesWorkspace(body); return; }
     if (section.kind === 'edges') { renderEdgesWorkspace(body); return; }
