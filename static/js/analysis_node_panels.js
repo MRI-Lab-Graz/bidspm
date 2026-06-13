@@ -246,7 +246,7 @@
                 enableBtn.className = 'btn btn-sm btn-outline-secondary align-self-start';
                 enableBtn.textContent = 'Enable Dummy Contrasts';
                 enableBtn.addEventListener('click', () => {
-                    node.DummyContrasts = { Test: 't', Contrasts: [] };
+                    node.DummyContrasts = { Test: 't' };
                     renderModelAccordionEditor();
                     setModelEditorStatus('Dummy contrasts enabled.', 'info');
                 });
@@ -293,10 +293,15 @@
             listInput.placeholder = 'trial_type.go, trial_type.stop';
             listInput.value = normalizeStringArray(dummyContrasts.Contrasts).join(', ');
             listInput.addEventListener('change', () => {
-                dummyContrasts.Contrasts = String(listInput.value || '')
+                const parsed = String(listInput.value || '')
                     .split(',')
                     .map((value) => value.trim())
                     .filter(Boolean);
+                if (parsed.length) {
+                    dummyContrasts.Contrasts = parsed;
+                } else {
+                    delete dummyContrasts.Contrasts;
+                }
                 renderModelAccordionEditor();
                 setModelEditorStatus('Dummy contrasts updated.', 'info');
             });
@@ -359,7 +364,7 @@
                 clearBtn.className = 'btn btn-sm btn-outline-danger';
                 clearBtn.textContent = 'Clear Contrasts';
                 clearBtn.addEventListener('click', () => {
-                    node.Contrasts = [];
+                    delete node.Contrasts;
                     renderModelAccordionEditor();
                     setModelEditorStatus('Contrasts cleared.', 'info');
                 });

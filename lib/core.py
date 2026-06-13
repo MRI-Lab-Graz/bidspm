@@ -493,6 +493,10 @@ def build_apptainer_command(
             "/home/neuro/bidspm/src/stats/subject_level/specifySubLvlContrasts.m",
         ),
         (
+            _ov / "src" / "stats" / "subject_level" / "createAndReturnCounfoundMatFile.m",
+            "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m",
+        ),
+        (
             _ov / "src" / "workflows" / "stats" / "bidsResults.m",
             "/home/neuro/bidspm/src/workflows/stats/bidsResults.m",
         ),
@@ -755,26 +759,34 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
 def _check_empty_contrasts(model: Dict) -> List[str]:
     """Check for empty or missing contrast definitions."""
     issues = []
-    
-    if 'Steps' not in model:
-        return issues
-    
-    for step_idx, step in enumerate(model.get('Steps', [])):
-        if 'Level' not in step:
+
+    # BIDS stats model 1.0 uses "Nodes"; older drafts used "Steps".
+    nodes = model.get('Nodes', model.get('Steps', []))
+
+    for node_idx, node in enumerate(nodes):
+        if 'Level' not in node:
             continue
-            
-        for contrast in step.get('Contrasts', []):
+
+        node_name = node.get('Name', f'node {node_idx}')
+
+        for contrast in node.get('Contrasts', []):
+            if not isinstance(contrast, dict):
+                continue
             if 'Name' not in contrast or not contrast.get('Name', '').strip():
-                issues.append(f"Step {step_idx}: Contrast missing 'Name'")
-            
+                issues.append(f"Node '{node_name}': contrast missing 'Name'")
+
             if 'ConditionList' not in contrast or not contrast.get('ConditionList'):
                 name = contrast.get('Name', 'unnamed')
-                issues.append(f"Step {step_idx}: Contrast '{name}' has empty 'ConditionList'")
-            
+                issues.append(f"Node '{node_name}': contrast '{name}' has empty 'ConditionList'")
+
             if 'Weights' in contrast and not contrast.get('Weights'):
                 name = contrast.get('Name', 'unnamed')
-                issues.append(f"Step {step_idx}: Contrast '{name}' has empty 'Weights'")
-    
+                issues.append(f"Node '{node_name}': contrast '{name}' has empty 'Weights'")
+
+        dummy = node.get('DummyContrasts')
+        if isinstance(dummy, dict) and 'Contrasts' in dummy and dummy['Contrasts'] == []:
+            issues.append(f"Node '{node_name}': DummyContrasts.Contrasts is an empty list — omit the key to use all model variables")
+
     return issues
 
 

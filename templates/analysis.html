@@ -1133,6 +1133,66 @@
         return taskCard;
     }
 
+    function createModelSessionRunPicker() {
+        const entityValues = (modelEditorInputEntityValues && typeof modelEditorInputEntityValues === 'object')
+            ? modelEditorInputEntityValues : {};
+        const availableSessions = Array.isArray(entityValues.session) ? entityValues.session.map(String).filter(Boolean) : [];
+        const availableRuns = Array.isArray(entityValues.run) ? entityValues.run.map(String).filter(Boolean) : [];
+
+        if (!availableSessions.length && !availableRuns.length) return null;
+
+        if (!modelEditorDraft.Input || typeof modelEditorDraft.Input !== 'object') modelEditorDraft.Input = {};
+
+        const wrap = document.createElement('div');
+        wrap.className = 'model-task-picker';
+
+        function buildFilterSection(filterKey, availableValues) {
+            const section = document.createElement('div');
+            if (wrap.childElementCount > 0) section.className = 'mt-2 pt-2 border-top';
+
+            const title = document.createElement('div');
+            title.className = 'model-task-picker-title';
+            title.textContent = `Input.${filterKey} (from BIDS folder)`;
+            section.appendChild(title);
+
+            const hint = document.createElement('div');
+            hint.className = 'small text-muted mb-2';
+            hint.textContent = `Restrict to specific ${filterKey}s. Leave all unchecked to include all.`;
+            section.appendChild(hint);
+
+            const pillRow = document.createElement('div');
+            pillRow.className = 'd-flex flex-wrap gap-2';
+            availableValues.forEach(val => {
+                const pill = document.createElement('label');
+                const isActive = Array.isArray(modelEditorDraft.Input[filterKey]) && modelEditorDraft.Input[filterKey].includes(val);
+                pill.className = `model-task-pill ${isActive ? 'active' : ''}`;
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = isActive;
+                checkbox.addEventListener('change', () => {
+                    const set = new Set(modelEditorDraft.Input[filterKey] || []);
+                    if (checkbox.checked) set.add(val);
+                    else set.delete(val);
+                    modelEditorDraft.Input[filterKey] = Array.from(set);
+                    if (!modelEditorDraft.Input[filterKey].length) delete modelEditorDraft.Input[filterKey];
+                    renderModelAccordionEditor();
+                });
+
+                pill.appendChild(checkbox);
+                pill.appendChild(document.createTextNode(val));
+                pillRow.appendChild(pill);
+            });
+            section.appendChild(pillRow);
+            return section;
+        }
+
+        if (availableSessions.length) wrap.appendChild(buildFilterSection('session', availableSessions));
+        if (availableRuns.length) wrap.appendChild(buildFilterSection('run', availableRuns));
+
+        return wrap;
+    }
+
     function createInlineNote(message) {
         const note = document.createElement('div');
         note.className = 'model-inline-note';
@@ -1157,8 +1217,11 @@
     function renderModelSectionContent(body, section) {
         if (section.kind === 'input') {
             body.appendChild(createModelTaskPicker());
+            const sessionRunPicker = createModelSessionRunPicker();
+            if (sessionRunPicker) body.appendChild(sessionRunPicker);
+            const MANAGED_INPUT_KEYS = new Set(['task', 'session', 'run']);
             const extraInput = section.value && typeof section.value === 'object'
-                ? Object.fromEntries(Object.entries(section.value).filter(([key]) => key !== 'task'))
+                ? Object.fromEntries(Object.entries(section.value).filter(([key]) => !MANAGED_INPUT_KEYS.has(key)))
                 : {};
 
             if (Object.keys(extraInput).length > 0) {
