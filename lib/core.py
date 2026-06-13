@@ -433,6 +433,7 @@ def build_apptainer_command(
         _wrapper.chmod(0o755)
         cmd.extend([
             "--bind", f"{_host_node}:/usr/bin/node",
+            "--bind", f"{_bids_cli}:/usr/lib/node_modules/bids-validator/dist/commonjs/cli.js",
             "--bind", f"{_wrapper}:/usr/bin/bids-validator",
         ])
 

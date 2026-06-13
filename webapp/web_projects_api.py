@@ -49,7 +49,7 @@ def _build_project_preflight_results(config) -> dict:
     available_spaces = []
     if fmriprep_path and fmriprep_path.exists():
         for space_name in ['MNI152NLin2009cAsym', 'MNI152NLin6Asym', 'T1w']:
-            if list(fmriprep_path.glob(f'**/*space-{space_name}*.nii*')):
+            if next(fmriprep_path.glob(f'**/*space-{space_name}*.nii*'), None) is not None:
                 available_spaces.append(space_name)
 
         if space in available_spaces:
@@ -63,11 +63,12 @@ def _build_project_preflight_results(config) -> dict:
 
     output_path = Path(config.output_folder) if config.output_folder else None
     if output_path and output_path.exists():
-        smooth_files = list(output_path.glob('**/*desc-smth*')) + list(output_path.glob('**/smooth/**/*.nii*'))
-        if smooth_files:
-            results['smooth'] = {'status': 'ok', 'message': f'Smoothing done ({len(smooth_files)} files)', 'value': 'Yes'}
-        else:
-            results['smooth'] = {'status': 'na', 'message': 'No smoothed files found', 'value': 'No'}
+        smooth_found = next(output_path.glob('**/*desc-smth*'), None) is not None
+        results['smooth'] = {
+            'status': 'ok' if smooth_found else 'na',
+            'message': 'Smoothed files found' if smooth_found else 'No smoothed files found',
+            'value': 'Yes' if smooth_found else 'No',
+        }
     else:
         results['smooth'] = {'status': 'na', 'message': 'Output folder not available', 'value': 'No'}
 
