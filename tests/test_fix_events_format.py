@@ -67,9 +67,10 @@ class TestFixEventsFormat(unittest.TestCase):
             self.assertEqual(item_row["aut_response"], "zum Wärmen")
             self.assertEqual(item_row["valid_response"], "valid")
             self.assertEqual(item_row["ai_rating"], "2.4")
-            self.assertEqual(response_row["aut_response"], "n/a")
-            self.assertEqual(response_row["valid_response"], "n/a")
-            self.assertEqual(response_row["ai_rating"], "n/a")
+            # verbal_response row should carry the same trial-level metadata
+            self.assertEqual(response_row["aut_response"], "zum Wärmen")
+            self.assertEqual(response_row["valid_response"], "valid")
+            self.assertEqual(response_row["ai_rating"], "2.4")
 
 
 if __name__ == "__main__":

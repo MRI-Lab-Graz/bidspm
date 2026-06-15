@@ -90,7 +90,10 @@ def find_matching_excel(events_file, excel_dir=None):
     if not search_dir.exists():
         return None
 
-    targets = {normalize_label(subject), normalize_label(f"sub-{subject}")}
+    # Also try the subject code with a leading digit-only prefix stripped (e.g. '141Z682S' → 'Z682S')
+    # so that rating files named like 'Z682S.xlsx' match subject 'sub-141Z682S'.
+    suffix = re.sub(r'^\d+', '', subject)
+    targets = {normalize_label(subject), normalize_label(f"sub-{subject}"), normalize_label(suffix)}
     candidates = sorted(search_dir.glob('*.xlsx')) + sorted(search_dir.glob('*.XLSX'))
     for candidate in candidates:
         normalized_stem = normalize_label(candidate.stem)
@@ -173,7 +176,9 @@ def fix_events_dataframe(df, item_metadata=None):
             'rating': 'n/a',
             'rating_type': 'n/a',
             'button_type': 'n/a',
-            'response_time': response_time if response_time != 'n/a' and pd.notna(response_time) else 'n/a'
+            'response_time': response_time if response_time != 'n/a' and pd.notna(response_time) else 'n/a',
+            'aut_response': 'n/a',
+            'valid_response': 'n/a',
         }
         for column in metadata_columns:
             event[column] = 'n/a'
@@ -243,6 +248,8 @@ def fix_events_dataframe(df, item_metadata=None):
             if response_match:
                 new_event['item'] = response_match.group(1)
             new_event['trial_type'] = 'verbal_response'
+            new_event['aut_response'] = col(row, 'aut_response')
+            new_event['valid_response'] = col(row, 'valid_response')
         
         # === SELF RATING (likertRating 2) ===
         elif event_type == 'AUTselfrating':
@@ -306,9 +313,40 @@ def fix_events_dataframe(df, item_metadata=None):
         
         i += 1
     
-    # Create output dataframe with column order
-    columns = ['onset', 'duration', 'trial_type', 'item', 'rating', 'rating_type', 'button_type', 'response_time']
-    columns.extend(metadata_columns)
+    # Propagate valid_response and aut_response from verbal_response rows back to their item row.
+    # Used when the source TSV itself carries these columns on verbal_response events.
+    for vr_idx, vr_row in enumerate(new_rows):
+        if vr_row['trial_type'] != 'verbal_response' or vr_row['item'] == 'n/a':
+            continue
+        if vr_row['valid_response'] == 'n/a' and vr_row['aut_response'] == 'n/a':
+            continue
+        for item_idx in range(vr_idx - 1, -1, -1):
+            candidate = new_rows[item_idx]
+            if candidate['trial_type'] == 'item' and candidate['item'] == vr_row['item']:
+                candidate['valid_response'] = vr_row['valid_response']
+                candidate['aut_response'] = vr_row['aut_response']
+                break
+
+    # Forward-propagate item-level metadata (from Excel) to verbal_response and rating rows
+    # within the same trial block. fixation and button_press are left as n/a.
+    if metadata_columns:
+        propagate_to = {'verbal_response', 'rating'}
+        current_meta = {}
+        for row in new_rows:
+            tt = row['trial_type']
+            if tt == 'item':
+                current_meta = {col: row[col] for col in metadata_columns}
+            elif tt in propagate_to and current_meta:
+                for col, val in current_meta.items():
+                    row[col] = val
+
+    # Create output dataframe with column order.
+    # aut_response / valid_response may also come from metadata_columns (Excel); skip duplicates.
+    columns = ['onset', 'duration', 'trial_type', 'item', 'rating', 'rating_type', 'button_type',
+               'response_time', 'aut_response', 'valid_response']
+    for col_name in metadata_columns:
+        if col_name not in columns:
+            columns.append(col_name)
     result_df = pd.DataFrame(new_rows, columns=columns)
     
     # Sort by onset

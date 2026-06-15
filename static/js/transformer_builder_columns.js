@@ -154,10 +154,10 @@
 
         addSuggestion(columnName);
 
-        if (String(colInfo?.derivedFrom || '').trim() === 'Concatenate') {
+        if (['Concatenate', 'Filter'].includes(String(colInfo?.derivedFrom || '').trim())) {
           getColumnDomain(columnName).forEach(level => {
             const normalizedLevel = String(level || '').trim();
-            if (!normalizedLevel) return;
+            if (!normalizedLevel || normalizedLevel === 'n/a') return;
             addSuggestion(`${columnName}.${normalizedLevel}`);
           });
         }

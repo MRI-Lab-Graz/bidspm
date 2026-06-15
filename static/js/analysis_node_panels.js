@@ -291,6 +291,11 @@
             listInput.type = 'text';
             listInput.className = 'form-control form-control-sm';
             listInput.placeholder = 'trial_type.go, trial_type.stop';
+            // An empty Contrasts array is invalid — omitting the key means "all variables".
+            // Clean it up immediately so the model is correct without requiring user interaction.
+            if (Array.isArray(dummyContrasts.Contrasts) && !dummyContrasts.Contrasts.length) {
+                delete dummyContrasts.Contrasts;
+            }
             listInput.value = normalizeStringArray(dummyContrasts.Contrasts).join(', ');
             listInput.addEventListener('change', () => {
                 const parsed = String(listInput.value || '')

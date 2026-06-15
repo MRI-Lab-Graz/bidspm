@@ -78,9 +78,47 @@
             ? node.Transformations
             : null;
         const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
-        const inferredGenerated = Array.isArray(transformations?.Instructions)
-            ? Array.from(new Set(transformations.Instructions.flatMap((instruction) => inferGeneratedColumnsFromInstruction(instruction))))
-            : [];
+        const instructions = Array.isArray(transformations?.Instructions) ? transformations.Instructions : [];
+
+        // Simulate the domain chain across Filter instructions so that dot-notation
+        // suggestions (e.g. item_valid.item) are available without the transformer
+        // builder UI being open. For each Filter we track what string values the
+        // output column will contain so callers can use col.value in X.
+        const domainMap = {};   // col → string[] of known values
+        const inferredGenerated = [];
+
+        instructions.forEach((instruction) => {
+            const opName = String(instruction?.Name || '').trim();
+            const outputs = normalizeStringArray(instruction.Output);
+            const inputs = normalizeStringArray(instruction.Input);
+            const inputCol = inputs[0] || '';
+
+            if (opName === 'Filter') {
+                const query = String(instruction.Query || '');
+                const queryLeft = (query.match(/^(\w+)\s*==/) || [])[1] || '';
+                const queryRhs  = (query.match(/==\s*'([^']+)'/) || [])[1] || '';
+
+                outputs.forEach((outputCol) => {
+                    if (!outputCol) return;
+                    inferredGenerated.push(outputCol);
+
+                    // When filtering on the same column as Input, the output domain
+                    // is the matched value itself. Otherwise inherit the Input domain.
+                    const domain = (queryLeft === inputCol && queryRhs)
+                        ? [queryRhs]
+                        : [...(domainMap[inputCol] || [])];
+                    domainMap[outputCol] = domain;
+
+                    domain.filter((v) => v && v !== 'n/a').forEach((v) => {
+                        inferredGenerated.push(`${outputCol}.${v}`);
+                    });
+                });
+            } else {
+                inferGeneratedColumnsFromInstruction(instruction).forEach((col) => {
+                    inferredGenerated.push(col);
+                });
+            }
+        });
 
         return Array.from(new Set([...explicitGenerated, ...inferredGenerated])).filter((name) => {
             if (!name || name === '1') return false;

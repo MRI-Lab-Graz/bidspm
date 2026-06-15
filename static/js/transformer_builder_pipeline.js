@@ -711,43 +711,73 @@
       const queryInput = card.querySelector('input[data-field="Query"]');
       if (!inputZone || !queryInput) return;
 
-      const columns = getZoneValue(inputZone);
-      const column = columns[0];
-      const values = column ? getColumnDomain(column) : [];
-
+      const allCols = getSelectableColumns().map(c => c.name).sort();
       let container = card.querySelector('.val-pills-container');
-      if (!values.length) {
+
+      if (!allCols.length) {
         if (container) container.remove();
         return;
       }
+
+      // Default query column to the Input column; preserve user selection across refreshes
+      const inputColumn = getZoneValue(inputZone)[0];
+      const prevCol = container ? container.dataset.queryCol : null;
+      const selectedCol = (prevCol && allCols.includes(prevCol))
+        ? prevCol
+        : (inputColumn && allCols.includes(inputColumn) ? inputColumn : allCols[0]);
 
       if (!container) {
         container = document.createElement('div');
         container.className = 'val-pills-container';
         queryInput.closest('div').appendChild(container);
       }
+      container.dataset.queryCol = selectedCol;
 
       container.innerHTML = `
-        <div class="val-pills-hint"><i class="fas fa-hand-pointer me-1"></i>Click a value to insert into query:</div>
-        <div class="val-pills">${values.map(value =>
-          `<button class="val-pill" data-col="${escAttr(column)}" data-val="${escAttr(value)}">${escHtml(value)}</button>`
-        ).join('')}</div>
+        <div class="val-pills-hint">
+          <i class="fas fa-hand-pointer me-1"></i>Click a value to insert into query:
+          <select class="query-col-select form-select form-select-sm d-inline-block ms-2"
+                  style="width:auto;font-size:.75rem;padding:.15rem .5rem;">
+            ${allCols.map(col =>
+              `<option value="${escAttr(col)}"${col === selectedCol ? ' selected' : ''}>${escHtml(col)}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="val-pills"></div>
       `;
-      container.querySelectorAll('.val-pill').forEach(pill => {
-        pill.addEventListener('click', () => {
-          const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
-          const current = queryInput.value.trim();
-          queryInput.value = current ? `${current} | ${expression}` : expression;
-          container.querySelectorAll('.val-pill').forEach(button => button.classList.remove('active'));
-          pill.classList.add('active');
-          updateGeneratedJSON();
+
+      const select = container.querySelector('.query-col-select');
+      const pillsDiv = container.querySelector('.val-pills');
+
+      function renderPills(col) {
+        container.dataset.queryCol = col;
+        const values = getColumnDomain(col);
+        if (!values.length) {
+          pillsDiv.innerHTML = '<span class="text-muted" style="font-size:.75rem;">No values for this column</span>';
+          return;
+        }
+        pillsDiv.innerHTML = values.map(value =>
+          `<button class="val-pill" data-col="${escAttr(col)}" data-val="${escAttr(value)}">${escHtml(value)}</button>`
+        ).join('');
+        pillsDiv.querySelectorAll('.val-pill').forEach(pill => {
+          pill.addEventListener('click', () => {
+            const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
+            const current = queryInput.value.trim();
+            queryInput.value = current ? `${current} | ${expression}` : expression;
+            pillsDiv.querySelectorAll('.val-pill').forEach(b => b.classList.remove('active'));
+            pill.classList.add('active');
+            updateGeneratedJSON();
+          });
         });
-      });
-      const currentQuery = queryInput.value;
-      container.querySelectorAll('.val-pill').forEach(pill => {
-        const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
-        pill.classList.toggle('active', currentQuery.includes(expression));
-      });
+        const currentQuery = queryInput.value;
+        pillsDiv.querySelectorAll('.val-pill').forEach(pill => {
+          const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
+          pill.classList.toggle('active', currentQuery.includes(expression));
+        });
+      }
+
+      select.addEventListener('change', () => renderPills(select.value));
+      renderPills(selectedCol);
     }
 
     function refreshReplaceSuggestions(card) {
