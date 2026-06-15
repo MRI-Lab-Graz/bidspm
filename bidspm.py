@@ -356,14 +356,15 @@ def main():
         print("\nUse --help for more information\n")
         sys.exit(1)
 
-    # Handle report generation (pure Python, no MATLAB needed)
-    if 'report' in args.action:
+    # Strip report from pipeline actions — it runs after the pipeline completes
+    run_report = 'report' in args.action
+    args.action = [a for a in args.action if a != 'report']
+
+    if not args.action and run_report:
+        # Report-only: skip pipeline entirely
         _handle_report(config_file, args)
-        remaining = [a for a in args.action if a != 'report']
-        if not remaining:
-            sys.exit(0)
-        args.action = remaining
-    
+        sys.exit(0)
+
     # Build pipeline options
     options = PipelineOptions(
         actions=args.action,
@@ -421,6 +422,11 @@ def main():
                 print(f"   {cmd[:100]}...")
         
         print()
+
+        # Generate HTML report after pipeline completes
+        if run_report:
+            _handle_report(config_file, args)
+
         sys.exit(0 if result.success else 1)
         
     except KeyboardInterrupt:

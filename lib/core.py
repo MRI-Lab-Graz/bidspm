@@ -463,8 +463,11 @@ def build_apptainer_command(
             "cli(process.argv.slice(2)).catch(code => process.exit(code || 1));\n"
         )
         _wrapper = run_tmp_dir / "bids-validator"
+        # Use the container-side mount path, not the host path —
+        # inside the container the tmp dir is at runtime_bind_path, not _runner.parent
+        _runner_container = f"{runtime_bind_path}/bids-validator-runner.js"
         _wrapper.write_text(
-            f"#!/bin/sh\nexec {_host_node} {_runner} \"$@\"\n"
+            f"#!/bin/sh\nexec {_host_node} {_runner_container} \"$@\"\n"
         )
         _wrapper.chmod(0o755)
         cmd.extend([
