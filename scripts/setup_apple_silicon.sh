@@ -31,10 +31,11 @@ DOCKER_IMAGE="bidspm/bidspm:latest"
 # Parse arguments
 # ---------------------------------------------------------------------------
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+INSTALL_DIR_SET=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dir)
-            INSTALL_DIR="$2"; shift 2 ;;
+            INSTALL_DIR="$2"; INSTALL_DIR_SET=true; shift 2 ;;
         -h|--help)
             echo "Usage: bash $(basename "$0") [--dir <path>]"
             echo "  --dir <path>   Installation directory (default: ~/bidspm)"
@@ -43,6 +44,22 @@ while [[ $# -gt 0 ]]; do
             echo "Unknown option: $1  (use --help for usage)"; exit 1 ;;
     esac
 done
+
+# ---------------------------------------------------------------------------
+# Interactive location prompt (skip if --dir was given explicitly)
+# ---------------------------------------------------------------------------
+if [[ "$INSTALL_DIR_SET" == false ]]; then
+    echo ""
+    echo "  Where should BIDSPM be installed?"
+    echo "  Press Enter to accept the default, or type a different path."
+    echo ""
+    read -r -p "  Install directory [${INSTALL_DIR}]: " _USER_DIR
+    if [[ -n "$_USER_DIR" ]]; then
+        # Expand a leading ~ manually (read does not expand it)
+        INSTALL_DIR="${_USER_DIR/#\~/$HOME}"
+    fi
+    echo ""
+fi
 
 # ---------------------------------------------------------------------------
 # Colour helpers
