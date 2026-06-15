@@ -1,232 +1,237 @@
 #!/bin/bash
-# setup_apple_silicon.sh
-# BIDSPM setup script for Apple Silicon Macs (M1 / M2 / M3 / M4)
+# setup_apple_silicon.sh — BIDSPM installer for Apple Silicon Macs (M1/M2/M3/M4)
+#
+# Share this single file with students. Running it once sets up everything.
+# Analyses run inside the same Docker container as the server — identical results.
 #
 # Usage:
-#   chmod +x scripts/setup_apple_silicon.sh
-#   ./scripts/setup_apple_silicon.sh
+#   bash setup_apple_silicon.sh              # installs to ~/bidspm
+#   bash setup_apple_silicon.sh --dir ~/Desktop/bidspm
 #
 # What this script does:
-#   1. Verifies you are on Apple Silicon
-#   2. Checks for Homebrew (and guides you to install it)
-#   3. Installs UV (fast Python package manager)
-#   4. Creates a Python virtual environment (.bidspm/)
-#   5. Installs all Python dependencies
-#   6. Checks for Docker Desktop (required for container-based runs)
-#   7. Creates an activation script for daily use
+#   1. Verifies Apple Silicon + macOS
+#   2. Checks Homebrew (guides install if missing)
+#   3. Checks Xcode CLI tools (needed for git)
+#   4. Clones the repository with all submodules
+#   5. Installs UV and creates a Python virtual environment
+#   6. Installs all Python dependencies
+#   7. Checks Docker Desktop and pulls the bidspm image
+#   8. Writes scripts/activate_bidspm.sh for daily use
 
-set -e  # Exit immediately on any error
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+REPO_URL="https://github.com/MRI-Lab-Graz/bidspm.git"
+DEFAULT_INSTALL_DIR="${HOME}/bidspm"
+DOCKER_IMAGE="bidspm/bidspm:latest"
+
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
+INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dir)
+            INSTALL_DIR="$2"; shift 2 ;;
+        -h|--help)
+            echo "Usage: bash $(basename "$0") [--dir <path>]"
+            echo "  --dir <path>   Installation directory (default: ~/bidspm)"
+            exit 0 ;;
+        *)
+            echo "Unknown option: $1  (use --help for usage)"; exit 1 ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
 info()    { echo -e "${BLUE}[INFO]${NC}  $*"; }
 success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*"; }
-step()    { echo -e "\n${BOLD}==> $*${NC}"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+step()    { echo -e "\n${BOLD}── $* ──${NC}"; }
 
 # ---------------------------------------------------------------------------
-# 1. Platform guard — Apple Silicon only
+# Step 1 — Apple Silicon guard
 # ---------------------------------------------------------------------------
-step "Checking hardware"
+step "1/8  Checking hardware"
 
-OS=$(uname -s)
-ARCH=$(uname -m)
+[[ "$(uname -s)" == "Darwin" ]] || error "This script is for macOS only."
+[[ "$(uname -m)" == "arm64"  ]] || error "Apple Silicon (arm64) required. Detected: $(uname -m)"
 
-if [[ "$OS" != "Darwin" ]]; then
-    error "This script is for macOS only. Detected OS: $OS"
-    error "For Linux / HPC, use:  ./scripts/setup.sh"
-    exit 1
-fi
-
-if [[ "$ARCH" != "arm64" ]]; then
-    error "This script targets Apple Silicon (arm64). Detected: $ARCH"
-    error "Intel Mac users: install Rosetta 2 and rerun, or use the generic setup."
-    error "  softwareupdate --install-rosetta --agree-to-license"
-    exit 1
-fi
-
-success "Apple Silicon Mac detected (${ARCH})"
-SW_VERS=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
-info "macOS version: ${SW_VERS}"
+success "Apple Silicon Mac — macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 
 # ---------------------------------------------------------------------------
-# 2. Homebrew
+# Step 2 — Homebrew
 # ---------------------------------------------------------------------------
-step "Checking Homebrew"
+step "2/8  Checking Homebrew"
 
 if ! command -v brew &>/dev/null; then
-    error "Homebrew is not installed."
     echo ""
-    echo "  Install it with:"
-    echo "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    echo "  Homebrew is not installed. Install it with:"
     echo ""
-    echo "  After installation, follow the instructions to add brew to your PATH,"
-    echo "  then rerun this script."
+    echo '    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    echo ""
+    echo "  After installation follow the printed instructions to add brew to"
+    echo "  your PATH, then rerun this script."
     exit 1
 fi
-
-BREW_PREFIX=$(brew --prefix)
-success "Homebrew found at ${BREW_PREFIX}"
+success "Homebrew at $(brew --prefix)"
 
 # ---------------------------------------------------------------------------
-# 3. Python 3.9+
+# Step 3 — Xcode CLI tools (provides git)
 # ---------------------------------------------------------------------------
-step "Checking Python"
+step "3/8  Checking Xcode CLI tools"
 
+if ! xcode-select -p &>/dev/null; then
+    warn "Xcode CLI tools not found — installing (a system dialog will appear)..."
+    xcode-select --install
+    echo ""
+    echo "  Wait for the Xcode CLI tools installation to finish, then rerun this script."
+    exit 0
+fi
+success "Xcode CLI tools present"
+command -v git &>/dev/null || error "git not found — please reopen your terminal and try again."
+
+# ---------------------------------------------------------------------------
+# Step 4 — Clone repository
+# ---------------------------------------------------------------------------
+step "4/8  Cloning repository → ${INSTALL_DIR}"
+
+if [[ -d "${INSTALL_DIR}/.git" ]]; then
+    warn "Repository already exists — pulling latest changes..."
+    git -C "$INSTALL_DIR" pull --ff-only
+    git -C "$INSTALL_DIR" submodule update --init --recursive
+else
+    git clone --recurse-submodules "$REPO_URL" "$INSTALL_DIR"
+fi
+
+cd "$INSTALL_DIR"
+success "Repository ready at ${INSTALL_DIR}"
+
+# ---------------------------------------------------------------------------
+# Step 5 — UV + Python virtual environment
+# ---------------------------------------------------------------------------
+step "5/8  Installing UV and creating Python environment"
+
+UV_BIN="./build/uv"
+
+if [[ -f "$UV_BIN" ]]; then
+    warn "UV already present ($("$UV_BIN" --version)) — skipping download."
+else
+    mkdir -p build
+    UV_TARBALL="uv-aarch64-apple-darwin.tar.gz"
+    info "Downloading UV for Apple Silicon..."
+    curl -LsSf --retry 3 \
+        "https://github.com/astral-sh/uv/releases/latest/download/${UV_TARBALL}" \
+        -o "build/${UV_TARBALL}" \
+        || error "UV download failed — check your internet connection."
+    tar -xzf "build/${UV_TARBALL}" -C build --strip-components=1
+    rm -f "build/${UV_TARBALL}"
+    chmod +x "$UV_BIN"
+    success "UV $("$UV_BIN" --version) installed"
+fi
+
+# Find Python 3.9+
 PYTHON_BIN=""
-for candidate in python3 python; do
+for candidate in python3.12 python3.11 python3.10 python3.9 python3; do
     if command -v "$candidate" &>/dev/null; then
-        VER=$("$candidate" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
-        MAJOR=$(echo "$VER" | cut -d. -f1)
-        MINOR=$(echo "$VER" | cut -d. -f2)
-        if [[ "$MAJOR" -ge 3 && "$MINOR" -ge 9 ]]; then
+        if "$candidate" -c "import sys; exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
             PYTHON_BIN=$(command -v "$candidate")
             break
         fi
     fi
 done
-
 if [[ -z "$PYTHON_BIN" ]]; then
-    error "Python 3.9 or newer is required but was not found."
     echo ""
-    echo "  Install via Homebrew:"
+    echo "  Python 3.9+ not found. Install via Homebrew:"
     echo "    brew install python@3.12"
-    echo ""
     echo "  Then rerun this script."
     exit 1
 fi
+info "Python $("$PYTHON_BIN" --version 2>&1 | awk '{print $2}') at ${PYTHON_BIN}"
 
-PY_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-success "Python ${PY_VERSION} found at ${PYTHON_BIN}"
-
-# ---------------------------------------------------------------------------
-# 4. UV — fast Python package manager (Apple Silicon native binary)
-# ---------------------------------------------------------------------------
-step "Installing UV package manager"
-
-UV_BIN="./build/uv"
-
-if [[ -f "$UV_BIN" ]]; then
-    UV_VER=$("$UV_BIN" --version 2>/dev/null || echo "unknown")
-    warn "UV already installed locally (${UV_VER}). Skipping download."
-else
-    mkdir -p build
-
-    UV_TARBALL="uv-aarch64-apple-darwin.tar.gz"
-    UV_URL="https://github.com/astral-sh/uv/releases/latest/download/${UV_TARBALL}"
-
-    info "Downloading UV for Apple Silicon..."
-    if ! curl -LsSf --retry 3 --retry-delay 2 "$UV_URL" -o "build/${UV_TARBALL}"; then
-        error "Failed to download UV from GitHub."
-        echo "  Check your internet connection and try again."
-        exit 1
-    fi
-
-    info "Extracting UV..."
-    tar -xzf "build/${UV_TARBALL}" -C build --strip-components=1
-    rm -f "build/${UV_TARBALL}"
-    chmod +x "$UV_BIN"
-
-    if [[ ! -f "$UV_BIN" ]]; then
-        error "UV extraction failed — binary not found at ${UV_BIN}"
-        exit 1
-    fi
-
-    UV_VER=$("$UV_BIN" --version)
-    success "UV installed: ${UV_VER}"
-fi
-
-# ---------------------------------------------------------------------------
-# 5. Python virtual environment
-# ---------------------------------------------------------------------------
-step "Creating Python virtual environment (.bidspm/)"
-
+# Create venv
 if [[ -d ".bidspm" ]]; then
-    warn "Existing .bidspm environment found — removing and recreating."
+    warn "Existing .bidspm environment found — recreating."
     rm -rf .bidspm
 fi
-
 "$UV_BIN" venv .bidspm --python "$PYTHON_BIN"
-success "Virtual environment created at .bidspm/"
-
-VENV_PYTHON=".bidspm/bin/python"
+success "Virtual environment created"
 
 # ---------------------------------------------------------------------------
-# 6. Python dependencies
+# Step 6 — Python dependencies
 # ---------------------------------------------------------------------------
-step "Installing Python dependencies"
+step "6/8  Installing Python dependencies"
 
-if [[ ! -f "requirements.txt" ]]; then
-    error "requirements.txt not found. Are you running this from the bidspm root directory?"
-    exit 1
-fi
-
-info "Installing from requirements.txt..."
-"$UV_BIN" pip install --python "$VENV_PYTHON" -r requirements.txt
+[[ -f "requirements.txt" ]] || error "requirements.txt not found — run this script from the repo root."
+"$UV_BIN" pip install --python ".bidspm/bin/python" -r requirements.txt
 success "Python dependencies installed"
 
-info "Installed packages:"
-"$UV_BIN" pip list --python "$VENV_PYTHON"
-
 # ---------------------------------------------------------------------------
-# 7. Docker Desktop
+# Step 7 — Docker Desktop + image pull
 # ---------------------------------------------------------------------------
-step "Checking Docker Desktop"
+step "7/8  Checking Docker Desktop and pulling bidspm image"
 
-if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-    DOCKER_VER=$(docker --version 2>/dev/null | head -1)
-    success "Docker is running: ${DOCKER_VER}"
-else
-    warn "Docker Desktop is not running (or not installed)."
+if ! command -v docker &>/dev/null; then
     echo ""
-    echo "  BIDSPM uses Docker to run fMRIPrep / SPM containers."
+    echo "  Docker Desktop is not installed."
     echo ""
-    echo "  Download Docker Desktop for Apple Silicon:"
+    echo "  Download it here (choose 'Apple Silicon'):"
     echo "    https://www.docker.com/products/docker-desktop/"
     echo ""
-    echo "  After installing, launch Docker Desktop and rerun this script"
-    echo "  if you want the check to pass — or just continue and start"
-    echo "  Docker when you are ready to run an analysis."
-fi
-
-# ---------------------------------------------------------------------------
-# 8. Container configuration
-# ---------------------------------------------------------------------------
-step "Setting up container configuration"
-
-if [[ -f "containers/container.json" ]]; then
-    cp containers/container.json containers/container_active.json
-    success "Docker container configuration ready (containers/container_active.json)"
+    echo "  After installing and launching Docker Desktop, rerun this script"
+    echo "  to pull the bidspm image."
+    echo ""
+    warn "Skipping image pull — complete Docker setup and rerun."
+elif ! docker info &>/dev/null 2>&1; then
+    echo ""
+    warn "Docker is installed but not running."
+    echo "  Please open Docker Desktop, wait for it to finish starting,"
+    echo "  then rerun this script to pull the bidspm image."
+    echo ""
 else
-    warn "containers/container.json not found — skipping container config copy."
+    success "Docker Desktop is running"
+
+    info "Pulling ${DOCKER_IMAGE} (this can take a few minutes the first time)..."
+    docker pull "$DOCKER_IMAGE" && success "Image ${DOCKER_IMAGE} ready" \
+        || warn "Image pull failed — check your internet connection and try: docker pull ${DOCKER_IMAGE}"
+
+    # Write Docker container config
+    mkdir -p containers
+    cat > containers/container_active.json << EOF
+{
+  "container_type": "docker",
+  "docker_image": "${DOCKER_IMAGE}",
+  "apptainer_image": ""
+}
+EOF
+    success "containers/container_active.json written"
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Activation script (macOS-specific)
+# Step 8 — Activation script
 # ---------------------------------------------------------------------------
-step "Creating activation script (scripts/activate_bidspm.sh)"
+step "8/8  Writing activation script"
 
-ACTIVATE_SCRIPT="scripts/activate_bidspm.sh"
+mkdir -p scripts
 
-cat > "$ACTIVATE_SCRIPT" << 'ACTIVATE_EOF'
+cat > scripts/activate_bidspm.sh << 'ACTIVATE_EOF'
 #!/bin/bash
-# Activate the BIDSPM Python environment on Apple Silicon Mac.
+# Activate the BIDSPM environment on Apple Silicon Mac.
 # Usage:  source scripts/activate_bidspm.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [[ ! -d "$PROJECT_ROOT/.bidspm" ]]; then
-    echo "ERROR: Virtual environment not found. Run ./scripts/setup_apple_silicon.sh first."
+    echo "ERROR: Virtual environment not found."
+    echo "       Run scripts/setup_apple_silicon.sh first."
     return 1 2>/dev/null || exit 1
 fi
 
@@ -234,36 +239,39 @@ source "$PROJECT_ROOT/.bidspm/bin/activate"
 
 export BIDSPM_PROJECT_ROOT="$PROJECT_ROOT"
 
+echo ""
 echo "BIDSPM environment activated"
 echo "  Project : $PROJECT_ROOT"
 echo "  Python  : $(which python)"
+echo "  Docker  : $(docker --version 2>/dev/null | head -1 || echo 'not found')"
 echo ""
-echo "To deactivate: deactivate"
+echo "Run an analysis:     python bidspm.py --action smooth stats"
+echo "Pilot (1 subject):   python bidspm.py --action smooth --pilot"
+echo "Web interface:       python web_interface.py"
+echo "Deactivate:          deactivate"
 ACTIVATE_EOF
 
-chmod +x "$ACTIVATE_SCRIPT"
-success "Activation script written to ${ACTIVATE_SCRIPT}"
+chmod +x scripts/activate_bidspm.sh
+success "scripts/activate_bidspm.sh written"
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo ""
-echo -e "${BOLD}======================================================${NC}"
-echo -e "${GREEN}${BOLD}  BIDSPM — Apple Silicon setup complete!${NC}"
-echo -e "${BOLD}======================================================${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}  BIDSPM setup complete!${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════${NC}"
 echo ""
-echo "  Activate the environment:"
-echo "    source scripts/activate_bidspm.sh"
+echo -e "  Installation path : ${BOLD}${INSTALL_DIR}${NC}"
 echo ""
-echo "  Run a pilot analysis:"
+echo "  To get started:"
+echo "    cd ${INSTALL_DIR}"
 echo "    source scripts/activate_bidspm.sh"
-echo "    python bidspm.py --pilot"
-echo ""
-echo "  Start the web interface:"
-echo "    source scripts/activate_bidspm.sh"
-echo "    python web_interface.py"
+echo "    python bidspm.py --action smooth --pilot"
 echo ""
 if ! (command -v docker &>/dev/null && docker info &>/dev/null 2>&1); then
-    echo -e "  ${YELLOW}Remember:${NC} Start Docker Desktop before running any analysis."
+    echo -e "  ${YELLOW}Reminder:${NC} Install and start Docker Desktop, then run:"
+    echo "    docker pull ${DOCKER_IMAGE}"
+    echo "    cp containers/container.json containers/container_active.json"
     echo ""
 fi

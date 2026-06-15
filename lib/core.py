@@ -352,6 +352,42 @@ def build_docker_command(
             cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
             model_container_path = "/models/smdl.json"
     
+    # Override container source files with the same patched local versions used
+    # by the Apptainer path.  Docker uses -v instead of --bind but the container
+    # paths are identical (same image).
+    _ov = Path(__file__).parent.parent / "bidspm_overrides"
+    _tl = _ov / "lib" / "bids-matlab" / "+bids" / "+transformers_list"
+    _file_overrides = [
+        (_tl / "Factor.m",           "/home/neuro/bidspm/lib/bids-matlab/+bids/+transformers_list/Factor.m"),
+        (_tl / "Filter.m",           "/home/neuro/bidspm/lib/bids-matlab/+bids/+transformers_list/Filter.m"),
+        (_tl / "get_input.m",        "/home/neuro/bidspm/lib/bids-matlab/+bids/+transformers_list/get_input.m"),
+        (_tl / "check_field.m",      "/home/neuro/bidspm/lib/bids-matlab/+bids/+transformers_list/check_field.m"),
+        (_tl / "identify_rows.m",    "/home/neuro/bidspm/lib/bids-matlab/+bids/+transformers_list/identify_rows.m"),
+        (_ov / "src" / "stats" / "utils" / "validateContrasts.m",
+                                     "/home/neuro/bidspm/src/stats/utils/validateContrasts.m"),
+        (_ov / "src" / "batches" / "stats" / "setBatchSubjectLevelContrasts.m",
+                                     "/home/neuro/bidspm/src/batches/stats/setBatchSubjectLevelContrasts.m"),
+        (_ov / "lib" / "bids-matlab" / "+bids" / "+internal" / "return_file_index.m",
+                                     "/home/neuro/bidspm/lib/bids-matlab/+bids/+internal/return_file_index.m"),
+        (_ov / "src" / "bids_model" / "BidsModel.m",
+                                     "/home/neuro/bidspm/src/bids_model/BidsModel.m"),
+        (_ov / "src" / "stats" / "subject_level" / "convertOnsetTsvToMat.m",
+                                     "/home/neuro/bidspm/src/stats/subject_level/convertOnsetTsvToMat.m"),
+        (_ov / "src" / "stats" / "subject_level" / "specifySubLvlContrasts.m",
+                                     "/home/neuro/bidspm/src/stats/subject_level/specifySubLvlContrasts.m"),
+        (_ov / "src" / "stats" / "subject_level" / "createAndReturnCounfoundMatFile.m",
+                                     "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m"),
+        (_ov / "src" / "workflows" / "stats" / "bidsResults.m",
+                                     "/home/neuro/bidspm/src/workflows/stats/bidsResults.m"),
+    ]
+    for local_path, container_path in _file_overrides:
+        if local_path.exists():
+            cmd.extend(["-v", f"{local_path}:{container_path}:ro"])
+
+    local_cpp_roi_atlas = Path(__file__).parent.parent / "local_src" / "bidspm_local" / "lib" / "CPP_ROI" / "atlas"
+    if local_cpp_roi_atlas.exists():
+        cmd.extend(["-v", f"{local_cpp_roi_atlas}:/home/neuro/bidspm/lib/CPP_ROI/atlas:ro"])
+
     # Environment variables
     cmd.extend([
         "-e", "HOME=/tmp",
