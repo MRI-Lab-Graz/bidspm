@@ -707,7 +707,7 @@
     const normalizedInput = String(inputColumn || '').trim();
     const domain = normalizeTransformerSuggestionValues(inputValues);
     const normalizedQuery = String(query || '').trim();
-    if (!normalizedInput || !normalizedQuery || !domain.length) return domain;
+    if (!normalizedInput || !normalizedQuery) return domain;
 
     const matched = new Set();
     let sawInputEquality = false;
