@@ -224,7 +224,7 @@ mkdir -p scripts
 cat > scripts/activate_bidspm.sh << 'ACTIVATE_EOF'
 #!/bin/bash
 # Activate the BIDSPM environment on Apple Silicon Mac.
-# Usage:  source scripts/activate_bidspm.sh
+# Usage:  source .bidspm/bin/activate
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -266,7 +266,7 @@ echo -e "  Installation path : ${BOLD}${INSTALL_DIR}${NC}"
 echo ""
 echo "  To get started:"
 echo "    cd ${INSTALL_DIR}"
-echo "    source scripts/activate_bidspm.sh"
+echo "    source .bidspm/bin/activate"
 echo "    python bidspm.py --action smooth --pilot"
 echo ""
 if ! (command -v docker &>/dev/null && docker info &>/dev/null 2>&1); then

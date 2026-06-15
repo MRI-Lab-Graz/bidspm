@@ -213,18 +213,24 @@ def open_browser_when_ready(url: str) -> tuple[bool, str]:
 
 
 def _pids_listening_on_port(port: int) -> List[int]:
-    """Return PIDs listening on the given TCP port."""
+    """Return PIDs listening on the given TCP port (Linux and macOS)."""
+    import sys
     try:
-        result = subprocess.run(
-            ['ss', '-tlnp', f'sport = :{port}'],
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        if sys.platform == "darwin":
+            # macOS: ss is not available, use lsof
+            result = subprocess.run(
+                ['lsof', '-ti', f'tcp:{port}'],
+                capture_output=True, text=True, check=False
+            )
+            return sorted({int(p) for p in result.stdout.split() if p.strip().isdigit()})
+        else:
+            result = subprocess.run(
+                ['ss', '-tlnp', f'sport = :{port}'],
+                capture_output=True, text=True, check=False
+            )
+            return sorted({int(pid) for pid in re.findall(r'pid=(\d+)', result.stdout)})
     except Exception:
         return []
-
-    return sorted({int(pid) for pid in re.findall(r'pid=(\d+)', result.stdout)})
 
 
 def kill_existing_on_port(port: int) -> bool:
@@ -429,10 +435,26 @@ if __name__ == '__main__':
     print('Press Ctrl+C to stop the server')
     print()
     print(f"Running with Waitress server on 0.0.0.0:{port}")
+    print(f"\n  👉  Open in browser: {url}\n")
 
-    # VS Code Remote SSH intercepts localhost URLs and opens them in its Simple
-    # Browser (a stripped-down WebView) instead of Safari.  Suppress auto-open
-    # and let the user open the URL in their real browser.
-    print(f"\n  👉  Open in Safari: {url}\n")
+    # Auto-open the browser unless suppressed.
+    # Skip on VS Code Remote SSH — the tunnel intercepts localhost URLs and
+    # would open a stripped-down WebView instead of a real browser.
+    _in_remote_ssh = bool(os.environ.get("SSH_CLIENT") or os.environ.get("SSH_TTY"))
+    if not args.no_browser and not _in_remote_ssh:
+        import sys as _sys
+        import threading as _threading
+        def _open_browser():
+            if not wait_for_http_ready(url):
+                return
+            try:
+                if _sys.platform == "darwin":
+                    subprocess.run(["open", url], check=False)
+                else:
+                    import webbrowser
+                    webbrowser.open(url)
+            except Exception:
+                pass
+        _threading.Thread(target=_open_browser, daemon=True).start()
 
     serve(app, host='0.0.0.0', port=port, threads=10)
