@@ -230,6 +230,19 @@
                                     <input class="form-check-input" type="checkbox" name="action" value="dataset" id="dataset" {% if project and 'dataset' in project.config.actions %}checked{% endif %}>
                                     <label class="form-check-label" for="dataset">Dataset</label>
                                 </div>
+                                <div class="form-check mt-2 pt-2 border-top">
+                                    <input class="form-check-input" type="checkbox" name="action" value="report" id="report" {% if project and 'report' in project.config.actions %}checked{% endif %}>
+                                    <label class="form-check-label" for="report">
+                                        Report
+                                        <span class="badge bg-info text-dark ms-1" style="font-size:.65rem; vertical-align:middle;">HTML</span>
+                                    </label>
+                                    <div class="text-muted mt-1" style="font-size:.72rem; line-height:1.4;">
+                                        Generates a self-contained HTML report (fMRIPrep-style) in
+                                        <code>derivatives/reports/</code> — no MATLAB needed.
+                                        Includes per-subject QC metrics, motion plots, preprocessing
+                                        figures, and statistical results.
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="col-md-6 ps-md-4 analysis-execution-col">
@@ -2061,16 +2074,39 @@
                 customBtn.addEventListener('click', () => addRegressorToModelX(basePath, customInput.value));
                 controls.appendChild(customBtn);
 
-                if (uniqueRegs.length > 0) {
+                const currentModelX = normalizeStringArray(getByPath(modelEditorDraft, basePath));
+                const usedSet = new Set(currentModelX);
+
+                function removeRegressorFromModelX(reg) {
+                    const arr = getByPath(modelEditorDraft, basePath);
+                    if (!Array.isArray(arr)) return;
+                    const next = arr.filter(v => String(v || '').trim() !== reg);
+                    if (next.length === arr.length) return;
+                    setByPath(modelEditorDraft, basePath, next);
+                    renderModelAccordionEditor();
+                }
+
+                function toggleRegressorInModelX(reg) {
+                    if (usedSet.has(reg)) {
+                        removeRegressorFromModelX(reg);
+                    } else {
+                        addRegressorToModelX(basePath, reg);
+                    }
+                }
+
+                const badgePoolRegs = uniqueRegs.filter(reg => !transformerRegressors.includes(reg));
+                if (badgePoolRegs.length > 0) {
                     const regPool = document.createElement('div');
                     regPool.className = 'd-flex flex-wrap gap-2 w-100 mt-2';
-                    uniqueRegs.forEach(reg => {
+                    badgePoolRegs.forEach(reg => {
+                        const isUsed = usedSet.has(reg);
                         const badge = document.createElement('button');
                         badge.type = 'button';
-                        badge.className = 'btn btn-sm btn-outline-primary';
+                        badge.className = isUsed ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-primary';
                         badge.textContent = reg;
-                        badge.draggable = true;
-                        badge.addEventListener('click', () => addRegressorToModelX(basePath, reg));
+                        badge.draggable = !isUsed;
+                        badge.title = isUsed ? 'In Design Matrix — click to remove' : 'Click to add to Design Matrix';
+                        badge.addEventListener('click', () => toggleRegressorInModelX(reg));
                         badge.addEventListener('dragstart', (event) => {
                             event.dataTransfer.effectAllowed = 'copy';
                             event.dataTransfer.setData('application/x-modelx-regressor', reg);
@@ -2093,7 +2129,7 @@
                     const transformerHint = document.createElement('div');
                     transformerHint.className = 'small text-muted mb-2';
                     transformerHint.textContent = transformerRegressors.length
-                        ? 'Outputs from the attached transformer pipeline. Drag or click badges into the Design Matrix space.'
+                        ? 'Outputs from the attached transformer pipeline. Click or drag badges to add to the Design Matrix; click again to remove.'
                         : 'No generated transformer columns detected yet. Define Output names in Transformations to reuse them in Model.X.';
                     transformerCard.appendChild(transformerHint);
 
@@ -2107,12 +2143,14 @@
                         transformerPool.appendChild(empty);
                     } else {
                         transformerRegressors.forEach(reg => {
+                            const isUsed = usedSet.has(reg);
                             const badge = document.createElement('button');
                             badge.type = 'button';
-                            badge.className = 'btn btn-sm btn-outline-success';
+                            badge.className = isUsed ? 'btn btn-sm btn-success' : 'btn btn-sm btn-outline-success';
                             badge.textContent = reg;
-                            badge.draggable = true;
-                            badge.addEventListener('click', () => addRegressorToModelX(basePath, reg));
+                            badge.draggable = !isUsed;
+                            badge.title = isUsed ? 'In Design Matrix — click to remove' : 'Click to add to Design Matrix';
+                            badge.addEventListener('click', () => toggleRegressorInModelX(reg));
                             badge.addEventListener('dragstart', (event) => {
                                 event.dataTransfer.effectAllowed = 'copy';
                                 event.dataTransfer.setData('application/x-modelx-regressor', reg);
@@ -2190,6 +2228,11 @@
 
                     controls.appendChild(nuisanceCard);
                 }
+
+                const dmLabel = document.createElement('div');
+                dmLabel.className = 'small fw-bold w-100 mt-1';
+                dmLabel.textContent = 'Design Matrix space';
+                controls.appendChild(dmLabel);
 
                 const dropZone = document.createElement('div');
                 dropZone.className = 'small text-muted border rounded p-2 w-100';

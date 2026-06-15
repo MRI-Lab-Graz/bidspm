@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ group.dataset_name }} | bidspm group report</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --brand: #2b6cb0;
+    --brand-light: #ebf4ff;
+    --sidebar-w: 220px;
+  }
+  body { font-size: 0.9rem; color: #222; }
+
+  /* ---- sidebar ---- */
+  #sidebar {
+    position: fixed; top: 0; left: 0;
+    width: var(--sidebar-w); height: 100vh;
+    background: #1a365d; color: #bee3f8;
+    overflow-y: auto; padding: 1rem 0;
+    z-index: 100;
+  }
+  #sidebar .brand { padding: .5rem 1rem 1rem; font-weight: 700; color: #fff; font-size: 1rem; }
+  #sidebar .brand small { display: block; font-weight: 400; color: #90cdf4; font-size: .75rem; }
+  #sidebar nav a {
+    display: block; padding: .35rem 1rem;
+    color: #bee3f8; text-decoration: none; font-size: .82rem;
+  }
+  #sidebar nav a:hover, #sidebar nav a.active { background: #2c5282; color: #fff; }
+  #sidebar .sidebar-section { padding: .5rem 1rem .1rem; font-size: .7rem;
+    text-transform: uppercase; letter-spacing: .06em; color: #63b3ed; margin-top: .5rem; }
+
+  /* ---- main ---- */
+  #main { margin-left: var(--sidebar-w); padding: 2rem 2.5rem; }
+  .page-title { font-size: 1.6rem; font-weight: 700; color: var(--brand); }
+  .page-subtitle { color: #555; margin-bottom: 2rem; }
+
+  /* ---- stat bar ---- */
+  .stat-bar { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .stat-pill {
+    background: var(--brand-light); border: 1px solid #bee3f8;
+    border-radius: 8px; padding: .5rem 1.1rem; text-align: center; min-width: 90px;
+  }
+  .stat-label { font-size: .68rem; text-transform: uppercase; color: var(--brand); letter-spacing: .05em; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; color: #1a365d; }
+
+  /* ---- subject cards ---- */
+  .sub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .sub-card {
+    border: 1px solid #c8ddf8; border-radius: 8px; padding: 1rem;
+    background: #fff; transition: box-shadow .15s;
+  }
+  .sub-card:hover { box-shadow: 0 4px 12px rgba(43,108,176,.15); }
+  .sub-card h5 { font-size: 1rem; color: var(--brand); margin-bottom: .4rem; }
+  .sub-card .badge-task { font-size: .7rem; margin-right: .3rem; }
+  .sub-card .metrics { font-size: .75rem; color: #555; margin-top: .5rem; }
+  .sub-card .metrics span { margin-right: .8rem; }
+  .sub-card a.btn { font-size: .78rem; margin-top: .7rem; }
+
+  /* ---- QA table ---- */
+  .table-scroll { overflow-x: auto; }
+  .table-sm td, .table-sm th { font-size: .78rem; vertical-align: middle; }
+  .qa-good   { color: #276749; font-weight: 600; }
+  .qa-warn   { color: #c05621; font-weight: 600; }
+
+  /* ---- section cards ---- */
+  .report-section { margin-bottom: 2.5rem; }
+  .section-header {
+    background: var(--brand); color: #fff;
+    padding: .6rem 1rem; border-radius: 6px 6px 0 0;
+    cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    user-select: none;
+  }
+  .section-header:hover { background: #2c5282; }
+  .section-body {
+    border: 1px solid #c8ddf8; border-top: none;
+    border-radius: 0 0 6px 6px; padding: 1.25rem; background: #fff;
+  }
+
+  .toggle-arrow { transition: transform .2s; display: inline-block; }
+  .collapsed .toggle-arrow { transform: rotate(-90deg); }
+
+  footer { margin-top: 3rem; padding: 1rem 0; border-top: 1px solid #e2e8f0;
+    font-size: .75rem; color: #718096; }
+</style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar">
+  <div class="brand">
+    bidspm
+    <small>Group report</small>
+  </div>
+  <div style="padding:.5rem 0"></div>
+  <nav>
+    <a href="#section-overview">Overview</a>
+    <a href="#section-subjects">Subjects</a>
+    <a href="#section-qa-table">QA Summary</a>
+  </nav>
+
+  <div class="sidebar-section" style="margin-top:1rem">Subjects</div>
+  <nav>
+    {% for sub in group.subjects %}
+    <a href="sub-{{ sub.label }}_report.html">sub-{{ sub.label }}</a>
+    {% endfor %}
+  </nav>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<main id="main">
+  <h1 class="page-title">{{ group.dataset_name }}</h1>
+  <p class="page-subtitle">
+    {% if group.model_name %}Model: <strong>{{ group.model_name }}</strong> &nbsp;·&nbsp;{% endif %}
+    Tasks: <strong>{{ group.tasks | join(", ") }}</strong> &nbsp;·&nbsp;
+    Generated: <strong>{{ group.generation_date }}</strong> &nbsp;·&nbsp;
+    bidspm {{ group.bidspm_version }}
+  </p>
+
+  <!-- ---- stat bar ---- -->
+  <div class="stat-bar" id="section-overview">
+    <div class="stat-pill">
+      <div class="stat-label">Subjects</div>
+      <div class="stat-value">{{ group.subjects | length }}</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Tasks</div>
+      <div class="stat-value">{{ group.tasks | length }}</div>
+    </div>
+    {% set n_with_qa = group.subjects | selectattr("anat_qa") | list | length %}
+    {% if n_with_qa %}
+    <div class="stat-pill">
+      <div class="stat-label">With Anat QA</div>
+      <div class="stat-value">{{ n_with_qa }}</div>
+    </div>
+    {% endif %}
+    {% set n_with_motion = group.subjects | selectattr("motion_summary") | list | length %}
+    {% if n_with_motion %}
+    <div class="stat-pill">
+      <div class="stat-label">With Motion QA</div>
+      <div class="stat-value">{{ n_with_motion }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ===== SUBJECTS ===== -->
+  <div class="report-section" id="section-subjects">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-subjects">
+      <span>Subjects ({{ group.subjects | length }})</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-subjects">
+      <div class="sub-grid">
+        {% for sub in group.subjects %}
+        <div class="sub-card">
+          <h5>sub-{{ sub.label }}</h5>
+          <div>
+            {% for t in sub.tasks %}
+            <span class="badge bg-secondary badge-task">{{ t }}</span>
+            {% endfor %}
+          </div>
+          <div class="metrics">
+            {% if sub.anat_qa %}
+            <span title="Signal-to-Noise Ratio">SNR: <strong>{{ sub.anat_qa.SNR }}</strong></span>
+            <span title="Contrast-to-Noise Ratio">CNR: <strong>{{ sub.anat_qa.CNR }}</strong></span>
+            {% endif %}
+            {% if sub.motion_summary %}
+            <span title="Mean framewise displacement">
+              FD: <strong
+                class="{% if sub.motion_summary.mean_fd < 0.3 %}qa-good{% elif sub.motion_summary.mean_fd > 0.5 %}qa-warn{% endif %}">
+                {{ sub.motion_summary.mean_fd }} mm
+              </strong>
+            </span>
+            {% endif %}
+          </div>
+          <a href="sub-{{ sub.label }}_report.html" class="btn btn-sm btn-outline-primary">
+            View report →
+          </a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== QA SUMMARY TABLE ===== -->
+  {% set has_any_qa = group.subjects | selectattr("anat_qa") | list | length > 0 %}
+  {% set has_any_motion = group.subjects | selectattr("motion_summary") | list | length > 0 %}
+  {% if has_any_qa or has_any_motion %}
+  <div class="report-section" id="section-qa-table">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-qa-table">
+      <span>QA Summary Table</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-qa-table">
+      <p class="text-muted" style="font-size:.8rem">
+        SNR/CNR/FBER/EFC: anatomical quality metrics (higher SNR/CNR/FBER and lower EFC are better).
+        FD: mean framewise displacement in mm (threshold 0.5 mm flagged in
+        <span class="qa-warn">orange</span>).
+      </p>
+      <div class="table-scroll">
+        <table class="table table-sm table-striped table-bordered" id="qa-table">
+          <thead class="table-dark">
+            <tr>
+              <th>Subject</th>
+              {% if has_any_qa %}
+              <th title="Signal-to-Noise Ratio">SNR</th>
+              <th title="Contrast-to-Noise Ratio">CNR</th>
+              <th title="Foreground-to-Background Energy Ratio">FBER</th>
+              <th title="Entropy Focus Criterion (lower=better)">EFC ↓</th>
+              {% endif %}
+              {% if has_any_motion %}
+              <th title="Mean framewise displacement">Mean FD (mm)</th>
+              <th title="Maximum framewise displacement">Max FD (mm)</th>
+              <th title="Volumes with FD > 0.5 mm">Outliers &gt;0.5 mm</th>
+              {% endif %}
+              <th>Report</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sub in group.subjects %}
+            <tr>
+              <td><strong>sub-{{ sub.label }}</strong></td>
+              {% if has_any_qa %}
+              {% if sub.anat_qa %}
+              <td>{{ sub.anat_qa.SNR }}</td>
+              <td>{{ sub.anat_qa.CNR }}</td>
+              <td>{{ sub.anat_qa.FBER }}</td>
+              <td>{{ sub.anat_qa.EFC }}</td>
+              {% else %}
+              <td colspan="4" class="text-muted">—</td>
+              {% endif %}
+              {% endif %}
+              {% if has_any_motion %}
+              {% if sub.motion_summary %}
+              <td class="{% if sub.motion_summary.mean_fd > 0.5 %}qa-warn{% endif %}">
+                {{ sub.motion_summary.mean_fd }}
+              </td>
+              <td class="{% if sub.motion_summary.max_fd > 1.5 %}qa-warn{% endif %}">
+                {{ sub.motion_summary.max_fd }}
+              </td>
+              <td class="{% if sub.motion_summary.pct_outliers > 20 %}qa-warn{% endif %}">
+                {{ sub.motion_summary.n_outliers_0_5mm }}
+                ({{ sub.motion_summary.pct_outliers }}%)
+              </td>
+              {% else %}
+              <td colspan="3" class="text-muted">—</td>
+              {% endif %}
+              {% endif %}
+              <td><a href="sub-{{ sub.label }}_report.html">→</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- simple sort hint -->
+      <p class="text-muted mt-1" style="font-size:.75rem">
+        Click a column header to sort the table.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  <footer>
+    bidspm group report &nbsp;·&nbsp; {{ group.dataset_name }} &nbsp;·&nbsp;
+    generated {{ group.generation_date }}
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // Arrow toggle
+  document.querySelectorAll('.section-header').forEach(function(hdr) {
+    var target = document.querySelector(hdr.getAttribute('data-bs-target'));
+    if (!target) return;
+    target.addEventListener('hide.bs.collapse', function() { hdr.classList.add('collapsed'); });
+    target.addEventListener('show.bs.collapse', function() { hdr.classList.remove('collapsed'); });
+  });
+
+  // Sortable QA table
+  var table = document.getElementById('qa-table');
+  if (table) {
+    var ths = table.querySelectorAll('thead th');
+    ths.forEach(function(th, idx) {
+      th.style.cursor = 'pointer';
+      th.title = (th.title ? th.title + ' — ' : '') + 'click to sort';
+      var asc = true;
+      th.addEventListener('click', function() {
+        var tbody = table.querySelector('tbody');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function(a, b) {
+          var aVal = (a.cells[idx] ? a.cells[idx].textContent.trim() : '');
+          var bVal = (b.cells[idx] ? b.cells[idx].textContent.trim() : '');
+          var aNum = parseFloat(aVal), bNum = parseFloat(bVal);
+          if (!isNaN(aNum) && !isNaN(bNum)) return asc ? aNum - bNum : bNum - aNum;
+          return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+        asc = !asc;
+        ths.forEach(function(h) { h.textContent = h.textContent.replace(/ [▲▼]$/, ''); });
+        th.textContent += asc ? ' ▲' : ' ▼';
+      });
+    });
+  }
+</script>
+</body>
+</html>

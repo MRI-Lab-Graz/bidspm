@@ -67,9 +67,41 @@
                 ? node.Transformations
                 : null;
             const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
-            const inferredGenerated = Array.isArray(transformations?.Instructions)
-                ? Array.from(new Set(transformations.Instructions.flatMap((instruction) => inferGeneratedColumnsFromInstruction(instruction))))
-                : [];
+            const instructions = Array.isArray(transformations?.Instructions) ? transformations.Instructions : [];
+
+            const domainMap = {};
+            const inferredGenerated = [];
+
+            instructions.forEach((instruction) => {
+                const opName = String(instruction?.Name || '').trim();
+                const outputs = normalizeStringArray(instruction.Output);
+                const inputs = normalizeStringArray(instruction.Input);
+                const inputCol = inputs[0] || '';
+
+                if (opName === 'Filter') {
+                    const query = String(instruction.Query || '');
+                    const queryLeft = (query.match(/^(\w+)\s*==/) || [])[1] || '';
+                    const queryRhs = (query.match(/==\s*'([^']+)'/) || [])[1] || '';
+
+                    outputs.forEach((outputCol) => {
+                        if (!outputCol) return;
+                        inferredGenerated.push(outputCol);
+
+                        const domain = (queryLeft === inputCol && queryRhs)
+                            ? [queryRhs]
+                            : [...(domainMap[inputCol] || [])];
+                        domainMap[outputCol] = domain;
+
+                        domain.filter((v) => v && v !== 'n/a').forEach((v) => {
+                            inferredGenerated.push(`${outputCol}.${v}`);
+                        });
+                    });
+                } else {
+                    inferGeneratedColumnsFromInstruction(instruction).forEach((col) => {
+                        inferredGenerated.push(col);
+                    });
+                }
+            });
 
             return Array.from(new Set([...explicitGenerated, ...inferredGenerated])).filter((name) => {
                 if (!name || name === '1') return false;

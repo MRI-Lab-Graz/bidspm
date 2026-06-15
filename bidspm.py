@@ -39,11 +39,12 @@ USAGE:
     python bidspm.py [OPTIONS] --action ACTION [ACTION ...]
 
 REQUIRED ARGUMENTS:
-    --action {smooth,stats,dataset}
+    --action {smooth,stats,dataset,report}
                           Actions to perform (specify one or more):
                           • smooth  : Smooth preprocessed fMRI data
                           • stats   : Run subject-level statistical analysis
                           • dataset : Run group-level statistical analysis
+                          • report  : Generate HTML QC/results report (no MATLAB needed)
 
 OPTIONAL ARGUMENTS:
     -h, --help           Show this help message and exit
@@ -67,6 +68,12 @@ EXAMPLES:
     
     # Run complete pipeline
     python bidspm.py --action smooth stats dataset
+
+    # Generate HTML reports after processing
+    python bidspm.py --action report
+
+    # Process then immediately generate reports
+    python bidspm.py --action smooth stats dataset report
     
     # Pilot test (single random subject)
     python bidspm.py --action smooth --pilot
@@ -124,8 +131,8 @@ def parse_arguments():
                        help='Name of the BIDS model node to run')
     
     # Actions
-    parser.add_argument('--action', nargs='+', 
-                       choices=['smooth', 'stats', 'dataset'],
+    parser.add_argument('--action', nargs='+',
+                       choices=['smooth', 'stats', 'dataset', 'report'],
                        help='Actions to perform')
     
     # Flags
@@ -281,6 +288,34 @@ def handle_check_environment(use_local: bool):
     sys.exit(0)
 
 
+def _handle_report(config_file: str, args) -> None:
+    """Generate HTML reports from existing bidspm derivatives."""
+    from lib.report_generator import generate_reports
+
+    config = load_config(config_file)
+    subjects = config.SUBJECTS or discover_subjects(config)
+
+    model_name = ""
+    if args.model or config.MODELS_FILE:
+        import json as _json
+        mf = args.model or config.MODELS_FILE
+        try:
+            with open(mf) as f:
+                m = _json.load(f)
+            model_name = m.get("Name", Path(mf).stem)
+        except Exception:
+            model_name = Path(mf).stem if mf else ""
+
+    print("\n📄 Generating HTML reports…")
+    index = generate_reports(
+        derivatives=config.DERIVATIVES_DIR,
+        tasks=config.TASKS,
+        subjects=subjects or None,
+        model_name=model_name,
+    )
+    print(f"\n✅ Group index: {index}\n")
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
@@ -317,9 +352,17 @@ def main():
     # Require action for actual execution
     if not args.action:
         print("❌ Error: --action argument is required")
-        print("   Please specify at least one action: smooth, stats, dataset")
+        print("   Please specify at least one action: smooth, stats, dataset, report")
         print("\nUse --help for more information\n")
         sys.exit(1)
+
+    # Handle report generation (pure Python, no MATLAB needed)
+    if 'report' in args.action:
+        _handle_report(config_file, args)
+        remaining = [a for a in args.action if a != 'report']
+        if not remaining:
+            sys.exit(0)
+        args.action = remaining
     
     # Build pipeline options
     options = PipelineOptions(

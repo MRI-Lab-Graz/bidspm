@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sub-{{ subject.label }} | bidspm report</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --brand: #2b6cb0;
+    --brand-light: #ebf4ff;
+    --sidebar-w: 220px;
+  }
+  body { font-size: 0.9rem; color: #222; }
+
+  /* ---- sidebar ---- */
+  #sidebar {
+    position: fixed; top: 0; left: 0;
+    width: var(--sidebar-w); height: 100vh;
+    background: #1a365d; color: #bee3f8;
+    overflow-y: auto; padding: 1rem 0;
+    z-index: 100;
+  }
+  #sidebar .brand { padding: .5rem 1rem 1rem; font-weight: 700; color: #fff; font-size: 1rem; }
+  #sidebar .brand small { display: block; font-weight: 400; color: #90cdf4; font-size: .75rem; }
+  #sidebar nav a {
+    display: block; padding: .35rem 1rem;
+    color: #bee3f8; text-decoration: none; font-size: .82rem;
+  }
+  #sidebar nav a:hover, #sidebar nav a.active { background: #2c5282; color: #fff; }
+  #sidebar .sidebar-section { padding: .5rem 1rem .1rem; font-size: .7rem;
+    text-transform: uppercase; letter-spacing: .06em; color: #63b3ed; margin-top: .5rem; }
+  #sidebar .back-link { padding: 1rem; }
+  #sidebar .back-link a { color: #63b3ed; font-size: .8rem; }
+
+  /* ---- main ---- */
+  #main { margin-left: var(--sidebar-w); padding: 2rem 2.5rem; }
+  .page-title { font-size: 1.6rem; font-weight: 700; color: var(--brand); }
+  .page-subtitle { color: #555; margin-bottom: 2rem; }
+
+  /* ---- section cards ---- */
+  .report-section { margin-bottom: 2rem; }
+  .section-header {
+    background: var(--brand); color: #fff;
+    padding: .6rem 1rem; border-radius: 6px 6px 0 0;
+    cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    user-select: none;
+  }
+  .section-header:hover { background: #2c5282; }
+  .section-body {
+    border: 1px solid #c8ddf8; border-top: none;
+    border-radius: 0 0 6px 6px; padding: 1.25rem;
+    background: #fff;
+  }
+
+  /* ---- metric pills ---- */
+  .metric-grid { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+  .metric-card {
+    background: var(--brand-light); border: 1px solid #bee3f8;
+    border-radius: 8px; padding: .6rem 1rem; min-width: 110px; text-align: center;
+  }
+  .metric-label { font-size: .7rem; text-transform: uppercase; color: #2b6cb0; letter-spacing: .05em; }
+  .metric-value { font-size: 1.3rem; font-weight: 700; color: #1a365d; }
+  .metric-note  { font-size: .65rem; color: #718096; }
+
+  /* ---- figure grid ---- */
+  .fig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }
+  .fig-card { border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background: #fafafa; }
+  .fig-card img { width: 100%; display: block; }
+  .fig-caption { padding: .4rem .6rem; font-size: .75rem; color: #4a5568; background: #f7fafc; }
+
+  /* ---- table ---- */
+  .table-sm td, .table-sm th { font-size: .78rem; }
+  .table-scroll { overflow-x: auto; }
+
+  /* ---- boilerplate ---- */
+  .boilerplate { font-size: .8rem; color: #444; line-height: 1.6;
+    white-space: pre-wrap; font-family: Georgia, serif; }
+
+  /* ---- footer ---- */
+  footer { margin-top: 3rem; padding: 1rem 0; border-top: 1px solid #e2e8f0;
+    font-size: .75rem; color: #718096; }
+
+  /* arrow toggle */
+  .toggle-arrow { transition: transform .2s; display: inline-block; }
+  .collapsed .toggle-arrow { transform: rotate(-90deg); }
+</style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar">
+  <div class="brand">
+    bidspm
+    <small>Processing report</small>
+  </div>
+  <div class="back-link"><a href="index.html">← All subjects</a></div>
+
+  <div class="sidebar-section">Subject</div>
+  <nav>
+    <a href="#section-summary">Summary</a>
+    {% if subject.anat_qa %}
+    <a href="#section-anat-qa">Anatomical QA</a>
+    {% endif %}
+    {% if subject.motion_summary %}
+    <a href="#section-motion">Motion QA</a>
+    {% endif %}
+    {% set preproc_figs = subject.figures | selectattr("section", "eq", "Preprocessing") | list %}
+    {% if preproc_figs %}
+    <a href="#section-preproc">Preprocessing</a>
+    {% endif %}
+    {% set stats_figs = subject.figures | selectattr("section", "equalto", "Statistical Results") | list %}
+    {% if stats_figs or subject.contrast_tables %}
+    <a href="#section-stats">Statistical Results</a>
+    {% endif %}
+    {% if subject.boilerplate %}
+    <a href="#section-methods">Methods</a>
+    {% endif %}
+  </nav>
+</div>
+
+<!-- ===== MAIN ===== -->
+<main id="main">
+  <h1 class="page-title">sub-{{ subject.label }}</h1>
+  <p class="page-subtitle">
+    Tasks: <strong>{{ subject.tasks | join(", ") }}</strong> &nbsp;·&nbsp;
+    Generated: <strong>{{ group.generation_date }}</strong> &nbsp;·&nbsp;
+    bidspm {{ group.bidspm_version }}
+  </p>
+
+  <!-- ===== SUMMARY ===== -->
+  <div class="report-section" id="section-summary">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-summary">
+      <span>Summary</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-summary">
+      <table class="table table-sm table-bordered w-auto">
+        <tbody>
+          <tr><th>Subject</th><td>sub-{{ subject.label }}</td></tr>
+          <tr><th>Tasks</th><td>{{ subject.tasks | join(", ") }}</td></tr>
+          <tr><th>Dataset</th><td>{{ group.dataset_name }}</td></tr>
+          {% if group.model_name %}<tr><th>Model</th><td>{{ group.model_name }}</td></tr>{% endif %}
+          <tr><th>Report generated</th><td>{{ group.generation_date }}</td></tr>
+          <tr><th>bidspm version</th><td>{{ group.bidspm_version }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== ANATOMICAL QA ===== -->
+  {% if subject.anat_qa %}
+  <div class="report-section" id="section-anat-qa">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-anat-qa">
+      <span>Anatomical Quality Assessment</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-anat-qa">
+      <p class="text-muted" style="font-size:.8rem">
+        Metrics computed from the normalised anatomical image via the
+        Preprocessed Connectome Project QAP protocol. Higher SNR/CNR/FBER and
+        lower EFC indicate better image quality.
+      </p>
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">SNR</div>
+          <div class="metric-value">{{ subject.anat_qa.SNR }}</div>
+          <div class="metric-note">Signal-to-Noise Ratio</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">CNR</div>
+          <div class="metric-value">{{ subject.anat_qa.CNR }}</div>
+          <div class="metric-note">Contrast-to-Noise Ratio</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">FBER</div>
+          <div class="metric-value">{{ subject.anat_qa.FBER }}</div>
+          <div class="metric-note">Foreground/Background Energy</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">EFC</div>
+          <div class="metric-value">{{ subject.anat_qa.EFC }}</div>
+          <div class="metric-note">Entropy Focus Criterion ↓</div>
+        </div>
+      </div>
+
+      {% set anat_figs = subject.figures | selectattr("section", "equalto", "Anatomical QA") | list %}
+      {% if anat_figs %}
+      <div class="fig-grid mt-3">
+        {% for fig in anat_figs %}
+        <div class="fig-card">
+          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
+          <div class="fig-caption">{{ fig.caption }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== MOTION QA ===== -->
+  {% if subject.motion_summary %}
+  <div class="report-section" id="section-motion">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-motion">
+      <span>Motion QA</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-motion">
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">Mean FD</div>
+          <div class="metric-value">{{ subject.motion_summary.mean_fd }}</div>
+          <div class="metric-note">mm (framewise displacement)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Max FD</div>
+          <div class="metric-value">{{ subject.motion_summary.max_fd }}</div>
+          <div class="metric-note">mm</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Outliers &gt;0.5 mm</div>
+          <div class="metric-value">{{ subject.motion_summary.n_outliers_0_5mm }}</div>
+          <div class="metric-note">{{ subject.motion_summary.pct_outliers }}% of volumes</div>
+        </div>
+        {% if subject.motion_summary.n_runs is defined %}
+        <div class="metric-card">
+          <div class="metric-label">Runs</div>
+          <div class="metric-value">{{ subject.motion_summary.n_runs }}</div>
+          <div class="metric-note">summarised runs</div>
+        </div>
+        {% endif %}
+      </div>
+
+      {% set motion_figs = subject.figures | selectattr("section", "equalto", "Motion QA") | list %}
+      {% if motion_figs %}
+      <div class="fig-grid mt-3">
+        {% for fig in motion_figs %}
+        <div class="fig-card">
+          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
+          <div class="fig-caption">{{ fig.caption }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== PREPROCESSING ===== -->
+  {% set preproc_figs = subject.figures | selectattr("section", "equalto", "Preprocessing") | list %}
+  {% if preproc_figs %}
+  <div class="report-section" id="section-preproc">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-preproc">
+      <span>Preprocessing Figures</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-preproc">
+      <div class="fig-grid">
+        {% for fig in preproc_figs %}
+        <div class="fig-card">
+          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
+          <div class="fig-caption">{{ fig.caption }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== STATISTICAL RESULTS ===== -->
+  {% set stats_figs = subject.figures | selectattr("section", "equalto", "Statistical Results") | list %}
+  {% if stats_figs or subject.contrast_tables %}
+  <div class="report-section" id="section-stats">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-stats">
+      <span>Statistical Results</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-stats">
+      {% if stats_figs %}
+      <div class="fig-grid mb-3">
+        {% for fig in stats_figs %}
+        <div class="fig-card">
+          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
+          <div class="fig-caption">{{ fig.caption }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% for table in subject.contrast_tables %}
+      <h6 class="mt-3">{{ table.name }}</h6>
+      <div class="table-scroll">
+        <table class="table table-sm table-striped table-bordered">
+          <thead class="table-dark">
+            <tr>{% for col in table.columns %}<th>{{ col }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+            {% for row in table.rows %}
+            <tr>{% for col in table.columns %}<td>{{ row[col] }}</td>{% endfor %}</tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== METHODS ===== -->
+  {% if subject.boilerplate %}
+  <div class="report-section" id="section-methods">
+    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-methods">
+      <span>Methods (boilerplate)</span><span class="toggle-arrow">▼</span>
+    </div>
+    <div class="section-body collapse show" id="body-methods">
+      <p class="text-muted" style="font-size:.8rem">
+        Auto-generated methods text suitable for the Methods section of a manuscript.
+      </p>
+      <div class="boilerplate">{{ subject.boilerplate }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <footer>
+    bidspm processing report &nbsp;·&nbsp; generated {{ group.generation_date }}
+    &nbsp;·&nbsp; <a href="index.html">Back to group index</a>
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // Rotate arrow chevron when section collapses
+  document.querySelectorAll('.section-header').forEach(function(hdr) {
+    var target = document.querySelector(hdr.getAttribute('data-bs-target'));
+    if (!target) return;
+    target.addEventListener('hide.bs.collapse', function() { hdr.classList.add('collapsed'); });
+    target.addEventListener('show.bs.collapse', function() { hdr.classList.remove('collapsed'); });
+  });
+
+  // Highlight active sidebar link on scroll
+  var sections = document.querySelectorAll('.report-section');
+  var links = document.querySelectorAll('#sidebar nav a');
+  window.addEventListener('scroll', function() {
+    var scrollY = window.scrollY + 80;
+    sections.forEach(function(sec) {
+      if (sec.offsetTop <= scrollY && sec.offsetTop + sec.offsetHeight > scrollY) {
+        links.forEach(function(l) { l.classList.remove('active'); });
+        var link = document.querySelector('#sidebar nav a[href="#' + sec.id + '"]');
+        if (link) link.classList.add('active');
+      }
+    });
+  });
+</script>
+</body>
+</html>
