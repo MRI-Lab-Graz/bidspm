@@ -548,6 +548,22 @@
         return hint;
     }
 
+    // Mirrors bidspm's own MATLAB-side check (BidsModel.m validateConditionNames,
+    // regex `^.*_[0-9]*$`). Condition/contrast names ending in an underscore plus
+    // digits (e.g. "single_W_2") collide with bidspm's internal run-numbering
+    // convention and can break results computation, per the FAQ entry below.
+    function getProblematicConditionNames(names) {
+        return (Array.isArray(names) ? names : [])
+            .map(item => (item === 1 ? '1' : String(item || '').trim()))
+            .filter(name => name && name !== '1' && /^.*_[0-9]*$/.test(name));
+    }
+
+    function getConditionNamingIssue(problematicNames) {
+        if (!problematicNames || !problematicNames.length) return null;
+        return `Name(s) ending in "_<digit>" may break results computation: ${problematicNames.join(', ')}. `
+            + 'Rename them (see FAQ: bidspm.readthedocs.io/en/latest/FAQ.html#statistics-how-should-i-name-my-conditions-in-my-events-tsv).';
+    }
+
     function getContrastSchemaChecks(contrastValue) {
         const nameValid = typeof contrastValue?.Name === 'string' && contrastValue.Name.trim() !== '';
 
@@ -557,6 +573,9 @@
         const conditionListArray = Array.isArray(contrastValue?.ConditionList);
         const conditionEntriesValid = conditionListArray && contrastValue.ConditionList.every(item => typeof item === 'string' || item === 1);
         const conditionCount = conditionListArray ? contrastValue.ConditionList.length : 0;
+        const problematicConditionNames = conditionListArray
+            ? getProblematicConditionNames(contrastValue.ConditionList)
+            : [];
 
         const weightsArray = Array.isArray(contrastValue?.Weights);
         const matrixWeights = weightsArray && contrastValue.Weights.some(item => Array.isArray(item));
@@ -579,6 +598,7 @@
             conditionCount,
             weightCount: weightsArray ? contrastValue.Weights.length : 0,
             matrixWeights,
+            problematicConditionNames,
             passedRequired: (nameValid ? 1 : 0) + (conditionListValid ? 1 : 0) + (weightsValid ? 1 : 0) + (testValid ? 1 : 0),
             totalRequired: 4
         };
@@ -591,6 +611,8 @@
         if (!checks.conditionListValid) issues.push('ConditionList is required, non-empty, and entries must be strings or integer 1.');
         if (!checks.weightsValid) issues.push('Weights is required and must align with ConditionList length (vector or matrix rows).');
         if (!checks.testValid) issues.push('Test is required and must be one of: pass, t, F.');
+        const namingIssue = getConditionNamingIssue(checks.problematicConditionNames);
+        if (namingIssue) issues.push(namingIssue);
         return issues;
     }
 
@@ -649,6 +671,12 @@
             return modelXSet.has(token);
         });
 
+        // bidspm falls back to Model.X (minus the intercept) when Contrasts isn't
+        // explicitly set, so check whichever set of names will actually be used.
+        const problematicConditionNames = getProblematicConditionNames(
+            Array.isArray(contrastsValue) ? contrastsValue : normalizedModelX
+        );
+
         return {
             unknownKeys,
             testValid,
@@ -657,6 +685,7 @@
             contrastsEntriesValid,
             contrastsSubsetValid,
             subsetCheckApplicable,
+            problematicConditionNames,
             contrastsCount: Array.isArray(contrastsValue) ? contrastsValue.length : 0,
             passedRequired: testValid ? 1 : 0,
             totalRequired: 1
@@ -671,6 +700,8 @@
         if (!checks.contrastsArray) issues.push('Contrasts must be an array or null when provided.');
         if (!checks.contrastsEntriesValid) issues.push('Contrasts entries must be strings or integer 1.');
         if (checks.subsetCheckApplicable && !checks.contrastsSubsetValid) issues.push('Contrasts should be a strict subset of Model.X.');
+        const namingIssue = getConditionNamingIssue(checks.problematicConditionNames);
+        if (namingIssue) issues.push(namingIssue);
         return issues;
     }
 

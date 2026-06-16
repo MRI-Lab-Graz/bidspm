@@ -563,9 +563,10 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260609a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v='20260616a') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_model_x_domains.js', v='20260616a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v='20260616b') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260616b') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_model_hints.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_browser.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
@@ -876,7 +877,8 @@
         getModelDraft: () => modelEditorDraft,
         getInterestRegressors: () => modelEditorInterestRegressors,
         getParticipantsInfo: () => getModelEditorParticipantsInfo(),
-        getInputEntityValues: () => modelEditorInputEntityValues
+        getInputEntityValues: () => modelEditorInputEntityValues,
+        getEventSamples: () => modelEditorEventSamples
     });
     window.getTransformerModelXRegressorsForNode = getTransformerModelXRegressorsForNode;
 
@@ -2117,7 +2119,9 @@
                     controls.appendChild(regPool);
                 }
 
-                if (!isDatasetModelX && (transformerRegressors.length || hasTransformerPipeline)) {
+                // bidspm only ever executes Transformations for Run-level events.tsv data, so
+                // suggesting transformer-generated regressors at other levels would be misleading.
+                if (isRunModelX && (transformerRegressors.length || hasTransformerPipeline)) {
                     const transformerCard = document.createElement('div');
                     transformerCard.className = 'border rounded p-2 mb-2 bg-white w-100';
 

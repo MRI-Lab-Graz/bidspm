@@ -421,7 +421,7 @@
           </div>
           <div>
             <div class="op-field-label">Query <span class="text-danger">*</span>
-              <span class="text-muted fw-normal ms-1" style="font-size:.68rem;">e.g. <code>trial_type == 'go'</code> or <code>col == 'a' | col == 'b'</code></span>
+              <span class="text-muted fw-normal ms-1" style="font-size:.68rem;">e.g. <code>trial_type == 'go'</code> or <code>trial_type==^(a|b)$</code> for multiple values</span>
             </div>
             <input type="text" class="form-control form-control-sm" data-field="Query" placeholder="trial_type == 'value'">
           </div>
@@ -735,7 +735,7 @@
 
       container.innerHTML = `
         <div class="val-pills-hint">
-          <i class="fas fa-hand-pointer me-1"></i>Click a value to insert into query:
+          <i class="fas fa-hand-pointer me-1"></i>Click one or more values to build the query:
           <select class="query-col-select form-select form-select-sm d-inline-block ms-2"
                   style="width:auto;font-size:.75rem;padding:.15rem .5rem;">
             ${allCols.map(col =>
@@ -749,6 +749,47 @@
       const select = container.querySelector('.query-col-select');
       const pillsDiv = container.querySelector('.val-pills');
 
+      // Builds a Query string the backend (bids.transformers Filter) can actually
+      // execute. The backend only parses a single "col <op> value" clause, so two or
+      // more selected values must be expressed as one anchored regex alternation
+      // rather than several "|"-joined "col == val" clauses (which only the first
+      // clause would ever be applied).
+      function buildEqualityQuery(col, values) {
+        if (!values.length) return '';
+        if (values.length === 1) return `${col}=='${values[0]}'`;
+        return `${col}==^(${values.join('|')})$`;
+      }
+
+      // Parses an existing Query string to figure out which values (if any) are
+      // currently selected for the given column, so pills stay in sync when a card
+      // is reloaded or the query was hand-edited.
+      function getSelectedValuesForColumn(query, col, domainValues) {
+        const selected = new Set();
+        const trimmed = String(query || '').trim();
+        const eqIndex = trimmed.indexOf('==');
+        if (eqIndex === -1) return selected;
+
+        const left = trimmed.slice(0, eqIndex).trim();
+        if (left !== col) return selected;
+
+        const right = trimmed.slice(eqIndex + 2).trim();
+
+        if ((right.startsWith('\'') && right.endsWith('\'')) ||
+            (right.startsWith('"') && right.endsWith('"'))) {
+          selected.add(right.slice(1, -1));
+          return selected;
+        }
+
+        const altMatch = right.match(/^\^\((.*)\)\$$/);
+        if (altMatch) {
+          altMatch[1].split('|').forEach(v => { if (v) selected.add(v); });
+          return selected;
+        }
+
+        if (domainValues.includes(right)) selected.add(right);
+        return selected;
+      }
+
       function renderPills(col) {
         container.dataset.queryCol = col;
         const values = getColumnDomain(col);
@@ -756,23 +797,21 @@
           pillsDiv.innerHTML = '<span class="text-muted" style="font-size:.75rem;">No values for this column</span>';
           return;
         }
+
+        const selectedValues = getSelectedValuesForColumn(queryInput.value, col, values);
+
         pillsDiv.innerHTML = values.map(value =>
-          `<button class="val-pill" data-col="${escAttr(col)}" data-val="${escAttr(value)}">${escHtml(value)}</button>`
+          `<button class="val-pill${selectedValues.has(String(value)) ? ' active' : ''}" data-col="${escAttr(col)}" data-val="${escAttr(value)}">${escHtml(value)}</button>`
         ).join('');
+
         pillsDiv.querySelectorAll('.val-pill').forEach(pill => {
           pill.addEventListener('click', () => {
-            const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
-            const current = queryInput.value.trim();
-            queryInput.value = current ? `${current} | ${expression}` : expression;
-            pillsDiv.querySelectorAll('.val-pill').forEach(b => b.classList.remove('active'));
-            pill.classList.add('active');
+            pill.classList.toggle('active');
+            const nowSelected = Array.from(pillsDiv.querySelectorAll('.val-pill.active'))
+              .map(b => b.dataset.val);
+            queryInput.value = buildEqualityQuery(col, nowSelected);
             updateGeneratedJSON();
           });
-        });
-        const currentQuery = queryInput.value;
-        pillsDiv.querySelectorAll('.val-pill').forEach(pill => {
-          const expression = `${pill.dataset.col} == '${pill.dataset.val}'`;
-          pill.classList.toggle('active', currentQuery.includes(expression));
         });
       }
 

@@ -166,7 +166,7 @@ def _parse_csv_table(csv_path: Path) -> Optional[Dict]:
 # Data collection per subject
 # ---------------------------------------------------------------------------
 
-def _collect_subject(sub_label: str, derivatives: Path, tasks: List[str]) -> SubjectData:
+def _collect_subject(sub_label: str, derivatives: Path, tasks: List[str], model_name: str = "") -> SubjectData:
     subject = SubjectData(label=sub_label, tasks=list(tasks))
 
     preproc_dir = derivatives / "bidspm-preproc" / f"sub-{sub_label}"
@@ -251,9 +251,23 @@ def _collect_subject(sub_label: str, derivatives: Path, tasks: List[str]) -> Sub
                 subject.contrast_tables.append(t)
 
     # ---- boilerplate markdown ----
-    boiler_dir = derivatives / "reports"
-    for md in sorted(boiler_dir.glob("*.md")) if boiler_dir.is_dir() else []:
-        subject.boilerplate += _read_text_safe(md) + "\n\n"
+    # bidspm's MATLAB side writes the citation/methods boilerplate to
+    # {derivatives}/bidspm-stats/reports/stats_model-<Name>_citation.md, not to
+    # {derivatives}/reports/ — check both so existing/older layouts still work.
+    # Prefer the file matching the current model so reports for other models in
+    # the same dataset don't bleed into this one's Methods section.
+    pattern = f"stats_model-{model_name}_citation.md" if model_name else "*.md"
+    boiler_dirs = [stats_dir.parent / "reports", derivatives / "reports"]
+    seen_boilerplate = set()
+    for boiler_dir in boiler_dirs:
+        matches = sorted(boiler_dir.glob(pattern)) if boiler_dir.is_dir() else []
+        if not matches and model_name and boiler_dir.is_dir():
+            matches = sorted(boiler_dir.glob("*.md"))  # fall back if naming doesn't match
+        for md in matches:
+            if md in seen_boilerplate:
+                continue
+            seen_boilerplate.add(md)
+            subject.boilerplate += _read_text_safe(md) + "\n\n"
 
     return subject
 
@@ -284,7 +298,7 @@ def generate_reports(
         raise ValueError(f"No subjects found under {derivatives}")
 
     # Build data
-    subject_data = [_collect_subject(s, derivatives, tasks) for s in sorted(subjects)]
+    subject_data = [_collect_subject(s, derivatives, tasks, model_name) for s in sorted(subjects)]
 
     # Try to find bidspm version
     bidspm_version = _detect_bidspm_version(derivatives)

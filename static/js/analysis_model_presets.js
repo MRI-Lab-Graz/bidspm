@@ -22,6 +22,7 @@
         const getInterestRegressors = config.getInterestRegressors || (() => []);
         const getParticipantsInfo = config.getParticipantsInfo || emptyParticipantsInfo;
         const getInputEntityValues = config.getInputEntityValues || (() => ({}));
+        const getEventSamples = config.getEventSamples || (() => ({ trial_type: [], condition: [] }));
 
         function slugifyNodeToken(value) {
             return String(value || '')
@@ -48,66 +49,22 @@
             return `${normalizedBase}_${Date.now().toString().slice(-4)}`;
         }
 
-        function inferGeneratedColumnsFromInstruction(instruction) {
-            if (!instruction || typeof instruction !== 'object') return [];
-
-            const opName = String(instruction.Name || '').trim();
-            const outputValues = normalizeStringArray(instruction.Output);
-
-            if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
-                if (outputValues.length) return outputValues;
-                return normalizeStringArray(instruction.Input).map((name) => `${name}_label`);
-            }
-
-            return outputValues;
-        }
-
         function getTransformerModelXRegressorsForNode(node) {
             const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
                 ? node.Transformations
                 : null;
-            const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
-            const instructions = Array.isArray(transformations?.Instructions) ? transformations.Instructions : [];
 
-            const domainMap = {};
-            const inferredGenerated = [];
+            // The actual domain-propagation (Filter, Replace, Copy, Concatenate, Factor, ...)
+            // lives in transformer_model_x_domains.js so this stays in sync with the
+            // Transformer Builder's own "Generated Columns" preview instead of drifting
+            // out of sync as a second, partial reimplementation.
+            const seedSamples = getEventSamples() || { trial_type: [], condition: [] };
+            const seedDomains = {
+                trial_type: normalizeStringArray(seedSamples.trial_type),
+                condition: normalizeStringArray(seedSamples.condition)
+            };
 
-            instructions.forEach((instruction) => {
-                const opName = String(instruction?.Name || '').trim();
-                const outputs = normalizeStringArray(instruction.Output);
-                const inputs = normalizeStringArray(instruction.Input);
-                const inputCol = inputs[0] || '';
-
-                if (opName === 'Filter') {
-                    const query = String(instruction.Query || '');
-                    const queryLeft = (query.match(/^(\w+)\s*==/) || [])[1] || '';
-                    const queryRhs = (query.match(/==\s*'([^']+)'/) || [])[1] || '';
-
-                    outputs.forEach((outputCol) => {
-                        if (!outputCol) return;
-                        inferredGenerated.push(outputCol);
-
-                        const domain = (queryLeft === inputCol && queryRhs)
-                            ? [queryRhs]
-                            : [...(domainMap[inputCol] || [])];
-                        domainMap[outputCol] = domain;
-
-                        domain.filter((v) => v && v !== 'n/a').forEach((v) => {
-                            inferredGenerated.push(`${outputCol}.${v}`);
-                        });
-                    });
-                } else {
-                    inferGeneratedColumnsFromInstruction(instruction).forEach((col) => {
-                        inferredGenerated.push(col);
-                    });
-                }
-            });
-
-            return Array.from(new Set([...explicitGenerated, ...inferredGenerated])).filter((name) => {
-                if (!name || name === '1') return false;
-                if (name.startsWith('trial_type.') || name.startsWith('condition.')) return false;
-                return true;
-            });
+            return window.TransformerModelXDomains.getModelXRegressors(seedDomains, transformations);
         }
 
         function getModelNodeByName(nodeName) {
@@ -131,6 +88,36 @@
             return getNodeOutputContrastNames(getModelNodeByName(edge?.Source));
         }
 
+        // bidspm auto-replicates a Run-level Contrast/DummyContrast once per run/session,
+        // naming each copy "<name>_ses-<ses>_run-<run>" (see constructContrastNameFromBidsEntity.m).
+        // A downstream node never sees the bare "<name>" as an actual regressor — only these
+        // concrete per-run/session names exist in the SPM design — so expand bare contrast
+        // names accordingly using the dataset's known run/session labels before suggesting them.
+        function expandUpstreamContrastNames(names, sourceNode) {
+            const bareNames = Array.from(new Set(normalizeStringArray(names)));
+            if (!bareNames.length) return bareNames;
+            if (String(sourceNode?.Level || '').trim().toLowerCase() !== 'run') return bareNames;
+
+            const groupBy = normalizeStringArray(sourceNode.GroupBy).map((v) => v.toLowerCase());
+            const entityValues = getInputEntityValues() || {};
+            const sessions = normalizeStringArray(entityValues.session);
+            const runs = groupBy.includes('run') ? normalizeStringArray(entityValues.run) : [];
+
+            if (!runs.length && !sessions.length) return bareNames;
+
+            const expanded = [];
+            bareNames.forEach((name) => {
+                if (runs.length && sessions.length) {
+                    runs.forEach((run) => sessions.forEach((ses) => expanded.push(`${name}_ses-${ses}_run-${run}`)));
+                } else if (runs.length) {
+                    runs.forEach((run) => expanded.push(`${name}_run-${run}`));
+                } else {
+                    sessions.forEach((ses) => expanded.push(`${name}_ses-${ses}`));
+                }
+            });
+            return Array.from(new Set(expanded));
+        }
+
         function getIncomingContrastNamesForNode(nodeIdx) {
             const draft = getModelDraft();
             const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
@@ -142,16 +129,18 @@
             const incoming = [];
             edges.forEach((edge) => {
                 if (String(edge?.Destination || '').trim() !== destinationName) return;
-                const availableFromSource = getEdgeAvailableContrastNames(edge);
+                const sourceNode = getModelNodeByName(edge?.Source);
+                const availableFromSource = getNodeOutputContrastNames(sourceNode);
                 const filterValues = normalizeStringArray(edge?.Filter?.contrast);
                 const selected = filterValues.length
                     ? availableFromSource.filter((name) => filterValues.includes(name))
                     : availableFromSource;
-                selected.forEach((name) => incoming.push(name));
+                expandUpstreamContrastNames(selected, sourceNode).forEach((name) => incoming.push(name));
             });
 
             if (!incoming.length && nodeIdx > 0) {
-                getNodeOutputContrastNames(nodes[nodeIdx - 1]).forEach((name) => incoming.push(name));
+                const sourceNode = nodes[nodeIdx - 1];
+                expandUpstreamContrastNames(getNodeOutputContrastNames(sourceNode), sourceNode).forEach((name) => incoming.push(name));
             }
 
             return Array.from(new Set(incoming));
@@ -217,7 +206,9 @@
             const nodes = Array.isArray(draft?.Nodes) ? draft.Nodes : [];
             const node = nodes[nodeIdx] || {};
             const level = String(node?.Level || '').trim().toLowerCase();
-            const transformerRegressors = getTransformerModelXRegressorsForNode(node);
+            // bidspm only ever executes Transformations for Run-level events.tsv data, so
+            // suggesting transformer-generated regressors at other levels would be misleading.
+            const transformerRegressors = level === 'run' ? getTransformerModelXRegressorsForNode(node) : [];
 
             if (level === 'dataset') {
                 return getParticipantRegressorTerms(true);

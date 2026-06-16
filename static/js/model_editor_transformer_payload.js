@@ -63,10 +63,12 @@
           };
         }
 
-        activeModel = payloadModelSnapshot;
-        if (typeof setModel === 'function') {
-          setModel(activeModel);
-        }
+        // The snapshot is only used to confirm this Apply event matches the launch
+        // that opened Transformer Builder — it must NOT replace the live model.
+        // Doing so previously discarded any edits made in the model editor while
+        // the builder was open (e.g. enabling DummyContrasts), since the snapshot
+        // reflects the model as it was at launch time, not now.
+        activeModel = model;
       }
 
       const generatedColumns = typeof normalizeStringArray === 'function'

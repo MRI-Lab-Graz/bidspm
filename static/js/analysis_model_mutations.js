@@ -59,72 +59,22 @@
         )).filter(Boolean);
     }
 
-    function inferGeneratedColumnsFromInstruction(instruction) {
-        if (!instruction || typeof instruction !== 'object') return [];
-
-        const opName = String(instruction.Name || '').trim();
-        const outputValues = normalizeStringArray(instruction.Output);
-
-        if (opName === 'LabelIdenticalRows' || opName === 'Label_identical_rows') {
-            if (outputValues.length) return outputValues;
-            return normalizeStringArray(instruction.Input).map((name) => `${name}_label`);
-        }
-
-        return outputValues;
-    }
-
     function getTransformerModelXRegressorsForNode(node) {
         const transformations = (node?.Transformations && typeof node.Transformations === 'object' && !Array.isArray(node.Transformations))
             ? node.Transformations
             : null;
-        const explicitGenerated = normalizeStringArray(transformations?.GeneratedColumns);
-        const instructions = Array.isArray(transformations?.Instructions) ? transformations.Instructions : [];
 
-        // Simulate the domain chain across Filter instructions so that dot-notation
-        // suggestions (e.g. item_valid.item) are available without the transformer
-        // builder UI being open. For each Filter we track what string values the
-        // output column will contain so callers can use col.value in X.
-        const domainMap = {};   // col → string[] of known values
-        const inferredGenerated = [];
+        // The actual domain-propagation (Filter, Replace, Copy, Concatenate, Factor, ...)
+        // lives in transformer_model_x_domains.js so this stays in sync with the
+        // Transformer Builder's own "Generated Columns" preview instead of drifting
+        // out of sync as a second, partial reimplementation.
+        const seedSamples = (typeof modelEditorEventSamples === 'object' && modelEditorEventSamples) || { trial_type: [], condition: [] };
+        const seedDomains = {
+            trial_type: normalizeStringArray(seedSamples.trial_type),
+            condition: normalizeStringArray(seedSamples.condition)
+        };
 
-        instructions.forEach((instruction) => {
-            const opName = String(instruction?.Name || '').trim();
-            const outputs = normalizeStringArray(instruction.Output);
-            const inputs = normalizeStringArray(instruction.Input);
-            const inputCol = inputs[0] || '';
-
-            if (opName === 'Filter') {
-                const query = String(instruction.Query || '');
-                const queryLeft = (query.match(/^(\w+)\s*==/) || [])[1] || '';
-                const queryRhs  = (query.match(/==\s*'([^']+)'/) || [])[1] || '';
-
-                outputs.forEach((outputCol) => {
-                    if (!outputCol) return;
-                    inferredGenerated.push(outputCol);
-
-                    // When filtering on the same column as Input, the output domain
-                    // is the matched value itself. Otherwise inherit the Input domain.
-                    const domain = (queryLeft === inputCol && queryRhs)
-                        ? [queryRhs]
-                        : [...(domainMap[inputCol] || [])];
-                    domainMap[outputCol] = domain;
-
-                    domain.filter((v) => v && v !== 'n/a').forEach((v) => {
-                        inferredGenerated.push(`${outputCol}.${v}`);
-                    });
-                });
-            } else {
-                inferGeneratedColumnsFromInstruction(instruction).forEach((col) => {
-                    inferredGenerated.push(col);
-                });
-            }
-        });
-
-        return Array.from(new Set([...explicitGenerated, ...inferredGenerated])).filter((name) => {
-            if (!name || name === '1') return false;
-            if (name.startsWith('trial_type.') || name.startsWith('condition.')) return false;
-            return true;
-        });
+        return window.TransformerModelXDomains.getModelXRegressors(seedDomains, transformations);
     }
 
     function getHigherLevelRegressorTermsForNode(nodeIdx, includeIntercept = true) {

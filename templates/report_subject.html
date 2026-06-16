@@ -99,23 +99,13 @@
   <div class="sidebar-section">Subject</div>
   <nav>
     <a href="#section-summary">Summary</a>
-    {% if subject.anat_qa %}
     <a href="#section-anat-qa">Anatomical QA</a>
-    {% endif %}
     {% if subject.motion_summary %}
     <a href="#section-motion">Motion QA</a>
     {% endif %}
-    {% set preproc_figs = subject.figures | selectattr("section", "eq", "Preprocessing") | list %}
-    {% if preproc_figs %}
     <a href="#section-preproc">Preprocessing</a>
-    {% endif %}
-    {% set stats_figs = subject.figures | selectattr("section", "equalto", "Statistical Results") | list %}
-    {% if stats_figs or subject.contrast_tables %}
     <a href="#section-stats">Statistical Results</a>
-    {% endif %}
-    {% if subject.boilerplate %}
     <a href="#section-methods">Methods</a>
-    {% endif %}
   </nav>
 </div>
 
@@ -148,12 +138,12 @@
   </div>
 
   <!-- ===== ANATOMICAL QA ===== -->
-  {% if subject.anat_qa %}
   <div class="report-section" id="section-anat-qa">
     <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-anat-qa">
       <span>Anatomical Quality Assessment</span><span class="toggle-arrow">▼</span>
     </div>
     <div class="section-body collapse show" id="body-anat-qa">
+      {% if subject.anat_qa %}
       <p class="text-muted" style="font-size:.8rem">
         Metrics computed from the normalised anatomical image via the
         Preprocessed Connectome Project QAP protocol. Higher SNR/CNR/FBER and
@@ -193,9 +183,15 @@
         {% endfor %}
       </div>
       {% endif %}
+      {% else %}
+      <p class="text-muted mb-0" style="font-size:.85rem">
+        Not available yet — no anatomical QA metrics were found under
+        <code>bidspm-preproc/sub-{{ subject.label }}/reports/*_qa.json</code>.
+        Run bidspm's <code>qa</code> action on the anatomical image to populate this section.
+      </p>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <!-- ===== MOTION QA ===== -->
   {% if subject.motion_summary %}
@@ -246,12 +242,12 @@
 
   <!-- ===== PREPROCESSING ===== -->
   {% set preproc_figs = subject.figures | selectattr("section", "equalto", "Preprocessing") | list %}
-  {% if preproc_figs %}
   <div class="report-section" id="section-preproc">
     <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-preproc">
       <span>Preprocessing Figures</span><span class="toggle-arrow">▼</span>
     </div>
     <div class="section-body collapse show" id="body-preproc">
+      {% if preproc_figs %}
       <div class="fig-grid">
         {% for fig in preproc_figs %}
         <div class="fig-card">
@@ -260,18 +256,26 @@
         </div>
         {% endfor %}
       </div>
+      {% else %}
+      <p class="text-muted mb-0" style="font-size:.85rem">
+        Not available yet — no figures were found under
+        <code>bidspm-preproc/sub-{{ subject.label }}/figures/</code>.
+        These come from bidspm's own preprocessing actions (e.g. <code>realign</code>, <code>coregistration</code>,
+        <code>norm</code>, <code>smooth</code>); they aren't written when starting from already fMRIPrep-preprocessed data
+        unless those actions were explicitly run.
+      </p>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <!-- ===== STATISTICAL RESULTS ===== -->
   {% set stats_figs = subject.figures | selectattr("section", "equalto", "Statistical Results") | list %}
-  {% if stats_figs or subject.contrast_tables %}
   <div class="report-section" id="section-stats">
     <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-stats">
       <span>Statistical Results</span><span class="toggle-arrow">▼</span>
     </div>
     <div class="section-body collapse show" id="body-stats">
+      {% if stats_figs or subject.contrast_tables %}
       {% if stats_figs %}
       <div class="fig-grid mb-3">
         {% for fig in stats_figs %}
@@ -298,24 +302,36 @@
         </table>
       </div>
       {% endfor %}
+      {% else %}
+      <p class="text-muted mb-0" style="font-size:.85rem">
+        Not available yet — no contrast figures or result tables were found under
+        <code>bidspm-stats/sub-{{ subject.label }}/results/</code>.
+        This means the Contrast Manager step hasn't produced output for this subject yet —
+        check the run log for contrast-specification errors.
+      </p>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <!-- ===== METHODS ===== -->
-  {% if subject.boilerplate %}
   <div class="report-section" id="section-methods">
     <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-methods">
       <span>Methods (boilerplate)</span><span class="toggle-arrow">▼</span>
     </div>
     <div class="section-body collapse show" id="body-methods">
+      {% if subject.boilerplate %}
       <p class="text-muted" style="font-size:.8rem">
         Auto-generated methods text suitable for the Methods section of a manuscript.
       </p>
       <div class="boilerplate">{{ subject.boilerplate }}</div>
+      {% else %}
+      <p class="text-muted mb-0" style="font-size:.85rem">
+        Not available yet — no citation/boilerplate markdown was found under
+        <code>bidspm-stats/reports/</code>. Re-run the <code>stats</code> action to generate it.
+      </p>
+      {% endif %}
     </div>
   </div>
-  {% endif %}
 
   <footer>
     bidspm processing report &nbsp;·&nbsp; generated {{ group.generation_date }}

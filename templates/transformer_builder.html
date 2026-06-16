@@ -89,11 +89,11 @@
         <label class="form-label form-label-sm fw-bold mb-1">Target node level</label>
         <select id="select-target-level" class="form-select form-select-sm">
           <option value="Run">Run (first-level)</option>
-          <option value="Session">Session</option>
-          <option value="Subject">Subject</option>
-          <option value="Dataset">Dataset (second-level)</option>
-          <option value="All">All levels</option>
         </select>
+        <div class="small text-muted mt-1">
+          bidspm only executes Transformations for Run-level events.tsv data — Session/Subject/Dataset
+          nodes never run them, so they aren't offered here.
+        </div>
       </div>
       <div class="col-md-4">
         <label class="form-label form-label-sm fw-bold mb-1">Variable source scope</label>
@@ -326,7 +326,10 @@
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
   const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
   const EMBEDDED_MODE = window.self !== window.top;
-  const NODE_LEVEL_OPTIONS = ['Run', 'Session', 'Subject', 'Dataset'];
+  // bidspm only ever executes node Transformations for Run-level events.tsv data
+  // (see convertOnsetTsvToMat.m) — Session/Subject/Dataset nodes never run them,
+  // so they aren't offered as targets here.
+  const NODE_LEVEL_OPTIONS = ['Run'];
   const transformerPathUtils = window.BIDSPMTransformerBuilderPathUtils;
   const modelSelectionFactory = window.BIDSPMTransformerBuilderModelSelection;
   const browserFactory = window.BIDSPMTransformerBuilderBrowser;
