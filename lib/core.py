@@ -678,7 +678,7 @@ def check_subject_processed(config: Config, subject_label: str, task: str, actio
         preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc" / f"sub-{subject_label}"
         if not preproc_dir.exists():
             return False
-        pattern = f"*task-{task}*space-{config.SPACE}*desc-preproc_bold.nii*"
+        pattern = f"*task-{task}*space-{config.SPACE}*desc-smth{config.FWHM}_bold.nii*"
         return len(list(preproc_dir.rglob(pattern))) > 0
     
     elif action == "stats":
