@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ from lib.utils import cleanup_tmp_directories
 from lib.utils import ensure_derivatives_dataset_description
 from lib.utils import generate_log_filename
 from lib.utils import get_container_model_path
+from lib.utils import log
 from lib.utils import run_command
 from lib.utils import run_streaming_command
 from lib.utils import validate_space_availability
@@ -234,6 +236,33 @@ class TestUtilsHelpers(unittest.TestCase):
 
         mock_non_fatal.assert_called_once()
         mock_log.assert_called_once()
+
+    def test_log_is_safe_under_concurrent_writes(self):
+        # --stats-workers runs Pipeline._process_subject for several subjects on
+        # separate threads at once; each of those can call into lib.utils.log()
+        # (e.g. via run_command). Every line written must stay intact -- no
+        # interleaved/corrupted lines from concurrent file appends.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "concurrent.log"
+            with patch("lib.utils.LOG_FILE", str(log_path)):
+                threads = [
+                    threading.Thread(target=log, args=(f"message-{i}",))
+                    for i in range(40)
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 40)
+            seen = {f"message-{i}" for i in range(40)}
+            for line in lines:
+                # Each line is "<timestamp> message-N" with nothing else mixed in.
+                message = line.split(" ", 2)[-1]
+                self.assertIn(message, seen)
+                seen.discard(message)
+            self.assertEqual(seen, set())
 
     def test_validate_space_availability_checks_subjects_and_spaces(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

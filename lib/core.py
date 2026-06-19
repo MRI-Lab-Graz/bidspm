@@ -12,6 +12,7 @@ import random
 import shlex
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -973,6 +974,7 @@ class PipelineOptions:
     skip_validation: bool = False
     local: bool = False
     smooth_backend: str = "fast"
+    stats_workers: int = 4
     force: bool = False
     dry_run: bool = False
     debug: bool = False
@@ -1265,6 +1267,10 @@ class Pipeline:
                             subjects_processed.append(subject)
                             actions_completed.add('smooth')
 
+                # Validation and the already-processed check are kept sequential and
+                # upfront in the main thread -- only the actual per-subject work
+                # (container/local MATLAB invocation) runs in the worker pool below.
+                eligible_subjects = []
                 for subject in subjects:
                     # Validate space availability
                     if not validate_space_availability(self.config, [subject], task):
@@ -1285,13 +1291,44 @@ class Pipeline:
                         if self._skip_if_processed(subject, task):
                             continue
 
-                    # Run actions
-                    success = self._process_subject(subject, task)
-                    if success:
-                        subjects_processed.append(subject)
-                        actions_completed.update(self.options.actions)
-                    else:
-                        subjects_failed.append(subject)
+                    eligible_subjects.append(subject)
+
+                max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
+                    if eligible_subjects else 1
+
+                if max_workers <= 1:
+                    for subject in eligible_subjects:
+                        success = self._process_subject(subject, task)
+                        if success:
+                            subjects_processed.append(subject)
+                            actions_completed.update(self.options.actions)
+                        else:
+                            subjects_failed.append(subject)
+                else:
+                    self._log(
+                        f">>> Processing {len(eligible_subjects)} subject(s) with "
+                        f"{max_workers} worker(s) (task {task})"
+                    )
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        futures = {
+                            executor.submit(self._process_subject, subject, task): subject
+                            for subject in eligible_subjects
+                        }
+                        # Collect results here in the main thread only -- workers must
+                        # never touch subjects_processed/subjects_failed/actions_completed
+                        # directly, to avoid races on these shared lists/set.
+                        for future in as_completed(futures):
+                            subject = futures[future]
+                            try:
+                                success = future.result()
+                            except Exception as exc:
+                                self._log_error(f"Unhandled error processing subject {subject}: {exc}")
+                                success = False
+                            if success:
+                                subjects_processed.append(subject)
+                                actions_completed.update(self.options.actions)
+                            else:
+                                subjects_failed.append(subject)
 
                 # Dataset-level stats
                 if 'dataset' in self.options.actions:
@@ -1606,7 +1643,9 @@ end
             try:
                 for line in proc.stdout:
                     line_stripped = line.rstrip()
-                    self._log(line_stripped)
+                    # Prefixed so interleaved output stays attributable when multiple
+                    # subjects run concurrently (see --stats-workers).
+                    self._log(f"[{subject}] {line_stripped}")
                     output_lines.append(line_stripped)
                     if "bidspm - ERROR" in line_stripped:
                         bidspm_error_seen = True

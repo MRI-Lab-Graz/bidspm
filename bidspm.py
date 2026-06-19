@@ -58,6 +58,10 @@ OPTIONAL ARGUMENTS:
     --local              Use local BIDSPM installation instead of containers
     --smooth-backend     Smoothing implementation: "fast" (default, parallel
                          nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)
+    --stats-workers      Number of subjects to process concurrently for
+                         smooth/stats (container or local MATLAB/Octave).
+                         Default 4. Set to 1 to disable parallelism (e.g.
+                         for single-seat MATLAB licenses).
     --force              Force reprocessing even if output already exists
     --dry-run            Show commands without executing them
     --debug              Enable debug output
@@ -148,6 +152,11 @@ def parse_arguments():
     parser.add_argument('--smooth-backend', choices=['spm', 'fast'], default='fast',
                        help='Smoothing implementation: "fast" (default, parallel '
                             'nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)')
+    parser.add_argument('--stats-workers', type=int, default=4,
+                       help='Number of subjects to process concurrently for smooth/stats '
+                            '(container or local MATLAB/Octave). Default 4. Set to 1 to '
+                            'disable parallelism (e.g. for single-seat MATLAB licenses or '
+                            'limited container concurrency).')
     parser.add_argument('--force', action='store_true',
                        help='Force reprocessing of existing outputs')
     parser.add_argument('--dry-run', action='store_true',
@@ -390,6 +399,7 @@ def main():
         skip_validation=args.skip_modelvalidation,
         local=args.local,
         smooth_backend=args.smooth_backend,
+        stats_workers=args.stats_workers,
         force=args.force,
         dry_run=args.dry_run,
         debug=args.debug,

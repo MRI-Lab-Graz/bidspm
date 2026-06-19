@@ -38,13 +38,18 @@ def log_error(msg):
     sys.exit(1)
 
 
+_LOG_FILE_LOCK = threading.Lock()
+
+
 def log(msg, error=False):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_msg = f"{timestamp} {msg}"
     log_path = Path(LOG_FILE)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "a") as f:
-        f.write(full_msg + "\n")
+    # --stats-workers runs this from multiple subject-processing threads at once.
+    with _LOG_FILE_LOCK:
+        with open(log_path, "a") as f:
+            f.write(full_msg + "\n")
     print(full_msg, file=sys.stderr if error else sys.stdout)
 
 

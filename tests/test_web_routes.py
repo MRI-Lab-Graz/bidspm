@@ -548,6 +548,7 @@ class TestWebRoutes(unittest.TestCase):
                     "skip_validation": True,
                     "local": True,
                     "force": True,
+                    "stats_workers": 3,
                 },
             )
 
@@ -568,6 +569,8 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("--local", called_command)
         self.assertIn("--force", called_command)
         self.assertIn("--settings", called_command)
+        self.assertIn("--stats-workers", called_command)
+        self.assertEqual(called_command[called_command.index("--stats-workers") + 1], "3")
 
         settings_path = Path(called_command[called_command.index("--settings") + 1])
         self.assertTrue(settings_path.exists())

@@ -18,6 +18,13 @@
         const getModelNodes = config.getModelNodes || (() => []);
         const getInputEntityValues = config.getInputEntityValues || (() => ({}));
         const getEdgeAvailableContrastNames = config.getEdgeAvailableContrastNames || (() => []);
+        const isAdvancedFieldsVisible = config.isAdvancedFieldsVisible || (() => true);
+        const createAdvancedFieldsBadge = config.createAdvancedFieldsBadge || ((text) => {
+            const badge = document.createElement('div');
+            badge.className = 'small text-muted';
+            badge.textContent = `${text} (advanced).`;
+            return badge;
+        });
 
         function createPanelShell(title, helpText, storageKey = null) {
             const panel = document.createElement('div');
@@ -820,6 +827,17 @@
                 grid.appendChild(fieldGroup);
             });
             wrap.appendChild(grid);
+
+            const filterKeyCount = (edge.Filter && typeof edge.Filter === 'object' && !Array.isArray(edge.Filter))
+                ? Object.keys(edge.Filter).length
+                : 0;
+
+            if (!isAdvancedFieldsVisible()) {
+                if (filterKeyCount) {
+                    wrap.appendChild(createAdvancedFieldsBadge(`Edge filter (${filterKeyCount} key${filterKeyCount === 1 ? '' : 's'}) hidden`));
+                }
+                return wrap;
+            }
 
             const availableContrastNames = getEdgeAvailableContrastNames(edge);
             wrap.appendChild(createEdgeFilterField(

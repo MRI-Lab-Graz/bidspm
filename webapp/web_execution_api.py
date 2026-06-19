@@ -182,6 +182,8 @@ def register_execution_routes(
             command.append('--local')
         if data.get('force'):
             command.append('--force')
+        if data.get('stats_workers'):
+            command.extend(['--stats-workers', str(data.get('stats_workers'))])
 
         execution_registry.cleanup_old_executions()
 

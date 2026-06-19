@@ -362,6 +362,92 @@ class TestCoreHelpers(unittest.TestCase):
         with patch("lib.core.check_subject_processed", side_effect=[True, True]):
             self.assertTrue(skip_pipeline._skip_if_processed("01", "motor"))
 
+    def test_pipeline_run_parallelizes_subjects_and_matches_sequential_outcome(self):
+        config = _make_config(Path(tempfile.mkdtemp()))
+        outcomes = {"01": True, "02": False, "03": True, "04": True}
+
+        def run_with_workers(stats_workers):
+            pipeline = core.Pipeline(core.PipelineOptions(
+                actions=["stats"], force=True, stats_workers=stats_workers
+            ))
+            pipeline.config = config
+            pipeline.setup = lambda: True
+            pipeline.get_subjects_to_process = lambda: list(outcomes.keys())
+            pipeline._process_subject = lambda subject, task: outcomes[subject]
+            with patch("lib.core.validate_space_availability", return_value=True) as mock_space, \
+                 patch("lib.core.validate_events_availability", return_value=True) as mock_events, \
+                 patch("lib.core.ensure_derivatives_dataset_description"), \
+                 patch("lib.core.cleanup_tmp_directories"):
+                result = pipeline.run()
+            # Validation must run exactly once per subject in the main thread,
+            # regardless of how many worker threads process them.
+            self.assertEqual(mock_space.call_count, len(outcomes))
+            self.assertEqual(mock_events.call_count, len(outcomes))
+            return result
+
+        sequential = run_with_workers(1)
+        parallel = run_with_workers(4)
+
+        self.assertEqual(sorted(sequential.subjects_processed), ["01", "03", "04"])
+        self.assertEqual(sorted(sequential.subjects_failed), ["02"])
+        self.assertEqual(sorted(sequential.subjects_processed), sorted(parallel.subjects_processed))
+        self.assertEqual(sorted(sequential.subjects_failed), sorted(parallel.subjects_failed))
+
+    def test_pipeline_dry_run_with_stats_workers_matches_sequential_commands(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = _make_config(root)
+            model_path = root / "model.json"
+            model_path.write_text("{}", encoding="utf-8")
+            subjects = ["01", "02", "03"]
+
+            def run_with_workers(stats_workers):
+                pipeline = core.Pipeline(core.PipelineOptions(
+                    actions=["stats"], local=True, force=True, dry_run=True,
+                    stats_workers=stats_workers
+                ))
+                pipeline.config = config
+                pipeline.model_file_path = model_path
+                pipeline.matlab_caps = core.MatlabCapabilities(
+                    environment=core.MatlabEnvironment.OCTAVE, path="/usr/bin/octave"
+                )
+                pipeline.setup = lambda: True
+                pipeline.get_subjects_to_process = lambda: list(subjects)
+                with patch("lib.core.validate_space_availability", return_value=True), \
+                     patch("lib.core.validate_events_availability", return_value=True), \
+                     patch("lib.core.ensure_derivatives_dataset_description"), \
+                     patch("lib.core.cleanup_tmp_directories"):
+                    result = pipeline.run()
+                return result, pipeline.dry_run_commands
+
+            sequential_result, sequential_commands = run_with_workers(1)
+            parallel_result, parallel_commands = run_with_workers(3)
+
+            self.assertEqual(sorted(sequential_result.subjects_processed), subjects)
+            self.assertEqual(sorted(parallel_result.subjects_processed), subjects)
+            self.assertEqual(len(sequential_commands), len(subjects))
+            self.assertEqual(sorted(sequential_commands), sorted(parallel_commands))
+
+    def test_execute_matlab_script_prefixes_streamed_output_with_subject(self):
+        config = _make_config(Path(tempfile.mkdtemp()))
+        logged_lines = []
+        pipeline = core.Pipeline(core.PipelineOptions(actions=["smooth"], on_progress=logged_lines.append))
+        pipeline.config = config
+        pipeline.matlab_caps = core.MatlabCapabilities(environment=core.MatlabEnvironment.OCTAVE, path="/usr/bin/octave")
+
+        fake_proc = SimpleNamespace(
+            stdout=["line one\n", "line two\n"],
+            wait=lambda timeout=None: 0,
+            returncode=0,
+        )
+        with patch("lib.core.subprocess.Popen", return_value=fake_proc):
+            self.assertTrue(pipeline._execute_matlab_script("disp('x')", "smooth", "01", "motor"))
+
+        # Concurrent subjects interleave their streamed output, so every raw
+        # output line must be tagged with the subject it came from.
+        self.assertIn("[01] line one", logged_lines)
+        self.assertIn("[01] line two", logged_lines)
+
     def test_pipeline_generates_local_scripts_and_handles_dry_run_timeout(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
