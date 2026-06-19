@@ -80,6 +80,13 @@
                                 <input class="form-check-input" type="checkbox" id="pilot" name="pilot">
                                 <label class="form-check-label" for="pilot">Pilot Mode</label>
                             </div>
+                            <div class="form-check form-switch mb-1">
+                                <input class="form-check-input" type="checkbox" id="force" name="force">
+                                <label class="form-check-label" for="force">Force Rerun</label>
+                            </div>
+                            <div class="text-muted mb-1" style="font-size:.72rem; line-height:1.4;">
+                                Reprocess subjects even if their output already exists (e.g. already smoothed). Off by default — existing outputs are skipped.
+                            </div>
                             <!-- Validation is now always skipped backend-side -->
                             <div class="form-check form-switch mb-1">
                                 <input class="form-check-input" type="checkbox" id="skip_validation" name="skip_validation" checked disabled>
@@ -342,6 +349,7 @@ Ready for command.</div>
             actions: actions,
             model: document.getElementById('model').value,
             pilot: document.getElementById('pilot').checked,
+            force: document.getElementById('force').checked,
             skip_validation: document.getElementById('skip_validation').checked,
             local: containerType === 'local',
             config_folder: document.getElementById('config-folder').value,
@@ -365,7 +373,7 @@ Ready for command.</div>
             if (el && data[f]) el.value = data[f];
         });
         
-        const switches = ['pilot', 'skip_validation'];
+        const switches = ['pilot', 'force', 'skip_validation'];
         switches.forEach(s => {
             const el = document.getElementById(s);
             if (el && data[s] !== undefined) el.checked = data[s];

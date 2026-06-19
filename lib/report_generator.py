@@ -282,9 +282,18 @@ def generate_reports(
     subjects: Optional[List[str]] = None,
     model_name: str = "",
     dataset_name: str = "",
+    subjects_to_render: Optional[List[str]] = None,
 ) -> Path:
     """
     Scan *derivatives* for bidspm outputs and write HTML reports.
+
+    The group index always aggregates every subject in *subjects* (or every
+    subject discovered under *derivatives*), but per-subject report pages are
+    only (re)written for *subjects_to_render* when given -- e.g. just the
+    subjects touched by the current pipeline run, so an unrelated --pilot or
+    --force=False run doesn't rewrite every subject's report page.
+    ``None`` (the default) renders every subject, matching report-only runs
+    where there is no "current run" subset to restrict to.
 
     Returns the path to the group index HTML.
     """
@@ -325,8 +334,11 @@ def generate_reports(
     env.globals["b64"] = _b64
 
     # Render per-subject reports
+    render_labels = set(subjects_to_render) if subjects_to_render is not None else None
     sub_tmpl = env.get_template("report_subject.html")
     for sub in group.subjects:
+        if render_labels is not None and sub.label not in render_labels:
+            continue
         html = sub_tmpl.render(subject=sub, group=group)
         out = report_dir / f"sub-{sub.label}_report.html"
         out.write_text(html, encoding="utf-8")

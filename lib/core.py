@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Callable, Tuple
 
 from .config import Config, ContainerConfig, load_config, load_container_config
+from .fast_smooth import smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
-    run_command, validate_space_availability,
+    run_command, validate_space_availability, validate_events_availability,
     ensure_derivatives_dataset_description, cleanup_tmp_directories
 )
 
@@ -379,6 +380,10 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m"),
         (_ov / "src" / "workflows" / "stats" / "bidsResults.m",
                                      "/home/neuro/bidspm/src/workflows/stats/bidsResults.m"),
+        (_ov / "src" / "batches" / "stats" / "setBatchEstimateModel.m",
+                                     "/home/neuro/bidspm/src/batches/stats/setBatchEstimateModel.m"),
+        (_ov / "src" / "bids_model" / "getDummyContrastFromParentNode.m",
+                                     "/home/neuro/bidspm/src/bids_model/getDummyContrastFromParentNode.m"),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -485,6 +490,15 @@ def build_apptainer_command(
     #   transformer chain uses our local versions so Filter + Factor work end-to-end.
     # BidsModel.m: fixes cellfun crash in validateConstrasts — Octave cannot use
     #   `x == 1` to test for the intercept when x is a multi-char string.
+    # setBatchEstimateModel.m: fixes `for j = 1:size(contrastsList)` (container
+    #   v4.0.0 bug) which should be `1:numel(contrastsList)` — size() on a
+    #   cellstr returns a dimension vector, not a count, so the group-level
+    #   GLM estimate batch silently ended up empty.
+    # getDummyContrastFromParentNode.m: the Run-level base case returned {}
+    #   instead of falling back to that node's HRF Variables, so any dataset/
+    #   subject node relying on inherited (un-named) DummyContrasts resolved
+    #   to an empty contrast list and the group-level GLM batch was silently
+    #   skipped with no error.
     _ov = Path(__file__).parent.parent / "bidspm_overrides"
     _tl = _ov / "lib" / "bids-matlab" / "+bids" / "+transformers_list"
     _file_overrides = [
@@ -539,6 +553,14 @@ def build_apptainer_command(
         (
             _ov / "src" / "workflows" / "stats" / "bidsResults.m",
             "/home/neuro/bidspm/src/workflows/stats/bidsResults.m",
+        ),
+        (
+            _ov / "src" / "batches" / "stats" / "setBatchEstimateModel.m",
+            "/home/neuro/bidspm/src/batches/stats/setBatchEstimateModel.m",
+        ),
+        (
+            _ov / "src" / "bids_model" / "getDummyContrastFromParentNode.m",
+            "/home/neuro/bidspm/src/bids_model/getDummyContrastFromParentNode.m",
         ),
     ]
     for local_path, container_path in _file_overrides:
@@ -950,6 +972,7 @@ class PipelineOptions:
     pilot: bool = False
     skip_validation: bool = False
     local: bool = False
+    smooth_backend: str = "fast"
     force: bool = False
     dry_run: bool = False
     debug: bool = False
@@ -1213,9 +1236,47 @@ class Pipeline:
             for task in self.config.TASKS:
                 self._log(f">>> Processing task: {task}")
 
+                if 'smooth' in self.options.actions and self.options.smooth_backend == 'fast':
+                    self._log(f">>> Fast-smoothing {len(subjects)} subject(s) in parallel (task {task})")
+                    smooth_results = smooth_subjects_parallel(
+                        self.config, subjects, task, force=self.options.force
+                    )
+                    for subject, result in smooth_results.items():
+                        status = result.get("status")
+                        if status == "no_input":
+                            self._log_error(
+                                f"No preprocessed data found for subject {subject}: "
+                                f"{result.get('message')}. Check that fMRIPrep has been "
+                                f"run for this subject."
+                            )
+                        elif status == "error":
+                            self._log_error(
+                                f"Fast smoothing failed for subject {subject}: {result.get('message')}"
+                            )
+                        elif status == "skipped":
+                            self._log(
+                                f"⏭️  Subject {subject} already smoothed. Use --force to reprocess."
+                            )
+                        elif status == "ok":
+                            # Record this here: the per-subject loop below will
+                            # see the file we just wrote and skip it as
+                            # "already processed", which would otherwise make
+                            # work done in this run vanish from the summary.
+                            subjects_processed.append(subject)
+                            actions_completed.add('smooth')
+
                 for subject in subjects:
                     # Validate space availability
                     if not validate_space_availability(self.config, [subject], task):
+                        subjects_failed.append(subject)
+                        continue
+
+                    # Events.tsv are required to build the GLM design matrix.
+                    # bidspm's own MATLAB code only warns (doesn't block) when
+                    # they're missing, so we block explicitly here instead.
+                    if 'stats' in self.options.actions and not validate_events_availability(
+                        self.config, [subject], task
+                    ):
                         subjects_failed.append(subject)
                         continue
 
@@ -1370,6 +1431,8 @@ class Pipeline:
             "--fwhm", str(self.config.FWHM),
             "--verbosity", str(self.config.VERBOSITY)
         ]
+        if self.config.SUBJECTS:
+            args.extend(["--participant_label"] + list(self.config.SUBJECTS))
         if self.options.node_name:
             args.extend(["--node_name", self.options.node_name])
         
@@ -1480,6 +1543,10 @@ try
             node_name_clause = ""
             if self.options.node_name:
                 node_name_clause = f"           'node_name', '{self.options.node_name}', ...\n"
+            participant_label_clause = ""
+            if self.config.SUBJECTS:
+                subjects_literal = ", ".join(f"'{s}'" for s in self.config.SUBJECTS)
+                participant_label_clause = f"           'participant_label', {{{subjects_literal}}}, ...\n"
             body = f"""
     bidspm('{self.config.BIDS_DIR}', ...
            '{self.config.DERIVATIVES_DIR}', ...
@@ -1489,7 +1556,7 @@ try
            'space', {{'{self.config.SPACE}'}}, ...
            'fwhm', {self.config.FWHM}, ...
            'model_file', '{self.model_file_path.absolute()}', ...
-{node_name_clause}           'verbosity', {self.config.VERBOSITY});
+{participant_label_clause}{node_name_clause}           'verbosity', {self.config.VERBOSITY});
     fprintf('Dataset stats completed successfully\\n');
     exit(0);
 """

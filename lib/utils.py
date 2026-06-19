@@ -271,6 +271,37 @@ def validate_space_availability(config, subjects_to_process: list, task: str) ->
     return True
 
 
+def validate_events_availability(config, subjects_to_process: list, task: str) -> bool:
+    """Validate that events.tsv files exist for the given task.
+
+    bidspm's own MATLAB code (getEventsData.m / setBatchSubjectLevelGLMSpec.m)
+    only logs a WARNING and proceeds with an empty onset file when no
+    events.tsv is found -- it does NOT block the stats action. That means a
+    subject-level GLM can "succeed" with all task regressors silently
+    missing. This check blocks stats explicitly instead of relying on that
+    warn-and-continue behavior.
+    """
+    missing_subjects = []
+
+    for subject_label in subjects_to_process:
+        pattern = f"sub-{subject_label}_*task-{task}_*events.tsv"
+        events_files = list(config.BIDS_DIR.rglob(pattern))
+        if not events_files:
+            missing_subjects.append(subject_label)
+
+    if missing_subjects:
+        if len(subjects_to_process) == 1:
+            print(f"❌ Blocking stats for subject {subjects_to_process[0]}: "
+                  f"no events.tsv found for task '{task}' in {config.BIDS_DIR}")
+        else:
+            print("❌ events.tsv validation failed!")
+            print(f"   Task: '{task}'")
+            print(f"   Subjects missing events.tsv: {missing_subjects}")
+        return False
+
+    return True
+
+
 def ensure_derivatives_dataset_description(derivatives_dir: Path):
     """Create a minimal dataset_description.json in derivatives directory."""
     dataset_desc_file = derivatives_dir / "dataset_description.json"

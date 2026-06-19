@@ -9,6 +9,7 @@ All business logic is in lib/core.py to avoid duplication with bidspm_gui.py.
 import argparse
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
@@ -55,6 +56,8 @@ OPTIONAL ARGUMENTS:
     --skip-modelvalidation
                          Skip validation of BIDS-StatsModel JSON
     --local              Use local BIDSPM installation instead of containers
+    --smooth-backend     Smoothing implementation: "fast" (default, parallel
+                         nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)
     --force              Force reprocessing even if output already exists
     --dry-run            Show commands without executing them
     --debug              Enable debug output
@@ -142,6 +145,9 @@ def parse_arguments():
                        help='Skip BIDS-StatsModel validation')
     parser.add_argument('--local', action='store_true',
                        help='Use local MATLAB/Octave instead of containers')
+    parser.add_argument('--smooth-backend', choices=['spm', 'fast'], default='fast',
+                       help='Smoothing implementation: "fast" (default, parallel '
+                            'nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)')
     parser.add_argument('--force', action='store_true',
                        help='Force reprocessing of existing outputs')
     parser.add_argument('--dry-run', action='store_true',
@@ -288,8 +294,15 @@ def handle_check_environment(use_local: bool):
     sys.exit(0)
 
 
-def _handle_report(config_file: str, args) -> None:
-    """Generate HTML reports from existing bidspm derivatives."""
+def _handle_report(config_file: str, args, processed_subjects: Optional[List[str]] = None) -> None:
+    """Generate HTML reports from existing bidspm derivatives.
+
+    ``processed_subjects``, when given, restricts which per-subject report
+    pages get (re)written to just the subjects touched by the pipeline run
+    that just finished -- e.g. a --pilot run should not rewrite every other
+    subject's report page. ``None`` (report-only invocations, with no
+    pipeline run behind them) renders every subject.
+    """
     from lib.report_generator import generate_reports
 
     config = load_config(config_file)
@@ -312,6 +325,7 @@ def _handle_report(config_file: str, args) -> None:
         tasks=config.TASKS,
         subjects=subjects or None,
         model_name=model_name,
+        subjects_to_render=processed_subjects,
     )
     print(f"\n✅ Group index: {index}\n")
 
@@ -375,6 +389,7 @@ def main():
         pilot=args.pilot,
         skip_validation=args.skip_modelvalidation,
         local=args.local,
+        smooth_backend=args.smooth_backend,
         force=args.force,
         dry_run=args.dry_run,
         debug=args.debug,
@@ -423,9 +438,11 @@ def main():
         
         print()
 
-        # Generate HTML report after pipeline completes
+        # Generate HTML report after pipeline completes -- restrict to
+        # subjects this run actually touched, so e.g. a --pilot run doesn't
+        # rewrite every other subject's report page.
         if run_report:
-            _handle_report(config_file, args)
+            _handle_report(config_file, args, processed_subjects=result.subjects_processed)
 
         sys.exit(0 if result.success else 1)
         
