@@ -1,6 +1,6 @@
 from typing import Callable, List, Optional, Tuple
 
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template
 
 
 ProjectManagerGetter = Callable[[], object]
@@ -64,17 +64,12 @@ def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) 
     @app.route('/model_editor')
     @app.route('/model_editor/<project_id>')
     def model_editor_page(project_id: Optional[str] = None):
-        """Dedicated model editor page (split-screen) for editing model JSON and transformations."""
-        project, projects = _load_page_context(project_id, get_project_manager)
-        model_path = request.args.get('path', '')
-        return render_template(
-            'model_editor.html',
-            project=project,
-            projects=projects,
-            current_project_id=project_id,
-            current_project=project,
-            model_path=model_path,
-        )
+        """Retired standalone model editor -- the Model Workspace on /analysis is
+        now the single editing surface. Kept registered (as a redirect) so old
+        links/bookmarks don't 404.
+        """
+        target = f'/analysis/{project_id}' if project_id else '/analysis'
+        return redirect(target)
 
     @app.route('/transformer-builder')
     @app.route('/transformer-builder/<project_id>')

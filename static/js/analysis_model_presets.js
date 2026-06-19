@@ -482,6 +482,7 @@
             applyDatasetNodePreset,
             buildNodeFromPreset,
             getDefaultConditionTokenForPath,
+            getEdgeAvailableContrastNames,
             getIncomingContrastNamesForNode,
             getSuggestedModelTermsForNode,
             getSuggestedConditionTermsForNode,

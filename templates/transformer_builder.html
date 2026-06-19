@@ -673,9 +673,9 @@
     }
 
     const baseUrl = targetProjectId
-      ? `/model_editor/${encodeURIComponent(targetProjectId)}`
-      : '/model_editor';
-    window.location.href = `${baseUrl}?path=${encodeURIComponent(targetModelPath)}`;
+      ? `/analysis/${encodeURIComponent(targetProjectId)}`
+      : '/analysis';
+    window.location.href = `${baseUrl}#analysis-model-workspace-section`;
   }
 
   async function initializeModelSelection() {

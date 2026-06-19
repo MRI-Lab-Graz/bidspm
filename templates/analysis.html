@@ -579,12 +579,15 @@
 <script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v='20260609a') }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260610a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260619a') }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260619a') }}"></script>
 <script>
     // Project context
     const currentProjectId = '{{ current_project_id or "" }}';
     const hasProject = {{ 'true' if project else 'false' }};
     const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
-    
+    const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
+
     const terminal = document.getElementById('terminal');
     const execStatus = document.getElementById('exec-status');
     const validationResult = document.getElementById('validation-result');
@@ -612,6 +615,34 @@
     let modelEditorInputEntityValues = {};
     let modelEditorParticipantsInfo = emptyParticipantsInfo();
     let showModelTechnicalPaths = false;
+
+    function extendInterestRegressorPool(names) {
+        const additions = normalizeStringArray(names);
+        if (!additions.length) return;
+        modelEditorInterestRegressors = Array.from(new Set([...modelEditorInterestRegressors, ...additions]));
+    }
+
+    const {
+        readTransformerLaunchContext,
+        clearTransformerLaunchContext,
+        areModelPathsEquivalent,
+        readPendingTransformerPayload,
+        clearPendingTransformerPayload
+    } = window.BidspmModelEditorLaunch.createLaunchHelpers({
+        transformerLaunchContextKey: TRANSFORMER_LAUNCH_CONTEXT_KEY,
+        pendingTransformerKey: PENDING_TRANSFORMER_KEY
+    });
+
+    const { consumePendingTransformerPayload } = window.BidspmModelEditorTransformerPayload.createTransformerPayloadHelpers({
+        currentProjectId,
+        getModel: () => modelEditorDraft,
+        setModel: (nextModel) => { modelEditorDraft = nextModel; },
+        areModelPathsEquivalent,
+        readTransformerLaunchContext,
+        readPendingTransformerPayload,
+        normalizeStringArray,
+        extendInterestRegressorPool
+    });
     let modelEditorOpenPaths = new Set(); // tracks which accordion panels are open across re-renders
     let modelEditorPendingOpenPaths = new Set();
     let modelXDragState = null;
@@ -877,6 +908,7 @@
         applyDatasetNodePreset,
         buildNodeFromPreset,
         getDefaultConditionTokenForPath,
+        getEdgeAvailableContrastNames,
         getIncomingContrastNamesForNode,
         getSuggestedConditionTermsForNode,
         getTransformerModelXRegressorsForNode
@@ -948,6 +980,7 @@
         createContrastManagerPanel,
         createDatasetModelPresetPanel,
         createDummyContrastsPanel,
+        createEdgeWorkspaceFields,
         createNodeIdentityEditor,
         createNodeMaskPicker
     } = window.BidspmAnalysisNodePanels.createNodePanelBuilders({
@@ -965,7 +998,10 @@
         renderModelAccordionEditor,
         setModelEditorStatus,
         openTransformerBuilder,
-        getModelEdges: () => Array.isArray(modelEditorDraft?.Edges) ? modelEditorDraft.Edges : []
+        getModelEdges: () => Array.isArray(modelEditorDraft?.Edges) ? modelEditorDraft.Edges : [],
+        getModelNodes: () => Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes : [],
+        getInputEntityValues: () => modelEditorInputEntityValues,
+        getEdgeAvailableContrastNames
     });
 
     function getBranchBadgeDescriptors(path, value) {
@@ -2268,7 +2304,14 @@
 
                 listWrap.appendChild(controls);
 
-                if (isRunModelX) {
+                if (isRunModelX && !showModelAdvancedFields) {
+                    const existingModulations = getParametricModulationsForCurrentX();
+                    if (existingModulations.length) {
+                        listWrap.appendChild(createAdvancedFieldsBadge(
+                            `Parametric modulations (${existingModulations.length}) hidden`
+                        ));
+                    }
+                } else if (isRunModelX) {
                     const modulationCard = document.createElement('div');
                     modulationCard.className = 'border rounded p-2 mb-2 bg-white d-flex flex-column gap-2';
 
@@ -2555,6 +2598,7 @@
                     : [];
                 const knownFilterKeys = getKnownEdgeFilterMetadataKeys();
                 container.appendChild(createEdgeSchemaHint(node, nodeNames, knownFilterKeys));
+                container.appendChild(createEdgeWorkspaceFields(node));
             }
 
             if (/^Nodes\[\d+\]\.Model$/.test(basePath)) {
@@ -2588,6 +2632,9 @@
                     return;
                 }
                 if (/^Nodes\[\d+\]$/.test(basePath) && ['Transformations', 'DummyContrasts', 'Contrasts'].includes(key)) {
+                    return;
+                }
+                if (/^Edges\[\d+\]$/.test(basePath) && ['Source', 'Destination', 'Filter'].includes(key)) {
                     return;
                 }
                 if (isManagedHrfObject && key === 'Variables') {
@@ -3302,6 +3349,17 @@
             if (pathLabel) pathLabel.textContent = modelPath;
             modelEditorOpenPaths = new Set();
             modelEditorPendingOpenPaths = new Set();
+
+            // Pick up a transformer pipeline built in /transformer-builder and applied
+            // while this page was navigated away (see openTransformerBuilder()).
+            const pendingTransformerResult = consumePendingTransformerPayload(modelPath);
+            if (pendingTransformerResult) {
+                if (pendingTransformerResult.appliedToTargetNodes || pendingTransformerResult.staleHandoff) {
+                    clearPendingTransformerPayload();
+                    clearTransformerLaunchContext();
+                }
+            }
+
             renderModelAccordionEditor();
             refreshExecutionNodeOptions(modelContent);
 
@@ -3319,7 +3377,12 @@
                 }
             });
 
-            if (status && showStatus) {
+            if (pendingTransformerResult && status) {
+                const tone = pendingTransformerResult.tone === 'success' ? 'success'
+                    : pendingTransformerResult.tone === 'warning' ? 'warning'
+                    : 'info';
+                status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${pendingTransformerResult.message}</div>`;
+            } else if (status && showStatus) {
                 status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model workspace loaded.</div>';
             } else if (status && !showStatus) {
                 status.innerHTML = '';

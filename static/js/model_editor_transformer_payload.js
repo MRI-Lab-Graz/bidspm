@@ -77,7 +77,7 @@
       const instructions = Array.isArray(payload.transformations?.Instructions)
         ? structuredClone(payload.transformations.Instructions)
         : [];
-      const allowedLevels = ['Run', 'Session', 'Subject', 'Dataset'];
+      const allowedLevels = ['Run'];
       const normalizeLevel = (value) => {
         const raw = String(value || '').trim().toLowerCase();
         return allowedLevels.find(level => level.toLowerCase() === raw) || '';

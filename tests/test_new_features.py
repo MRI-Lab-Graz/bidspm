@@ -20,26 +20,14 @@ class TestNewFeatures(unittest.TestCase):
         flask_app.config.update(TESTING=True)
         cls.client = flask_app.test_client()
 
-    def test_model_editor_page_renders(self):
+    def test_model_editor_page_redirects_to_analysis(self):
+        # The standalone /model_editor page was retired in favor of the Model
+        # Workspace on /analysis; the route stays registered as a redirect so
+        # old links/bookmarks don't 404.
         response = self.client.get("/model_editor", query_string={"path": "studies/model.json"})
 
-        self.assertEqual(response.status_code, 200)
-        text = response.get_data(as_text=True)
-        self.assertIn("Model Editor", text)
-        self.assertIn("studies/model.json", text)
-        self.assertIn("Second-Level Presets", text)
-        self.assertIn("Session node", text)
-        self.assertIn("Node schema: required Level, Name, GroupBy and Model(Type,X) are present.", text)
-        self.assertIn("Model schema: required Type and X are present.", text)
-        self.assertIn("HRF schema: required Variables and Model are present.", text)
-        self.assertIn("Options schema: all official fields are optional.", text)
-        self.assertIn("Contrast schema: required Name, ConditionList, Weights and Test are present.", text)
-        self.assertIn("DummyContrasts schema: required Test is present; optional Contrasts is valid.", text)
-        self.assertIn("Transformations schema: required Transformer and Instructions are present.", text)
-        self.assertIn("Edge schema: required Source and Destination are present.", text)
-        self.assertIn("Top-level schema: required Name, BIDSModelVersion and Nodes are present.", text)
-        self.assertIn("one sample t-test: all subjects", text)
-        self.assertIn("2 samples t-test: compare 2 groups", text)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/analysis")
 
     def test_analysis_page_renders_second_level_add_node_menu(self):
         response = self.client.get("/analysis")

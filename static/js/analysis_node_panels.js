@@ -15,6 +15,9 @@
         const openTransformerBuilder = config.openTransformerBuilder || (() => {});
         const openContrastBuilder = config.openContrastBuilder || (() => {});
         const getModelEdges = config.getModelEdges || (() => []);
+        const getModelNodes = config.getModelNodes || (() => []);
+        const getInputEntityValues = config.getInputEntityValues || (() => ({}));
+        const getEdgeAvailableContrastNames = config.getEdgeAvailableContrastNames || (() => []);
 
         function createPanelShell(title, helpText, storageKey = null) {
             const panel = document.createElement('div');
@@ -149,6 +152,31 @@
                 && typeof node.Transformations === 'object'
                 && !Array.isArray(node.Transformations)
             ) ? node.Transformations : null;
+            const isRunLevel = String(node?.Level || '').trim().toLowerCase() === 'run';
+
+            if (!isRunLevel) {
+                const note = document.createElement('div');
+                note.className = 'small text-muted';
+                note.textContent = 'bidspm only executes Transformations for Run-level events.tsv data '
+                    + `(see convertOnsetTsvToMat.m) — ${node?.Level || 'this'}-level nodes never run them, `
+                    + 'so this is not offered here.';
+                body.appendChild(note);
+
+                if (transformations) {
+                    const clearBtn = document.createElement('button');
+                    clearBtn.type = 'button';
+                    clearBtn.className = 'btn btn-sm btn-outline-danger';
+                    clearBtn.textContent = 'Remove Transformations';
+                    clearBtn.addEventListener('click', () => {
+                        delete node.Transformations;
+                        renderModelAccordionEditor();
+                        setModelEditorStatus('Transformations removed.', 'info');
+                    });
+                    body.appendChild(clearBtn);
+                }
+
+                return panel;
+            }
 
             if (!transformations) {
                 const empty = document.createElement('div');
@@ -675,11 +703,165 @@
             return panel;
         }
 
+        function parseCsvValues(raw) {
+            return String(raw || '')
+                .split(',')
+                .map((v) => v.trim())
+                .filter(Boolean);
+        }
+
+        function createEdgeFilterField(edge, filterKey, availableValues, hintText) {
+            const fieldWrap = document.createElement('div');
+            fieldWrap.className = 'mt-2';
+            const label = document.createElement('label');
+            label.className = 'form-label small mb-1';
+            label.textContent = `Filter.${filterKey} (optional)`;
+            const suggestionsId = `edge-filter-${filterKey}-${Math.random().toString(36).slice(2)}-suggestions`;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control form-control-sm';
+            input.placeholder = availableValues.length ? availableValues.join(', ') : `${filterKey}_a, ${filterKey}_b`;
+            if (availableValues.length) input.setAttribute('list', suggestionsId);
+            input.value = normalizeStringArray(edge.Filter?.[filterKey]).join(', ');
+            input.addEventListener('change', () => {
+                const values = parseCsvValues(input.value);
+                if (!values.length) {
+                    if (edge.Filter && typeof edge.Filter === 'object') {
+                        delete edge.Filter[filterKey];
+                        if (!Object.keys(edge.Filter).length) delete edge.Filter;
+                    }
+                } else {
+                    if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
+                    edge.Filter[filterKey] = values;
+                }
+                renderModelAccordionEditor();
+                setModelEditorStatus('Edge updated.', 'info');
+            });
+            fieldWrap.appendChild(label);
+            fieldWrap.appendChild(input);
+
+            if (availableValues.length) {
+                const datalist = document.createElement('datalist');
+                datalist.id = suggestionsId;
+                availableValues.forEach((val) => {
+                    const option = document.createElement('option');
+                    option.value = val;
+                    datalist.appendChild(option);
+                });
+                fieldWrap.appendChild(datalist);
+
+                const quickRow = document.createElement('div');
+                quickRow.className = 'd-flex flex-wrap gap-1 mt-1';
+                availableValues.slice(0, 10).forEach((val) => {
+                    const chip = document.createElement('button');
+                    chip.type = 'button';
+                    chip.className = 'btn btn-sm btn-outline-secondary';
+                    chip.textContent = val;
+                    chip.addEventListener('click', () => {
+                        if (!edge.Filter || typeof edge.Filter !== 'object' || Array.isArray(edge.Filter)) edge.Filter = {};
+                        edge.Filter[filterKey] = Array.from(new Set([
+                            ...normalizeStringArray(edge.Filter[filterKey]),
+                            val
+                        ]));
+                        renderModelAccordionEditor();
+                        setModelEditorStatus('Edge updated.', 'info');
+                    });
+                    quickRow.appendChild(chip);
+                });
+                fieldWrap.appendChild(quickRow);
+            }
+
+            if (hintText) {
+                const hint = document.createElement('div');
+                hint.className = 'small text-muted mt-1';
+                hint.textContent = hintText;
+                fieldWrap.appendChild(hint);
+            }
+
+            return fieldWrap;
+        }
+
+        function createEdgeWorkspaceFields(edge) {
+            const wrap = document.createElement('div');
+            const nodes = getModelNodes();
+            const nodeNames = nodes.map((node, idx) => node?.Name || `node_${idx + 1}`);
+
+            const grid = document.createElement('div');
+            grid.className = 'd-flex flex-wrap gap-2';
+            ['Source', 'Destination'].forEach((field) => {
+                const fieldGroup = document.createElement('div');
+                fieldGroup.style.minWidth = '200px';
+                const label = document.createElement('label');
+                label.className = 'form-label small mb-1';
+                label.textContent = field;
+                const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
+                const values = Array.from(new Set([edge[field] || '', ...nodeNames])).filter(Boolean);
+                if (!values.length) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No nodes available';
+                    select.appendChild(option);
+                }
+                values.forEach((value) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    select.appendChild(option);
+                });
+                select.value = edge[field] || values[0] || '';
+                select.addEventListener('change', () => {
+                    edge[field] = select.value;
+                    renderModelAccordionEditor();
+                    setModelEditorStatus('Edge updated.', 'info');
+                });
+                fieldGroup.appendChild(label);
+                fieldGroup.appendChild(select);
+                grid.appendChild(fieldGroup);
+            });
+            wrap.appendChild(grid);
+
+            const availableContrastNames = getEdgeAvailableContrastNames(edge);
+            wrap.appendChild(createEdgeFilterField(
+                edge,
+                'contrast',
+                availableContrastNames,
+                availableContrastNames.length
+                    ? `Available from source node ${edge.Source || '?'}: ${availableContrastNames.join(', ')}`
+                    : 'No named source contrasts were found yet. Define source Node.Contrasts first.'
+            ));
+
+            const entityValues = getInputEntityValues() || {};
+            const availableSessions = normalizeStringArray(entityValues.session);
+            const availableRuns = normalizeStringArray(entityValues.run);
+
+            wrap.appendChild(createEdgeFilterField(
+                edge,
+                'session',
+                availableSessions,
+                availableSessions.length
+                    ? `Sessions in dataset: ${availableSessions.join(', ')}`
+                    : 'No sessions discovered yet. Set the BIDS folder in Input to load values.'
+            ));
+
+            wrap.appendChild(createEdgeFilterField(
+                edge,
+                'run',
+                availableRuns,
+                availableRuns.length
+                    ? `Runs in dataset: ${availableRuns.join(', ')}`
+                    : 'No runs discovered yet. Set the BIDS folder in Input to load values.'
+            ));
+
+            return wrap;
+        }
+
         return {
             createAddTransformationsPanel,
             createContrastManagerPanel,
             createDatasetModelPresetPanel,
             createDummyContrastsPanel,
+            createEdgeWorkspaceFields,
             createNodeIdentityEditor,
             createNodeMaskPicker
         };

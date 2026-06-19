@@ -112,20 +112,29 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn('/static/js/transformer_builder_columns.js', text)
         self.assertIn('/static/js/transformer_builder_pipeline.js', text)
 
-    def test_model_editor_route_loads_split_stylesheet(self):
-        project = self.project_manager.create_project("Model editor assets demo")
+    def test_model_editor_route_redirects_to_analysis(self):
+        # The standalone model editor was retired in favor of the Model
+        # Workspace on /analysis; the route stays registered (so old
+        # links/bookmarks don't 404) but now redirects there.
+        project = self.project_manager.create_project("Model editor redirect demo")
 
         response = self.client.get(f"/model_editor/{project.id}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], f"/analysis/{project.id}")
+
+        response_no_project = self.client.get("/model_editor")
+        self.assertEqual(response_no_project.status_code, 302)
+        self.assertEqual(response_no_project.headers["Location"], "/analysis")
+
+    def test_analysis_route_loads_transformer_handoff_assets(self):
+        project = self.project_manager.create_project("Analysis handoff assets demo")
+
+        response = self.client.get(f"/analysis/{project.id}")
 
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertIn('/static/css/model_editor.css', text)
         self.assertIn('/static/js/model_editor_launch.js', text)
-        self.assertIn('/static/js/model_editor_launch_context.js', text)
         self.assertIn('/static/js/model_editor_transformer_payload.js', text)
-        self.assertIn('/static/js/model_editor_transformer_apply.js', text)
-        self.assertIn('/static/js/model_editor_transformer_events.js', text)
-        self.assertIn('/static/js/model_editor_loading.js', text)
 
     def test_api_create_project_requires_name(self):
         response = self.client.post("/api/projects", json={})
