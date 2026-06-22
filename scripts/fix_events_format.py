@@ -12,11 +12,23 @@ import sys
 import re
 import shutil
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from glob import glob
 
 
 PASSTHROUGH_TASKS = {'MRECO', 'MREOC'}
+
+# Folder names that mark a rating workbook as excluded from analysis (e.g. the
+# German 'Ausschlüsse' = "exclusions" folder). Workbooks under any directory
+# whose name matches one of these (case-insensitive) are never matched.
+EXCLUDED_DIR_NAMES = {'ausschlüsse', 'ausschluesse', 'exclusions', 'excluded'}
+
+# Some '_AIrating.xlsx' workbooks ship with the original workbook's column
+# header text leaked into the first data row (e.g. item column holds the
+# literal label "AUT items" instead of a real item, with bogus AI-rated
+# scores attached to it). normalize_label("AUT items") == "autitems".
+LEAKED_HEADER_ITEM_LABELS = {'autitems'}
 
 
 def normalize_label(value):
@@ -79,8 +91,24 @@ class ItemMetadataMatcher:
         return None
 
 
+def _is_excluded_workbook(candidate, search_dir):
+    """True if any folder in the path between search_dir and the file is an exclusions folder."""
+    relative_parts = candidate.relative_to(search_dir).parts[:-1]
+    return any(
+        unicodedata.normalize('NFC', part).casefold() in EXCLUDED_DIR_NAMES
+        for part in relative_parts
+    )
+
+
 def find_matching_excel(events_file, excel_dir=None):
-    """Find a subject-matched Excel workbook for the source events file."""
+    """Find a subject-matched Excel workbook for the source events file.
+
+    Searches excel_dir recursively (workbooks are sometimes nested in
+    subfolders). Workbooks under an exclusions folder (see
+    EXCLUDED_DIR_NAMES) are skipped. When both a plain '<subject>.xlsx' and
+    a newer AI-annotated '<subject>_AIrating.xlsx' workbook exist for the
+    same subject, the AI-rated version is preferred.
+    """
     events_path = Path(events_file)
     subject = parse_bids_filename(events_path.name).get('sub')
     if not subject:
@@ -93,16 +121,22 @@ def find_matching_excel(events_file, excel_dir=None):
     # Also try the subject code with a leading digit-only prefix stripped (e.g. '141Z682S' → 'Z682S')
     # so that rating files named like 'Z682S.xlsx' match subject 'sub-141Z682S'.
     suffix = re.sub(r'^\d+', '', subject)
-    targets = {normalize_label(subject), normalize_label(f"sub-{subject}"), normalize_label(suffix)}
-    candidates = sorted(search_dir.glob('*.xlsx')) + sorted(search_dir.glob('*.XLSX'))
-    for candidate in candidates:
-        normalized_stem = normalize_label(candidate.stem)
-        if normalized_stem in targets:
-            return candidate
-        if normalized_stem.startswith('sub') and normalized_stem[3:] in targets:
-            return candidate
+    base_labels = {subject, f"sub-{subject}", suffix}
+    plain_targets = {normalize_label(label) for label in base_labels}
+    ai_targets = {normalize_label(f"{label}_AIrating") for label in base_labels}
+    candidates = sorted(search_dir.glob('**/*.xlsx')) + sorted(search_dir.glob('**/*.XLSX'))
+    candidates = [c for c in candidates if not _is_excluded_workbook(c, search_dir)]
 
-    return None
+    def find(targets):
+        for candidate in candidates:
+            normalized_stem = normalize_label(candidate.stem)
+            if normalized_stem in targets:
+                return candidate
+            if normalized_stem.startswith('sub') and normalized_stem[3:] in targets:
+                return candidate
+        return None
+
+    return find(ai_targets) or find(plain_targets)
 
 
 def load_item_metadata_matcher(excel_path):
@@ -119,6 +153,12 @@ def load_item_metadata_matcher(excel_path):
         return None
 
     item_column = metadata_df.columns[0]
+
+    if not metadata_df.empty:
+        first_value = clean_metadata_value(metadata_df.iloc[0][item_column])
+        if normalize_label(first_value) in LEAKED_HEADER_ITEM_LABELS:
+            metadata_df = metadata_df.iloc[1:]
+
     metadata_columns = [sanitize_column_name(column) for column in metadata_df.columns[1:]]
     records = []
 
@@ -424,20 +464,30 @@ def generate_bids_events_name(bold_file):
     return name
 
 
-def backup_existing_files(target_dir, file_pattern):
-    """Backup existing files matching pattern to a timestamped subdirectory."""
-    from datetime import datetime
+def backup_existing_files(target_dir, file_pattern, backup_root, bids_root, timestamp):
+    """Backup existing files matching pattern outside the BIDS tree.
+
+    Backups must never be written under bids_root: the BIDS validator
+    treats any non-BIDS-named file or folder inside a subject directory as
+    an error. backup_root (e.g. a folder under sourcedata) mirrors the
+    sub-X/[ses-Y/]func relative path so backups stay organized and
+    collision-free across subjects.
+    """
     target_path = Path(target_dir)
     existing = list(target_path.glob(file_pattern))
     if not existing:
         return
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_dir = target_path / f"backup_events_{timestamp}"
+    relative = target_path.relative_to(bids_root)
+    backup_dir = Path(backup_root) / f"backup_events_{timestamp}" / relative
     backup_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Creating backup directory: {backup_dir}")
     for f in existing:
         print(f"    Backing up (copy): {f.name}")
-        shutil.copy2(str(f), backup_dir / f.name)  # copy, never move – originals stay in BIDS
+        # copy, never move – originals stay in BIDS. Use copyfile() (content
+        # only, no copystat/copymode) since network shares (e.g. CIFS) can
+        # reject preserving timestamps/permission bits on files not owned by
+        # the current user.
+        shutil.copyfile(str(f), backup_dir / f.name)
 
 
 def process_folder(source_folder, dest_folder, force=False, dry_run=False, excel_dir=None):
@@ -519,7 +569,7 @@ def process_folder(source_folder, dest_folder, force=False, dry_run=False, excel
 def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None,
                           ses_override=None, run=None, force=False,
                           excel_dir=None,
-                          backup=False, dry_run=False):
+                          backup=False, backup_dir=None, dry_run=False):
     """
     Process all events files in source folder and copy to correct BIDS paths.
 
@@ -539,11 +589,27 @@ def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None
         run:           Run index to include in output filename (e.g. '1').
                        Inserted between task and 'events' if provided.
         force:         If True, overwrite existing files. Otherwise skip them.
-        backup:        If True, back up existing events files before writing
+        backup:        If True, back up existing events files before writing.
+        backup_dir:    Directory to store backups in. Must be outside
+                       bids_root (the BIDS validator errors on non-BIDS
+                       files inside a subject directory). Defaults to a
+                       '<source_folder's parent>/events_backups' folder,
+                       which stays under sourcedata, never under BIDS.
         dry_run:       If True, only show what would be done
     """
     source_path = Path(source_folder)
     bids_path = Path(bids_root)
+
+    if backup:
+        backup_root = Path(backup_dir) if backup_dir else source_path.parent / f"{source_path.name}_backups"
+        try:
+            backup_root.relative_to(bids_path)
+            print(f"Error: --backup-dir {backup_root} is inside the BIDS root {bids_root}. "
+                  "Backups must be stored outside the BIDS dataset (e.g. under sourcedata).")
+            return
+        except ValueError:
+            pass  # backup_root is not inside bids_path, as required
+        backup_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     if not source_path.exists():
         print(f"Error: Source folder does not exist: {source_folder}")
@@ -682,7 +748,7 @@ def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None
                 pass  # Can't read existing file – fall through and overwrite
 
         if backup and output_path.exists():
-            backup_existing_files(func_dir, '*_events.tsv')
+            backup_existing_files(func_dir, '*_events.tsv', backup_root, bids_path, backup_timestamp)
 
         try:
             result_df.to_csv(output_path, sep='\t', index=False)
@@ -695,7 +761,7 @@ def process_folder_to_bids(source_folder, bids_root, task=None, source_task=None
     print("-" * 60)
     print(f"Processed {processed} file(s)")
     if backup:
-        print("Note: Existing files were backed up to timestamped backup directories.")
+        print(f"Note: Existing files were backed up under: {backup_root}")
 
     if missing_func_dirs:
         print(f"\nMissing func folders ({len(missing_func_dirs)}) – no events written:")
@@ -763,6 +829,10 @@ Examples:
                         help='Overwrite existing output files even if content is identical.')
     parser.add_argument('--backup', action='store_true',
                         help='Back up existing events files before overwriting (implies --force).')
+    parser.add_argument('--backup-dir', metavar='BACKUP_DIR',
+                        help='Directory to store --backup copies in. Must be outside the BIDS '
+                             'root (the BIDS validator errors on non-BIDS files inside a subject '
+                             "directory). Defaults to '<source folder>_backups' next to --folder.")
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be done without writing any files')
 
@@ -775,7 +845,8 @@ Examples:
                                    source_task=args.source_task,
                                    ses_override=args.ses, run=args.run,
                                    excel_dir=args.excel_dir,
-                                   force=force, backup=args.backup, dry_run=args.dry_run)
+                                   force=force, backup=args.backup, backup_dir=args.backup_dir,
+                                   dry_run=args.dry_run)
         elif args.dest:
             process_folder(args.folder, args.dest, force=force, dry_run=args.dry_run, excel_dir=args.excel_dir)
         else:

@@ -61,16 +61,16 @@ def _build_project_preflight_results(config) -> dict:
     else:
         results['space'] = {'status': 'na', 'message': 'fMRIPrep folder not available', 'value': space}
 
-    output_path = Path(config.output_folder) if config.output_folder else None
-    if output_path and output_path.exists():
-        smooth_found = next(output_path.glob('**/*desc-smth*'), None) is not None
+    derivatives_path = Path(config.derivatives_folder) if config.derivatives_folder else None
+    if derivatives_path and derivatives_path.exists():
+        smooth_found = next((derivatives_path / 'bidspm-preproc').glob('**/*desc-smth*'), None) is not None
         results['smooth'] = {
             'status': 'ok' if smooth_found else 'na',
             'message': 'Smoothed files found' if smooth_found else 'No smoothed files found',
             'value': 'Yes' if smooth_found else 'No',
         }
     else:
-        results['smooth'] = {'status': 'na', 'message': 'Output folder not available', 'value': 'No'}
+        results['smooth'] = {'status': 'na', 'message': 'Derivatives folder not available', 'value': 'No'}
 
     results['available_spaces'] = available_spaces
     return results
