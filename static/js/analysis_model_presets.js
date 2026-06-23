@@ -174,7 +174,10 @@
                 ? participantsInfo.sample_values
                 : {};
             const inputEntityValues = getInputEntityValues() || {};
-            const metadataTerms = getHigherLevelMetadataTerms(node);
+            // "subject" in GroupBy is just bidspm's per-subject loop/grouping key, never a
+            // real design-matrix regressor -- contrasting one named subject against the rest
+            // is never a meaningful analysis, so it's excluded from suggested condition terms.
+            const metadataTerms = getHigherLevelMetadataTerms(node).filter((term) => term !== 'subject');
             const expanded = [];
 
             metadataTerms.forEach((term) => {

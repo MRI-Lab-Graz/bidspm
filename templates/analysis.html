@@ -2044,8 +2044,11 @@
 
                 function getConditionRegressorsForModulation() {
                     const regs = getByPath(modelEditorDraft, basePath);
-                    return normalizeStringArray(regs)
-                        .filter(reg => reg.startsWith('trial_type.') || reg.startsWith('condition.'));
+                    // Condition regressors use "column.level" dot notation (trial_type.*,
+                    // condition.*, or any Transformations-derived name like valid_item.item).
+                    // Confound/motion regressors (trans_*, rot_*, motion_outlier*, "1", ...)
+                    // never contain a dot, so this also excludes them without an allowlist.
+                    return normalizeStringArray(regs).filter(reg => reg.includes('.'));
                 }
 
                 function getNumericColumnsForModulation() {
@@ -2368,7 +2371,7 @@
                     if (!availableConditions.length) {
                         const warn = document.createElement('div');
                         warn.className = 'small text-warning';
-                        warn.textContent = 'Add trial_type.* or condition.* regressors to Model.X before enabling modulation.';
+                        warn.textContent = 'Add a condition regressor (e.g. trial_type.*, condition.*, or a Transformations-derived column.level name) to Model.X before enabling modulation.';
                         modulationCard.appendChild(warn);
                     }
                     if (!availableValues.length) {

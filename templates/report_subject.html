@@ -53,16 +53,6 @@
     background: #fff;
   }
 
-  /* ---- metric pills ---- */
-  .metric-grid { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
-  .metric-card {
-    background: var(--brand-light); border: 1px solid #bee3f8;
-    border-radius: 8px; padding: .6rem 1rem; min-width: 110px; text-align: center;
-  }
-  .metric-label { font-size: .7rem; text-transform: uppercase; color: #2b6cb0; letter-spacing: .05em; }
-  .metric-value { font-size: 1.3rem; font-weight: 700; color: #1a365d; }
-  .metric-note  { font-size: .65rem; color: #718096; }
-
   /* ---- figure grid ---- */
   .fig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; }
   .fig-card { border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background: #fafafa; }
@@ -99,11 +89,6 @@
   <div class="sidebar-section">Subject</div>
   <nav>
     <a href="#section-summary">Summary</a>
-    <a href="#section-anat-qa">Anatomical QA</a>
-    {% if subject.motion_summary %}
-    <a href="#section-motion">Motion QA</a>
-    {% endif %}
-    <a href="#section-preproc">Preprocessing</a>
     <a href="#section-stats">Statistical Results</a>
     <a href="#section-methods">Methods</a>
   </nav>
@@ -137,137 +122,6 @@
     </div>
   </div>
 
-  <!-- ===== ANATOMICAL QA ===== -->
-  <div class="report-section" id="section-anat-qa">
-    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-anat-qa">
-      <span>Anatomical Quality Assessment</span><span class="toggle-arrow">▼</span>
-    </div>
-    <div class="section-body collapse show" id="body-anat-qa">
-      {% if subject.anat_qa %}
-      <p class="text-muted" style="font-size:.8rem">
-        Metrics computed from the normalised anatomical image via the
-        Preprocessed Connectome Project QAP protocol. Higher SNR/CNR/FBER and
-        lower EFC indicate better image quality.
-      </p>
-      <div class="metric-grid">
-        <div class="metric-card">
-          <div class="metric-label">SNR</div>
-          <div class="metric-value">{{ subject.anat_qa.SNR }}</div>
-          <div class="metric-note">Signal-to-Noise Ratio</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">CNR</div>
-          <div class="metric-value">{{ subject.anat_qa.CNR }}</div>
-          <div class="metric-note">Contrast-to-Noise Ratio</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">FBER</div>
-          <div class="metric-value">{{ subject.anat_qa.FBER }}</div>
-          <div class="metric-note">Foreground/Background Energy</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">EFC</div>
-          <div class="metric-value">{{ subject.anat_qa.EFC }}</div>
-          <div class="metric-note">Entropy Focus Criterion ↓</div>
-        </div>
-      </div>
-
-      {% set anat_figs = subject.figures | selectattr("section", "equalto", "Anatomical QA") | list %}
-      {% if anat_figs %}
-      <div class="fig-grid mt-3">
-        {% for fig in anat_figs %}
-        <div class="fig-card">
-          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
-          <div class="fig-caption">{{ fig.caption }}</div>
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% else %}
-      <p class="text-muted mb-0" style="font-size:.85rem">
-        Not available yet — no anatomical QA metrics were found under
-        <code>bidspm-preproc/sub-{{ subject.label }}/reports/*_qa.json</code>.
-        Run bidspm's <code>qa</code> action on the anatomical image to populate this section.
-      </p>
-      {% endif %}
-    </div>
-  </div>
-
-  <!-- ===== MOTION QA ===== -->
-  {% if subject.motion_summary %}
-  <div class="report-section" id="section-motion">
-    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-motion">
-      <span>Motion QA</span><span class="toggle-arrow">▼</span>
-    </div>
-    <div class="section-body collapse show" id="body-motion">
-      <div class="metric-grid">
-        <div class="metric-card">
-          <div class="metric-label">Mean FD</div>
-          <div class="metric-value">{{ subject.motion_summary.mean_fd }}</div>
-          <div class="metric-note">mm (framewise displacement)</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Max FD</div>
-          <div class="metric-value">{{ subject.motion_summary.max_fd }}</div>
-          <div class="metric-note">mm</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Outliers &gt;0.5 mm</div>
-          <div class="metric-value">{{ subject.motion_summary.n_outliers_0_5mm }}</div>
-          <div class="metric-note">{{ subject.motion_summary.pct_outliers }}% of volumes</div>
-        </div>
-        {% if subject.motion_summary.n_runs is defined %}
-        <div class="metric-card">
-          <div class="metric-label">Runs</div>
-          <div class="metric-value">{{ subject.motion_summary.n_runs }}</div>
-          <div class="metric-note">summarised runs</div>
-        </div>
-        {% endif %}
-      </div>
-
-      {% set motion_figs = subject.figures | selectattr("section", "equalto", "Motion QA") | list %}
-      {% if motion_figs %}
-      <div class="fig-grid mt-3">
-        {% for fig in motion_figs %}
-        <div class="fig-card">
-          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
-          <div class="fig-caption">{{ fig.caption }}</div>
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- ===== PREPROCESSING ===== -->
-  {% set preproc_figs = subject.figures | selectattr("section", "equalto", "Preprocessing") | list %}
-  <div class="report-section" id="section-preproc">
-    <div class="section-header" data-bs-toggle="collapse" data-bs-target="#body-preproc">
-      <span>Preprocessing Figures</span><span class="toggle-arrow">▼</span>
-    </div>
-    <div class="section-body collapse show" id="body-preproc">
-      {% if preproc_figs %}
-      <div class="fig-grid">
-        {% for fig in preproc_figs %}
-        <div class="fig-card">
-          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
-          <div class="fig-caption">{{ fig.caption }}</div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <p class="text-muted mb-0" style="font-size:.85rem">
-        Not available yet — no figures were found under
-        <code>bidspm-preproc/sub-{{ subject.label }}/figures/</code>.
-        These come from bidspm's own preprocessing actions (e.g. <code>realign</code>, <code>coregistration</code>,
-        <code>norm</code>, <code>smooth</code>); they aren't written when starting from already fMRIPrep-preprocessed data
-        unless those actions were explicitly run.
-      </p>
-      {% endif %}
-    </div>
-  </div>
-
   <!-- ===== STATISTICAL RESULTS ===== -->
   {% set stats_figs = subject.figures | selectattr("section", "equalto", "Statistical Results") | list %}
   <div class="report-section" id="section-stats">
@@ -280,7 +134,7 @@
       <div class="fig-grid mb-3">
         {% for fig in stats_figs %}
         <div class="fig-card">
-          <img src="{{ b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
+          <img src="{{ fig.data_uri if fig.data_uri else b64(fig.path) }}" alt="{{ fig.caption }}" loading="lazy">
           <div class="fig-caption">{{ fig.caption }}</div>
         </div>
         {% endfor %}
@@ -304,10 +158,9 @@
       {% endfor %}
       {% else %}
       <p class="text-muted mb-0" style="font-size:.85rem">
-        Not available yet — no contrast figures or result tables were found under
-        <code>bidspm-stats/sub-{{ subject.label }}/results/</code>.
-        This means the Contrast Manager step hasn't produced output for this subject yet —
-        check the run log for contrast-specification errors.
+        Not available yet — no <code>SPM.mat</code> was found under
+        <code>bidspm-stats/sub-{{ subject.label }}/</code>.
+        Run the <code>stats</code> action first so the model gets estimated.
       </p>
       {% endif %}
     </div>

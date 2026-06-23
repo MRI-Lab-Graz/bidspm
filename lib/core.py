@@ -385,6 +385,8 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/batches/stats/setBatchEstimateModel.m"),
         (_ov / "src" / "bids_model" / "getDummyContrastFromParentNode.m",
                                      "/home/neuro/bidspm/src/bids_model/getDummyContrastFromParentNode.m"),
+        (_ov / "src" / "stats" / "utils" / "getRegressorIdx.m",
+                                     "/home/neuro/bidspm/src/stats/utils/getRegressorIdx.m"),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -500,6 +502,10 @@ def build_apptainer_command(
     #   subject node relying on inherited (un-named) DummyContrasts resolved
     #   to an empty contrast list and the group-level GLM batch was silently
     #   skipped with no error.
+    # getRegressorIdx.m: adds support for a 'condition:pmodName^order' syntax
+    #   in Contrasts/ConditionList so explicit contrasts can target a
+    #   parametric modulation term (e.g. valid_item.item:ai_rating_mod^1),
+    #   not just a condition's unmodulated main effect.
     _ov = Path(__file__).parent.parent / "bidspm_overrides"
     _tl = _ov / "lib" / "bids-matlab" / "+bids" / "+transformers_list"
     _file_overrides = [
@@ -562,6 +568,10 @@ def build_apptainer_command(
         (
             _ov / "src" / "bids_model" / "getDummyContrastFromParentNode.m",
             "/home/neuro/bidspm/src/bids_model/getDummyContrastFromParentNode.m",
+        ),
+        (
+            _ov / "src" / "stats" / "utils" / "getRegressorIdx.m",
+            "/home/neuro/bidspm/src/stats/utils/getRegressorIdx.m",
         ),
     ]
     for local_path, container_path in _file_overrides:
@@ -1374,19 +1384,56 @@ class Pipeline:
     def _process_subject(self, subject: str, task: str) -> bool:
         """Process a single subject for the given task."""
         success = True
-        
+
         if 'smooth' in self.options.actions:
             self._log(f">>> Smoothing: subject {subject}, task {task}")
             if not self._run_smooth(subject, task):
                 success = False
-        
+
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
+            self._copy_brain_mask(subject, task)
             if not self._run_stats(subject, task):
                 success = False
-        
+
         return success
-    
+
+    def _copy_brain_mask(self, subject: str, task: str) -> None:
+        """Copy fmriprep's brain mask for this subject/task/space into bidspm-preproc.
+
+        The "stats" action only indexes /raw and /derivatives/bidspm-preproc as BIDS
+        datasets (see --preproc_dir in _run_container_action) -- it never sees files
+        that live only under FMRIPREP_DIR. Without this, a model's explicit Mask can
+        never be resolved and SPM silently falls back to its own loose intracerebral
+        mask, which inflates voxel count (and ReML/estimation runtime) for every GLM.
+        """
+        config = self.config
+        pattern = f"sub-{subject}_*task-{task}_space-{config.SPACE}_desc-brain_mask.nii*"
+        for mask_src in sorted(config.FMRIPREP_DIR.rglob(pattern)):
+            rel = mask_src.relative_to(config.FMRIPREP_DIR)
+            is_gz = mask_src.name.endswith(".nii.gz")
+            # bidspm-preproc is exclusively plain .nii (its own smoothing step always
+            # decompresses); a gzipped mask makes matlabbatch's cfg_files harvest drop
+            # the entry silently, leaving spm_run_fmri_spec with an empty job.mask{1}.
+            dst_name = rel.name[:-len(".gz")] if is_gz else rel.name
+            mask_dst = config.DERIVATIVES_DIR / "bidspm-preproc" / rel.parent / dst_name
+            mask_dst.parent.mkdir(parents=True, exist_ok=True)
+            if not mask_dst.exists() or mask_dst.stat().st_mtime < mask_src.stat().st_mtime:
+                if is_gz:
+                    import gzip
+                    with gzip.open(mask_src, "rb") as f_in, open(mask_dst, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                else:
+                    shutil.copy2(mask_src, mask_dst)
+
+            json_name = mask_src.name[:-len(".nii.gz")] + ".json" if is_gz \
+                else mask_src.with_suffix(".json").name
+            json_src = mask_src.with_name(json_name)
+            if json_src.exists():
+                json_dst = mask_dst.with_name(json_name)
+                if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
+                    shutil.copy2(json_src, json_dst)
+
     def _run_smooth(self, subject: str, task: str) -> bool:
         """Run smoothing for a subject."""
         if self.options.local:

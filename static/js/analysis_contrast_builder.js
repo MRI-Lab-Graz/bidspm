@@ -35,6 +35,31 @@
             return getNodes()[cbNodeIdx] || null;
         }
 
+        // 'condition:pmodName^order' addresses a parametric modulation term rather than a
+        // condition's main effect -- see getRegressorIdx.m for the matching SPM-side syntax.
+        function pmodTermId(condition, pmodName, order) {
+            return `${condition}:${pmodName}^${order}`;
+        }
+
+        function buildParametricModulationTerms(node) {
+            const terms = [];
+            const modulations = node?.Model?.Software?.SPM?.ParametricModulations;
+            if (!Array.isArray(modulations)) return terms;
+            modulations.forEach((entry) => {
+                const name = String(entry?.Name || '').trim();
+                if (!name) return;
+                const conditions = Array.isArray(entry?.Conditions) ? entry.Conditions : [];
+                const maxOrder = Number(entry?.PolynomialExpansion) > 0 ? Math.round(Number(entry.PolynomialExpansion)) : 1;
+                conditions.forEach((condition) => {
+                    if (typeof condition !== 'string' || !condition.trim()) return;
+                    for (let order = 1; order <= maxOrder; order += 1) {
+                        terms.push(pmodTermId(condition.trim(), name, order));
+                    }
+                });
+            });
+            return terms;
+        }
+
         function buildConditions() {
             const pool = new Set(config.getSuggestedConditionTermsForNode?.(cbNodeIdx) || config.getInterestRegressors?.() || []);
             const node = currentNode();
@@ -49,6 +74,7 @@
                 (node.Contrasts || []).forEach((contrast) => {
                     (contrast.ConditionList || []).forEach((condition) => pool.add(condition));
                 });
+                buildParametricModulationTerms(node).forEach((term) => pool.add(term));
             }
             const conditions = Array.from(pool).filter(Boolean);
             if (!conditions.includes('1')) conditions.push('1');
@@ -71,6 +97,12 @@
 
         function conditionLabel(condition) {
             if (condition === '1') return 'constant (intercept)';
+            const pmodMatch = /^(.+):(.+)\^(\d+)$/.exec(condition);
+            if (pmodMatch) {
+                const [, baseCondition, pmodName, order] = pmodMatch;
+                const orderLabel = order === '1' ? 'linear' : order === '2' ? 'quadratic' : `order ${order}`;
+                return `${baseCondition} × ${pmodName} (${orderLabel} pmod)`;
+            }
             return condition;
         }
 
