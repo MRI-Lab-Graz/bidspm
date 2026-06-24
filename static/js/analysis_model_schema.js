@@ -146,6 +146,10 @@
         const readyEdges = list.filter(edge => getEdgeSchemaIssues(edge, nodeNames, knownFilterKeys).length === 0).length;
         const withFilter = list.filter(edge => edge?.Filter && typeof edge.Filter === 'object' && !Array.isArray(edge.Filter)).length;
         const withUnknownFilterKeys = list.filter(edge => getEdgeSchemaAdvisories(edge, nodeNames, knownFilterKeys).length > 0).length;
+        const missingDatasetContrastFilter = list.filter(edge => {
+            const checks = getEdgeSchemaChecks(edge, nodeNames, knownFilterKeys);
+            return checks.destinationIsDataset && !checks.hasContrastFilter;
+        }).length;
         const total = list.length > 0 ? list.length : 1;
 
         return createModelStats({
@@ -156,7 +160,10 @@
                 { text: `Edges ${list.length}`, tone: list.length > 0 ? 'success' : 'neutral' },
                 { text: `Ready ${readyEdges}/${list.length || 0}`, tone: list.length > 0 ? getModelPillTone(readyEdges, list.length) : 'neutral' },
                 { text: `With filter ${withFilter}`, tone: 'neutral' },
-                { text: withUnknownFilterKeys ? `Unknown filter keys ${withUnknownFilterKeys}` : 'Known filter keys', tone: withUnknownFilterKeys ? 'warning' : 'neutral' }
+                { text: withUnknownFilterKeys ? `Unknown filter keys ${withUnknownFilterKeys}` : 'Known filter keys', tone: withUnknownFilterKeys ? 'warning' : 'neutral' },
+                ...(missingDatasetContrastFilter
+                    ? [{ text: `Dataset edges missing contrast filter ${missingDatasetContrastFilter}`, tone: 'warning' }]
+                    : [])
             ]
         });
     }
@@ -793,6 +800,18 @@
             ? Object.keys(filterValue).length
             : 0;
 
+        // A Dataset-level destination should pick its upstream contrast(s) explicitly --
+        // https://bidspm.readthedocs.io/en/latest/stats/bids_stats_model.html#dataset-level
+        const destinationNode = Array.isArray(modelEditorDraft?.Nodes)
+            ? modelEditorDraft.Nodes.find(node => String(node?.Name || '').trim() === destinationValue)
+            : null;
+        const destinationIsDataset = String(destinationNode?.Level || '').trim() === 'Dataset';
+        const hasContrastFilter = filterProvided
+            && typeof filterValue === 'object'
+            && !Array.isArray(filterValue)
+            && Array.isArray(filterValue.contrast)
+            && filterValue.contrast.filter(Boolean).length > 0;
+
         return {
             unknownKeys,
             sourceValue,
@@ -806,6 +825,8 @@
             filterKeys,
             unknownFilterKeys,
             filterKeyCount,
+            destinationIsDataset,
+            hasContrastFilter,
             passedRequired: (sourceValid ? 1 : 0) + (destinationValid ? 1 : 0),
             totalRequired: 2,
             nodeNameCount: nodeNameSet.size
@@ -829,6 +850,9 @@
         const advisories = [];
         if (checks.unknownFilterKeys.length) {
             advisories.push(`Filter key(s) not found in detected metadata fields: ${checks.unknownFilterKeys.join(', ')} (allowed by spec; verify spelling/context).`);
+        }
+        if (checks.destinationIsDataset && !checks.hasContrastFilter) {
+            advisories.push(`Destination '${checks.destinationValue}' is a Dataset-level node; set Filter.contrast to pick which upstream contrast(s) feed in.`);
         }
         return advisories;
     }

@@ -982,6 +982,7 @@
         getInterestRegressors: () => modelEditorInterestRegressors,
         getIncomingContrastNamesForNode,
         getSuggestedConditionTermsForNode,
+        getParticipantsInfo: () => getModelEditorParticipantsInfo(),
         getModelPath: () => document.getElementById('input-MODELS_FILE')?.value,
         getModelContentFromPath,
         loadBidsTasksForModelEditor,
@@ -1598,13 +1599,26 @@
         const modelXArrayPath = modelXPathMatch ? modelXPathMatch[1] : '';
         const scopedInterestRegressors = isModelXEntry ? getSuggestedRegressorsForModelXPath(modelXArrayPath) : [];
         const useInterestDropdown = isModelXEntry && typeof value === 'string' && !isNuisanceRegressor(value) && scopedInterestRegressors.length > 0;
+        const isSerialCorrelationEntry = /\.Software\.SPM\.SerialCorrelation$/.test(path);
 
         if (isGroupByEntry) {
             row.classList.add('json-row-compact');
         }
 
         let input;
-        if (isGroupByEntry) {
+        if (isSerialCorrelationEntry) {
+            input = document.createElement('select');
+            input.className = 'form-select form-select-sm';
+
+            const options = Array.from(new Set(['none', 'AR(1)', 'FAST', value]));
+            options.forEach(optVal => {
+                const opt = document.createElement('option');
+                opt.value = optVal;
+                opt.textContent = optVal;
+                input.appendChild(opt);
+            });
+            input.value = String(value);
+        } else if (isGroupByEntry) {
             input = document.createElement('select');
             input.className = 'form-select form-select-sm';
 

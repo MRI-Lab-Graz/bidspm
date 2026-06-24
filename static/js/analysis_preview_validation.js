@@ -21,6 +21,17 @@
                     delete value.Transformations.GeneratedColumns;
                 }
 
+                // An empty Contrasts array is invalid per the BIDS Stats Models spec --
+                // omitting the key (rather than "[]") is what "no contrasts" means.
+                if (Array.isArray(value.Contrasts) && !value.Contrasts.length) {
+                    delete value.Contrasts;
+                }
+                if (value.DummyContrasts && typeof value.DummyContrasts === 'object' && !Array.isArray(value.DummyContrasts)) {
+                    if (Array.isArray(value.DummyContrasts.Contrasts) && !value.DummyContrasts.Contrasts.length) {
+                        delete value.DummyContrasts.Contrasts;
+                    }
+                }
+
                 Object.values(value).forEach((entry) => walk(entry));
             };
 

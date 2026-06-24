@@ -100,8 +100,7 @@
                         X: ['1'],
                         Type: 'glm'
                     },
-                    DummyContrasts: { Test: 't' },
-                    Contrasts: []
+                    DummyContrasts: { Test: 't' }
                 };
             }
             return {
@@ -113,8 +112,7 @@
                     HRF: { Variables: ['trial_type'], Model: 'spm' },
                     Type: 'glm',
                     Software: { SPM: { Model: 'spm' } }
-                },
-                Contrasts: []
+                }
             };
         }
         if (path === 'Edges') {

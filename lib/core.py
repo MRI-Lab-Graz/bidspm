@@ -797,7 +797,9 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
     contrast_issues = _check_empty_contrasts(model_content)
     if contrast_issues:
         return {"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"}
-    
+
+    warnings.extend(_check_dataset_edge_filters(model_content))
+
     # Schema validation
     try:
         import requests
@@ -842,6 +844,9 @@ def _check_empty_contrasts(model: Dict) -> List[str]:
 
         node_name = node.get('Name', f'node {node_idx}')
 
+        if 'Contrasts' in node and node['Contrasts'] == []:
+            issues.append(f"Node '{node_name}': Contrasts is an empty list — omit the key instead")
+
         for contrast in node.get('Contrasts', []):
             if not isinstance(contrast, dict):
                 continue
@@ -861,6 +866,42 @@ def _check_empty_contrasts(model: Dict) -> List[str]:
             issues.append(f"Node '{node_name}': DummyContrasts.Contrasts is an empty list — omit the key to use all model variables")
 
     return issues
+
+
+def _check_dataset_edge_filters(model: Dict) -> List[str]:
+    """Warn when an Edge into a Dataset-level node omits Filter.contrast.
+
+    Per the BIDS Stats Models docs, an Edge feeding a Dataset-level node should
+    explicitly set Filter.contrast to pick which upstream contrast(s) flow in —
+    https://bidspm.readthedocs.io/en/latest/stats/bids_stats_model.html#dataset-level
+    """
+    warnings = []
+
+    nodes = model.get('Nodes', model.get('Steps', []))
+    dataset_node_names = {
+        str(node.get('Name', '')).strip()
+        for node in nodes
+        if isinstance(node, dict) and str(node.get('Level', '')).strip() == 'Dataset'
+    }
+    if not dataset_node_names:
+        return warnings
+
+    for edge in model.get('Edges', []):
+        if not isinstance(edge, dict):
+            continue
+        destination = str(edge.get('Destination', '')).strip()
+        if destination not in dataset_node_names:
+            continue
+
+        contrast_filter = edge.get('Filter', {}).get('contrast') if isinstance(edge.get('Filter'), dict) else None
+        if not contrast_filter:
+            source = edge.get('Source', 'unknown source')
+            warnings.append(
+                f"Edge '{source}' -> '{destination}': Destination is a Dataset-level node "
+                "but Filter.contrast is not set"
+            )
+
+    return warnings
 
 
 def _normalize_legacy_model_keys(node: Any) -> int:

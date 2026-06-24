@@ -5,6 +5,8 @@
         const querySelectorAll = config.querySelectorAll || ((selector) => document.querySelectorAll(selector));
         const alertImpl = config.alertImpl || window.alert.bind(window);
         const nuisanceRegressorRx = config.nuisanceRegressorRx || /$^/;
+        const getParticipantsInfo = config.getParticipantsInfo || (() => ({}));
+        const normalizeStringArray = config.normalizeStringArray || ((value) => (Array.isArray(value) ? value.map(String) : []));
 
         let cbNodeIdx = 0;
         let cbDraft = null;
@@ -60,15 +62,31 @@
             return terms;
         }
 
+        // A categorical Model.X entry (e.g. "group", matching a participants.tsv column)
+        // is dummy-coded by bidspm into one column per level -- "group.blind", "group.control"
+        // -- so those expanded levels, not the bare column name, are what a Contrast can weight.
+        function expandFactorLevels(term) {
+            const participantsInfo = getParticipantsInfo() || {};
+            const categoricalColumns = normalizeStringArray(participantsInfo.categorical_columns);
+            if (!categoricalColumns.includes(term)) return [term];
+            const sampleValues = (participantsInfo.sample_values && typeof participantsInfo.sample_values === 'object')
+                ? participantsInfo.sample_values
+                : {};
+            const levels = normalizeStringArray(sampleValues[term]);
+            return levels.length ? levels.map((level) => `${term}.${level}`) : [term];
+        }
+
+        // Contrasts can only weight columns that actually exist in this node's design
+        // matrix, so the pool is built strictly from Model.X (plus its factor-level and
+        // pmod expansions, and conditions already saved on the node) -- not from
+        // dataset-wide suggestions like upstream contrast names that aren't in X.
         function buildConditions() {
-            const pool = new Set(config.getSuggestedConditionTermsForNode?.(cbNodeIdx) || config.getInterestRegressors?.() || []);
+            const pool = new Set();
             const node = currentNode();
-            const incomingContrastNames = config.getIncomingContrastNamesForNode?.(cbNodeIdx) || [];
-            incomingContrastNames.forEach((name) => pool.add(name));
             if (node) {
                 (node.Model?.X || []).forEach((value) => {
                     if (typeof value === 'string' && !nuisanceRegressorRx.test(value.trim())) {
-                        pool.add(value.trim());
+                        expandFactorLevels(value.trim()).forEach((term) => pool.add(term));
                     }
                 });
                 (node.Contrasts || []).forEach((contrast) => {
@@ -593,7 +611,11 @@
                 return;
             }
 
-            nodes[cbNodeIdx].Contrasts = structuredClone(cbDraft);
+            if (cbDraft.length) {
+                nodes[cbNodeIdx].Contrasts = structuredClone(cbDraft);
+            } else {
+                delete nodes[cbNodeIdx].Contrasts;
+            }
             if (config.getModelDraft?.()) {
                 config.renderModelAccordionEditor?.();
             }
