@@ -165,13 +165,49 @@ def copy_preproc_from_fmriprep(config: Config, subject: str, task: str) -> List[
     return copied
 
 
+def copy_confounds_from_fmriprep(config: Config, subject: str, task: str) -> List[Path]:
+    """Copy fMRIPrep's confounds_timeseries.tsv/.json into bidspm-preproc if missing.
+
+    bidspm's MATLAB preprocessing step does this copy as part of
+    ``bidsCopyInputFolder.m`` ("force grab the confounds for fmriprep"). This
+    fast path replaces that step for the BOLD data but was missing the
+    equivalent confounds copy, so the GLM silently ran with zero motion
+    regressors for any subject whose confounds file hadn't been copied by an
+    earlier (MATLAB-based) run -- ``getConfoundsRegressorFilename.m`` only
+    logs a WARNING, not an error, when the file can't be found. Always called
+    (not gated on whether the BOLD file was already present), since a subject
+    can have its BOLD file copied already while still missing confounds.
+    """
+    preproc_root = config.DERIVATIVES_DIR / "bidspm-preproc"
+    fmriprep_subject_dir = config.FMRIPREP_DIR / f"sub-{subject}"
+    if not fmriprep_subject_dir.exists():
+        return []
+
+    pattern = f"*task-{task}*desc-confounds_timeseries.tsv"
+    fmriprep_files = sorted(fmriprep_subject_dir.rglob(pattern))
+
+    copied = []
+    for src in fmriprep_files:
+        dst = _fmriprep_to_preproc_path(src, config.FMRIPREP_DIR, preproc_root)
+        if not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, dst)
+            src_json = src.with_suffix(".json")
+            if src_json.exists():
+                shutil.copy(src_json, dst.with_suffix(".json"))
+        copied.append(dst)
+
+    return copied
+
+
 def smooth_subject(config: Config, subject: str, task: str, force: bool = False) -> dict:
     """Smooth every desc-preproc BOLD file for one subject/task.
 
     Looks for desc-preproc files already in bidspm-preproc first; if missing,
     copies them straight from fMRIPrep's output (see
     ``copy_preproc_from_fmriprep``) before smoothing -- no MATLAB/SPM needed
-    in either case.
+    in either case. Also copies the confounds_timeseries file (see
+    ``copy_confounds_from_fmriprep``), since the stats step needs it later.
 
     If every file already has a desc-smth{fwhm} output, the subject is
     skipped (status "skipped") unless ``force`` is set -- smoothing is
@@ -188,6 +224,7 @@ def smooth_subject(config: Config, subject: str, task: str, force: bool = False)
     """
     preproc_root = config.DERIVATIVES_DIR / "bidspm-preproc"
     files = copy_preproc_from_fmriprep(config, subject, task)
+    copy_confounds_from_fmriprep(config, subject, task)
     if not files:
         return {
             "status": "no_input",
