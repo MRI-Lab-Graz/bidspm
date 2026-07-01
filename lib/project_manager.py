@@ -23,6 +23,15 @@ from dataclasses import dataclass, field, asdict
 DATA_DIR = Path.home() / ".bidspm"
 PROJECTS_DIR = DATA_DIR / "projects"
 
+# Fallback locations for logs/config used only when no project is active.
+# Project-scoped runs use get_project_logs_dir()/get_project_configs_dir() instead.
+GLOBAL_LOG_DIR = DATA_DIR / "logs"
+GLOBAL_CONFIG_DIR = DATA_DIR / "config"
+
+# Single file tracking the last project opened, so the app can resume it
+# without requiring a project id in the URL.
+CURRENT_PROJECT_FILE = DATA_DIR / "current_project.json"
+
 
 def ensure_dirs():
     """Ensure data directories exist."""
@@ -266,6 +275,20 @@ class ProjectManager:
         
         return new_project
     
+    def get_current_project_id(self) -> Optional[str]:
+        """Return the id of the last project opened, if any."""
+        try:
+            with open(CURRENT_PROJECT_FILE, "r") as f:
+                return json.load(f).get("project_id")
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+
+    def set_current_project_id(self, project_id: str) -> None:
+        """Record the last project opened, so the app can resume it."""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CURRENT_PROJECT_FILE, "w") as f:
+            json.dump({"project_id": project_id}, f)
+
     def get_project_logs_dir(self, project_id: str) -> Path:
         """Get the logs directory for a project.
 

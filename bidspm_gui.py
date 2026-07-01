@@ -50,7 +50,7 @@ from lib import (
     load_config
 )
 from lib.config import auto_select_container_config
-from lib.project_manager import project_manager
+from lib.project_manager import project_manager, GLOBAL_LOG_DIR
 from webapp.web_config_fs_api import register_config_fs_routes
 from webapp.web_discovery_model_api import (
     _build_model_warnings,
@@ -81,7 +81,7 @@ app.config['APP_VERSION'] = __version__
 # Execution state
 BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
 PYTHON_EXE = os.path.abspath(".bidspm/bin/python")
-LOG_DIR = Path("logs")
+LOG_DIR = GLOBAL_LOG_DIR  # fallback when no project is selected; per-project runs use project_manager
 DEFAULT_PORT = 5100
 APP_ROOT = Path(__file__).resolve().parent
 

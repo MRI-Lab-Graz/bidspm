@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Module-level variables
-LOG_DIR = Path("logs")
+LOG_DIR = Path.home() / ".bidspm" / "logs"  # global fallback; project-scoped runs use project_manager instead
 LOG_FILE = str(LOG_DIR / "run_bidspm.log")
 DEBUG = True  # Set to False to suppress debug output
 

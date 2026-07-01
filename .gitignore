@@ -17,6 +17,7 @@ error_logs/
 external/
 local_src/
 logs/
+octave-workspace
 # Python cache
 __pycache__/
 *.py[cod]

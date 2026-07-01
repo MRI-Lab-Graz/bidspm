@@ -12,6 +12,8 @@ def _load_page_context(
 ) -> Tuple[Optional[object], List[object]]:
     manager = get_project_manager()
     project = manager.load_project(project_id) if project_id else None
+    if project:
+        manager.set_current_project_id(project_id)
     projects = manager.list_projects()
     return project, projects
 
@@ -51,7 +53,16 @@ def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) 
     @app.route('/analysis')
     @app.route('/analysis/<project_id>')
     def analysis_page(project_id: Optional[str] = None):
-        """Render analysis page, optionally with a project loaded."""
+        """Render analysis page, optionally with a project loaded.
+
+        With no project id in the URL, resume the last project opened
+        (tracked in ~/.bidspm/current_project.json) if one still exists.
+        """
+        manager = get_project_manager()
+        if not project_id:
+            last_project_id = manager.get_current_project_id()
+            if last_project_id and manager.load_project(last_project_id):
+                return redirect(f'/analysis/{last_project_id}')
         project, projects = _load_page_context(project_id, get_project_manager)
         return render_template(
             'analysis.html',

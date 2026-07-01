@@ -264,7 +264,7 @@ echo "  Docker  : $(docker --version 2>/dev/null | head -1 || echo 'not found')"
 echo ""
 echo "Run an analysis:     python bidspm.py --action smooth stats"
 echo "Pilot (1 subject):   python bidspm.py --action smooth --pilot"
-echo "Web interface:       python web_interface.py"
+echo "Web interface:       python bidspm_gui.py"
 echo "Deactivate:          deactivate"
 ACTIVATE_EOF
 

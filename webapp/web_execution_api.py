@@ -13,6 +13,8 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
+from lib.project_manager import GLOBAL_CONFIG_DIR
+
 
 ProjectManagerGetter = Callable[[], object]
 NormalizeSubjects = Callable[[object], list[str]]
@@ -145,7 +147,11 @@ def register_execution_routes(
                 return jsonify({'error': f'Failed to read settings file: {exc}'}), 400
 
             run_config['SUBJECTS'] = subjects_override
-            override_path = Path('config') / f'run_settings_override_{execution_id}.json'
+            if project_id:
+                override_dir = get_project_manager().get_project_configs_dir(project_id)
+            else:
+                override_dir = GLOBAL_CONFIG_DIR
+            override_path = override_dir / f'run_settings_override_{execution_id}.json'
             override_path.parent.mkdir(parents=True, exist_ok=True)
             with open(override_path, 'w', encoding='utf-8') as stream:
                 json.dump(run_config, stream, indent=2)
