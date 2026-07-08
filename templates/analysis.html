@@ -362,6 +362,25 @@
         </div>
     </div>
 
+    <!-- Run Issues: warnings/errors pulled out of the scrolling terminal log so
+         they don't get missed (e.g. "No regressor found for condition ...",
+         "No contrast to build."). Populated live as the run streams. -->
+    <div class="row mt-4 d-none" id="run-issues-row">
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-warning-subtle d-flex justify-content-between align-items-center py-2">
+                    <span class="small text-uppercase fw-bold text-warning-emphasis">
+                        <i class="fas fa-triangle-exclamation me-2"></i>Run Issues
+                    </span>
+                    <span class="small text-muted" id="run-issues-summary"></span>
+                </div>
+                <div class="card-body p-2" style="max-height: 260px; overflow-y: auto;">
+                    <div id="run-issues-list" class="d-flex flex-column gap-1"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bottom Section: Terminal -->
     <div class="row mt-4 mb-5">
         <div class="col-12">
@@ -1367,7 +1386,21 @@
 
         if (section.kind === 'overview') {
             body.appendChild(createTopLevelSchemaHint(modelEditorDraft));
-            renderJsonEditor(body, section.value, '', false, 0);
+
+            // Name and Description are always shown here as plain editable rows.
+            // BIDSModelVersion is intentionally not rendered -- it's a locked,
+            // non-editable schema field (see READONLY_MODEL_PATHS) and Description
+            // is shown unconditionally rather than gated behind "Show advanced
+            // fields" (that gate exists for the rarely-used per-node/per-edge
+            // Description fields, not this top-level one).
+            createPrimitiveRow(body, 'Name', modelEditorDraft?.Name ?? '', 'Name', false, 0);
+            createPrimitiveRow(body, 'Description', modelEditorDraft?.Description ?? '', 'Description', false, 0);
+
+            const extraKeys = Object.keys(section.value).filter(key => key !== 'Name' && key !== 'Description');
+            if (extraKeys.length) {
+                const extraValue = Object.fromEntries(extraKeys.map(key => [key, section.value[key]]));
+                renderJsonEditor(body, extraValue, '', false, 0);
+            }
             return;
         }
 
@@ -4271,14 +4304,86 @@
         new bootstrap.Modal(document.getElementById('loadConfigModal')).show();
     });
 
+    // --- RUN ISSUES DETECTION ---
+    // bidspm's own logger writes a "[HH:MM:SS] bidspm - WARNING/ERROR <tab> fnName"
+    // header line followed by the actual message on the next line(s), e.g.
+    // "No regressor found for condition ..." or "No contrast to build.".
+    // Those are easy to miss in a scrolling multi-thousand-line terminal, so pull
+    // them into a standalone summary, attributed to whichever subject is currently
+    // being processed, as the run streams in.
+    let runIssues = [];
+    let pendingIssueLevel = null;
+    let currentRunSubject = null;
+
+    function resetRunIssues() {
+        runIssues = [];
+        pendingIssueLevel = null;
+        currentRunSubject = null;
+        renderRunIssues();
+    }
+
+    function renderRunIssues() {
+        const row = document.getElementById('run-issues-row');
+        const list = document.getElementById('run-issues-list');
+        const summary = document.getElementById('run-issues-summary');
+        if (!row || !list || !summary) return;
+
+        if (!runIssues.length) {
+            row.classList.add('d-none');
+            list.innerHTML = '';
+            summary.textContent = '';
+            return;
+        }
+
+        const errorCount = runIssues.filter(issue => issue.level === 'error').length;
+        const warningCount = runIssues.filter(issue => issue.level === 'warning').length;
+        summary.textContent = [
+            errorCount ? `${errorCount} error(s)` : '',
+            warningCount ? `${warningCount} warning(s)` : ''
+        ].filter(Boolean).join(', ');
+
+        list.innerHTML = runIssues.map(issue => {
+            const tone = issue.level === 'error' ? 'danger' : 'warning';
+            const subjectLabel = issue.subject ? `sub-${issue.subject}` : 'unknown subject';
+            return `<div class="small border-start border-3 border-${tone} ps-2">
+                <span class="badge bg-${tone} text-uppercase me-1">${issue.level}</span>
+                <strong>${subjectLabel}</strong> &mdash; ${issue.message}
+            </div>`;
+        }).join('');
+
+        row.classList.remove('d-none');
+    }
+
+    function processRunLogLine(line) {
+        const subjectMatch = line.match(/PROCESSING SUBJECT No\.\s*:\s*\d+\s*SUBJECT LABEL\s*:\s*(\S+)/);
+        if (subjectMatch) {
+            currentRunSubject = subjectMatch[1];
+            return;
+        }
+
+        const levelMatch = line.match(/bidspm\s*-\s*(WARNING|ERROR)\b/i);
+        if (levelMatch) {
+            pendingIssueLevel = levelMatch[1].toLowerCase();
+            return;
+        }
+
+        const trimmed = line.trim();
+        if (pendingIssueLevel && trimmed && !/^\[\d{2}:\d{2}:\d{2}\]/.test(trimmed)) {
+            runIssues.push({ level: pendingIssueLevel, subject: currentRunSubject, message: trimmed });
+            pendingIssueLevel = null;
+            renderRunIssues();
+        }
+    }
+
     // --- EXECUTION CORE ---
     async function startExecution(payload) {
         if (payload.actions.length === 0) { alert('Please select at least one action.'); return; }
-        
+
         terminal.innerText = '--- EXECUTION TRIGGERED ---\n';
         execStatus.innerText = 'RUNNING';
         execStatus.className = 'badge bg-danger';
-        
+        resetRunIssues();
+
         const res = await fetch('/run', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -4296,6 +4401,7 @@
         eventSource.onmessage = e => {
             terminal.innerText += e.data + '\n';
             terminal.scrollTop = terminal.scrollHeight;
+            processRunLogLine(e.data);
             if (e.data.includes('Process finished')) resetStatus();
         };
         eventSource.onerror = () => {

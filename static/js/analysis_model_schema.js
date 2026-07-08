@@ -68,10 +68,14 @@
     }
 
     function getOverviewSectionValue(model) {
+        // BIDSModelVersion is excluded here: it's a locked, non-editable field
+        // (always "1.0.0"), so it isn't part of the user-facing/editable overview
+        // fields tracked for completion. It's still validated separately via
+        // requiredKeys/topLevelChecks in getOverviewSectionStats.
         const primitiveKeys = Object.entries(model || {})
-            .filter(([key, value]) => key !== 'Input' && key !== 'Nodes' && (value === null || typeof value !== 'object'))
+            .filter(([key, value]) => key !== 'Input' && key !== 'Nodes' && key !== 'BIDSModelVersion' && (value === null || typeof value !== 'object'))
             .map(([key]) => key);
-        const keys = Array.from(new Set(['Name', 'BIDSModelVersion', 'Description', ...primitiveKeys]));
+        const keys = Array.from(new Set(['Name', 'Description', ...primitiveKeys]));
         return Object.fromEntries(keys.map(key => [key, model?.[key] ?? '']));
     }
 
