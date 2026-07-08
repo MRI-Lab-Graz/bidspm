@@ -20,7 +20,8 @@ from .core import (
     detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, discover_spaces,
     check_subject_processed,
-    validate_bids_model, estimate_processing_time
+    validate_bids_model, estimate_processing_time,
+    resolve_models_dir, run_bms
 )
 from .project_manager import (
     ProjectManager, Project, ProjectConfig,
@@ -40,6 +41,7 @@ __all__ = [
     'discover_subjects', 'discover_tasks', 'discover_spaces',
     'check_subject_processed',
     'validate_bids_model', 'estimate_processing_time',
+    'resolve_models_dir', 'run_bms',
     # Project Manager
     'ProjectManager', 'Project', 'ProjectConfig',
     'project_manager', 'PROJECTS_DIR', 'DATA_DIR',

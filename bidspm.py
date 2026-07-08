@@ -15,7 +15,7 @@ from lib import (
     Pipeline, PipelineOptions, PipelineResult,
     detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, estimate_processing_time,
-    log_debug
+    log_debug, run_bms
 )
 from lib.config import load_config
 from lib.utils import DEBUG
@@ -40,18 +40,22 @@ USAGE:
     python bidspm.py [OPTIONS] --action ACTION [ACTION ...]
 
 REQUIRED ARGUMENTS:
-    --action {smooth,stats,dataset,report}
+    --action {smooth,stats,dataset,report,bms}
                           Actions to perform (specify one or more):
                           • smooth  : Smooth preprocessed fMRI data
                           • stats   : Run subject-level statistical analysis
                           • dataset : Run group-level statistical analysis
                           • report  : Generate HTML QC/results report (no MATLAB needed)
+                          • bms     : Bayesian Model Selection across competing models
+                                      in --models-dir (requires container; each model
+                                      must already have --action stats run for it)
 
 OPTIONAL ARGUMENTS:
     -h, --help           Show this help message and exit
     -s, --settings       Path to configuration JSON file (default: config/config.json)
     -c, --container      Path to container config file (default: auto-detect)
     -m, --model          Path to BIDS-StatsModel JSON file (overrides config)
+    --models-dir         Directory of competing models to compare (--action bms only)
     --pilot              Test mode: process only one random subject
     --skip-modelvalidation
                          Skip validation of BIDS-StatsModel JSON
@@ -139,8 +143,13 @@ def parse_arguments():
     
     # Actions
     parser.add_argument('--action', nargs='+',
-                       choices=['smooth', 'stats', 'dataset', 'report'],
+                       choices=['smooth', 'stats', 'dataset', 'report', 'bms'],
                        help='Actions to perform')
+    parser.add_argument('--models-dir', '--models_dir',
+                       dest='models_dir',
+                       help='Directory of competing BIDS-StatsModel JSON files to compare '
+                            '(required for --action bms; must contain only the models '
+                            'being compared, bidspm globs every *.json in it)')
     
     # Flags
     parser.add_argument('--pilot', action='store_true',
@@ -339,6 +348,42 @@ def _handle_report(config_file: str, args, processed_subjects: Optional[List[str
     print(f"\n✅ Group index: {index}\n")
 
 
+def _handle_bms(config_file: str, args) -> bool:
+    """Run Bayesian Model Selection across the models in --models-dir.
+
+    Returns True on success. Requires container execution and a `stats` run
+    already completed for every competing model (BMS compares their
+    already-estimated SPM.mat files).
+    """
+    if not args.models_dir:
+        print("❌ --action bms requires --models-dir <directory of competing model files>")
+        return False
+
+    print(f"\n🧮 Running Bayesian Model Selection ({args.models_dir})…")
+    result = run_bms(
+        config_file=config_file,
+        container_config_file=args.container,
+        models_dir=args.models_dir,
+        dry_run=args.dry_run,
+        skip_validation=args.skip_modelvalidation,
+    )
+
+    if result["dry_run_commands"]:
+        print("\n🔍 Command that would be executed:")
+        for cmd in result["dry_run_commands"]:
+            print(f"   {cmd}")
+
+    if result["success"]:
+        print("✅ BMS completed successfully\n")
+    else:
+        print("❌ BMS failed")
+        for e in result["errors"]:
+            print(f"   • {e}")
+        print()
+
+    return result["success"]
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
@@ -375,18 +420,25 @@ def main():
     # Require action for actual execution
     if not args.action:
         print("❌ Error: --action argument is required")
-        print("   Please specify at least one action: smooth, stats, dataset, report")
+        print("   Please specify at least one action: smooth, stats, dataset, report, bms")
         print("\nUse --help for more information\n")
         sys.exit(1)
 
-    # Strip report from pipeline actions — it runs after the pipeline completes
+    # Strip report/bms from pipeline actions — neither goes through the
+    # per-subject/task Pipeline loop (report is pure Python; bms compares
+    # already-estimated models across a --models-dir, not a single model).
     run_report = 'report' in args.action
-    args.action = [a for a in args.action if a != 'report']
+    run_bms_action = 'bms' in args.action
+    args.action = [a for a in args.action if a not in ('report', 'bms')]
 
-    if not args.action and run_report:
-        # Report-only: skip pipeline entirely
-        _handle_report(config_file, args)
-        sys.exit(0)
+    if not args.action and (run_report or run_bms_action):
+        # No smooth/stats/dataset requested: skip the pipeline entirely.
+        bms_ok = True
+        if run_bms_action:
+            bms_ok = _handle_bms(config_file, args)
+        if run_report:
+            _handle_report(config_file, args)
+        sys.exit(0 if bms_ok else 1)
 
     # Build pipeline options
     options = PipelineOptions(
@@ -448,13 +500,20 @@ def main():
         
         print()
 
+        # Run BMS after the pipeline completes -- it compares already-
+        # estimated SPM.mat files across --models-dir, so any stats run
+        # requested alongside it must finish first.
+        bms_ok = True
+        if run_bms_action:
+            bms_ok = _handle_bms(config_file, args)
+
         # Generate HTML report after pipeline completes -- restrict to
         # subjects this run actually touched, so e.g. a --pilot run doesn't
         # rewrite every other subject's report page.
         if run_report:
             _handle_report(config_file, args, processed_subjects=result.subjects_processed)
 
-        sys.exit(0 if result.success else 1)
+        sys.exit(0 if (result.success and bms_ok) else 1)
         
     except KeyboardInterrupt:
         print("\n\n🛑 Process interrupted by user")

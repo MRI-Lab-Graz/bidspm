@@ -326,9 +326,16 @@ def build_docker_command(
     container_config: ContainerConfig,
     config: Config,
     args: List[str],
-    model_file_path: Optional[Path]
+    model_file_path: Optional[Path],
+    override_entrypoint: Optional[List[str]] = None
 ) -> Tuple[List[str], Optional[str]]:
-    """Build Docker container command."""
+    """Build Docker container command.
+
+    ``override_entrypoint``, when given, replaces the normal ``bidspm <args>``
+    call with an arbitrary command (e.g. a direct ``octave --eval ...`` call)
+    while still setting up all the same binds/overrides -- used by BMS, whose
+    action the bidspm Python CLI does not implement yet (see run_bms()).
+    """
     if not container_config.docker_image:
         raise ValueError("Docker image not specified in container configuration.")
     
@@ -345,16 +352,21 @@ def build_docker_command(
     run_tmp_dir.mkdir(parents=True, exist_ok=True)
     cmd.extend(["-v", f"{run_tmp_dir}:/tmp"])
     
-    # Handle model file path
+    # Handle model file/dir path (a directory is used for BMS's --models_dir,
+    # which needs a folder of competing smdl.json files, not a single file).
     model_container_path = None
     if model_file_path:
         try:
             rel_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
             model_container_path = f"/derivatives/{rel_path}"
         except ValueError:
-            cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
-            model_container_path = "/models/smdl.json"
-    
+            if model_file_path.is_dir():
+                cmd.extend(["-v", f"{model_file_path}:/models/bms_models:ro"])
+                model_container_path = "/models/bms_models"
+            else:
+                cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
+                model_container_path = "/models/smdl.json"
+
     # Override container source files with the same patched local versions used
     # by the Apptainer path.  Docker uses -v instead of --bind but the container
     # paths are identical (same image).
@@ -388,6 +400,10 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/bids_model/getDummyContrastFromParentNode.m"),
         (_ov / "src" / "stats" / "utils" / "getRegressorIdx.m",
                                      "/home/neuro/bidspm/src/stats/utils/getRegressorIdx.m"),
+        (_ov / "src" / "cli" / "cliBayesModel.m",
+                                     "/home/neuro/bidspm/src/cli/cliBayesModel.m"),
+        (_ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
+                                     "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m"),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -409,7 +425,7 @@ def build_docker_command(
     ])
 
     cmd.append(container_config.docker_image)
-    cmd.extend(args)
+    cmd.extend(override_entrypoint if override_entrypoint is not None else args)
     return cmd, model_container_path
 
 
@@ -417,9 +433,16 @@ def build_apptainer_command(
     container_config: ContainerConfig,
     config: Config,
     args: List[str],
-    model_file_path: Optional[Path]
+    model_file_path: Optional[Path],
+    override_entrypoint: Optional[List[str]] = None
 ) -> Tuple[List[str], Optional[str]]:
-    """Build Apptainer/Singularity container command."""
+    """Build Apptainer/Singularity container command.
+
+    ``override_entrypoint``, when given, replaces the normal ``bidspm <args>``
+    call with an arbitrary command (e.g. a direct ``octave --eval ...`` call)
+    while still setting up all the same binds/overrides -- used by BMS, whose
+    action the bidspm Python CLI does not implement yet (see run_bms()).
+    """
     if not container_config.apptainer_image:
         raise ValueError("Apptainer image not specified in container configuration.")
     
@@ -438,16 +461,21 @@ def build_apptainer_command(
         "--bind", f"{config.FMRIPREP_DIR}:/fmriprep"
     ]
     
-    # Handle model file path
+    # Handle model file/dir path (a directory is used for BMS's --models_dir,
+    # which needs a folder of competing smdl.json files, not a single file).
     model_container_path = None
     if model_file_path:
         try:
             rel_path = model_file_path.relative_to(config.DERIVATIVES_DIR)
             model_container_path = f"/derivatives/{rel_path}"
         except ValueError:
-            cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
-            model_container_path = "/models/smdl.json"
-    
+            if model_file_path.is_dir():
+                cmd.extend(["--bind", f"{model_file_path}:/models/bms_models:ro"])
+                model_container_path = "/models/bms_models"
+            else:
+                cmd.extend(["--bind", f"{model_file_path}:/models/smdl.json"])
+                model_container_path = "/models/smdl.json"
+
     # Create runtime directory
     run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
     run_tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -508,6 +536,18 @@ def build_apptainer_command(
     #   in Contrasts/ConditionList so explicit contrasts can target a
     #   parametric modulation term (e.g. valid_item.item:ai_rating_mod^1),
     #   not just a condition's unmodulated main effect.
+    # cliBayesModel.m: container v4.0.0 bug -- calls bidsModelSelection(opt,
+    #   'action', <value>) but bidsModelSelection's inputParser registers
+    #   'action' via addOptional (positional), not addParameter. GNU Octave's
+    #   inputParser enforces this strictly and errors with "argument 'ACTION'
+    #   is not a valid parameter"; MATLAB's is lenient. Calls positionally
+    #   instead, which works on both.
+    # bidsModelSelection.m: container v4.0.0 bug in checks() -- unconditionally
+    #   redid a cellfun(@(x) x.space, inputs) call without 'UniformOutput',
+    #   false right after computing it correctly, which crashes with "cellfun:
+    #   all values must be scalars when UniformOutput = true" for any space
+    #   value longer than one character (i.e. always, for real space labels
+    #   like 'MNI152NLin2009cAsym').
     _ov = Path(__file__).parent.parent / "bidspm_overrides"
     _tl = _ov / "lib" / "bids-matlab" / "+bids" / "+transformers_list"
     _file_overrides = [
@@ -575,6 +615,14 @@ def build_apptainer_command(
             _ov / "src" / "stats" / "utils" / "getRegressorIdx.m",
             "/home/neuro/bidspm/src/stats/utils/getRegressorIdx.m",
         ),
+        (
+            _ov / "src" / "cli" / "cliBayesModel.m",
+            "/home/neuro/bidspm/src/cli/cliBayesModel.m",
+        ),
+        (
+            _ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
+            "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m",
+        ),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -616,10 +664,11 @@ def build_apptainer_command(
     ])
 
     cmd.append(container_config.apptainer_image)
-    
+
     # Wrap in shell to set PATH
-    quoted_args = " ".join(shlex.quote(str(arg)) for arg in args)
-    shell_cmd = f"export PATH={runtime_bind_path}:/usr/local/bin:/usr/bin:/bin; exec bidspm {quoted_args}"
+    entrypoint = override_entrypoint if override_entrypoint is not None else ["bidspm"] + args
+    quoted_entrypoint = " ".join(shlex.quote(str(arg)) for arg in entrypoint)
+    shell_cmd = f"export PATH={runtime_bind_path}:/usr/local/bin:/usr/bin:/bin; exec {quoted_entrypoint}"
     cmd.extend(["sh", "-c", shell_cmd])
     
     # Prepend env command for PATH
@@ -649,15 +698,157 @@ def build_container_command(
     container_config: ContainerConfig,
     config: Config,
     args: List[str],
-    model_file_path: Optional[Path]
+    model_file_path: Optional[Path],
+    override_entrypoint: Optional[List[str]] = None
 ) -> Tuple[List[str], Optional[str]]:
     """Build container command based on type (dispatches to specific builder)."""
     if container_config.container_type == "docker":
-        return build_docker_command(container_config, config, args, model_file_path)
+        return build_docker_command(container_config, config, args, model_file_path, override_entrypoint)
     elif container_config.container_type == "apptainer":
-        return build_apptainer_command(container_config, config, args, model_file_path)
+        return build_apptainer_command(container_config, config, args, model_file_path, override_entrypoint)
     else:
         raise ValueError(f"Unsupported container type: {container_config.container_type}")
+
+
+# =============================================================================
+# Bayesian Model Selection (BMS)
+# =============================================================================
+#
+# bidspm (v4.0.0) already ships first-level Bayesian Model Selection via the
+# bundled MACS toolbox (src/workflows/stats/bidsModelSelection.m), reachable
+# from the MATLAB function as bidspm(..., 'action', 'bms', 'models_dir', DIR).
+# However the container's own Python CLI entrypoint (`bidspm` on PATH) has
+# 'bms' hardcoded into a NOT_IMPLEMENTED set (bidspm/src/bidspm/cli.py) even
+# though the command-builder and MATLAB dispatch both work -- confirmed by
+# calling the MATLAB function directly. So this calls octave directly inside
+# the container instead of going through the `bidspm` CLI entrypoint, mirroring
+# how this wrapper's local (non-container) execution mode already invokes
+# bidspm() directly for smooth/stats/dataset.
+#
+# It globs every *_smdl.json in --models_dir as the competing models
+# (src/defaults/getOptionsFromModel.m -- note the required _smdl.json suffix,
+# not just any .json), so that directory must contain only the models being
+# compared, named accordingly. Each competing model's Input must include the
+# same `space` and `task` (src/workflows/stats/bidsModelSelection.m: checks()),
+# and `stats` must already have been run for every competing model (BMS
+# compares their already-estimated SPM.mat files, it does not estimate
+# anything itself).
+
+def resolve_models_dir(models_dir: str) -> Path:
+    """Validate a directory of competing BIDS Stats Model files for BMS.
+
+    bidspm globs every ``*_smdl.json`` in this directory as a competing
+    model, so it must be dedicated to exactly the models being compared,
+    named with that suffix.
+    """
+    path = Path(models_dir).expanduser().resolve()
+    if not path.is_dir():
+        raise ValueError(f"Models directory not found: {path}")
+    json_files = sorted(path.glob("*_smdl.json"))
+    if len(json_files) < 2:
+        raise ValueError(
+            f"BMS needs at least 2 competing model files matching "
+            f"*_smdl.json in {path}, found {len(json_files)}. bidspm globs "
+            "exactly that pattern as competing models (src/defaults/"
+            "getOptionsFromModel.m) -- keep this directory dedicated to the "
+            "models being compared, named with the _smdl.json suffix."
+        )
+    return path
+
+
+def run_bms(
+    config_file: str,
+    container_config_file: Optional[str],
+    models_dir: str,
+    fwhm: Optional[float] = None,
+    participant_label: Optional[List[str]] = None,
+    dry_run: bool = False,
+    skip_validation: bool = False,
+    on_progress: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Run Bayesian Model Selection across a directory of competing models.
+
+    Container execution only -- BMS needs the MACS toolbox, which ships
+    inside the bidspm container image. Local/Octave execution is not wired
+    up for this action.
+    """
+    def _log(msg: str):
+        if on_progress:
+            on_progress(msg)
+        else:
+            print(msg)
+
+    errors: List[str] = []
+
+    try:
+        resolved_models_dir = resolve_models_dir(models_dir)
+    except ValueError as e:
+        errors.append(str(e))
+        return {"success": False, "errors": errors, "dry_run_commands": []}
+
+    config = load_config(config_file)
+
+    container_file = container_config_file
+    if not container_file:
+        from .config import auto_select_container_config
+        container_file = auto_select_container_config()
+
+    if not container_file or not Path(container_file).exists():
+        errors.append("No container configuration found (BMS requires container execution).")
+        return {"success": False, "errors": errors, "dry_run_commands": []}
+
+    container_config = load_container_config(container_file)
+
+    if container_config.container_type == "docker":
+        check_docker_availability()
+    elif container_config.container_type == "apptainer":
+        check_command("apptainer")
+
+    effective_fwhm = fwhm if fwhm is not None else config.FWHM
+
+    # First pass just to learn where the models dir gets mounted -- the mount
+    # path doesn't depend on the entrypoint, so args/entrypoint are dummies.
+    _, models_dir_container_path = build_container_command(
+        container_config, config, [], resolved_models_dir
+    )
+
+    matlab_args = [
+        "'/raw'", "'/derivatives'", "'subject'",
+        "'action'", "'bms'",
+        "'fwhm'", str(effective_fwhm),
+        "'verbosity'", str(config.VERBOSITY),
+        "'models_dir'", f"'{models_dir_container_path}'",
+    ]
+    if participant_label:
+        labels = ",".join(f"'{p}'" for p in participant_label)
+        matlab_args.extend(["'participant_label'", f"{{{labels}}}"])
+    if dry_run:
+        matlab_args.extend(["'dry_run'", "true"])
+    if skip_validation:
+        matlab_args.extend(["'skip_validation'", "true"])
+
+    matlab_call = f"bidspm({', '.join(matlab_args)})"
+    octave_eval = (
+        "bidspm('init'); try; "
+        f"{matlab_call}; "
+        "catch ME; fprintf('bidspm - ERROR - %s\\n', ME.message); exit(1); end; "
+        "exit(0);"
+    )
+    override_entrypoint = ["octave", "--no-gui", "--no-window-system", "--silent", "--eval", octave_eval]
+
+    cmd, _ = build_container_command(
+        container_config, config, [], resolved_models_dir, override_entrypoint=override_entrypoint
+    )
+
+    if dry_run:
+        _log(f"[DRY RUN] Would execute: {' '.join(cmd)}")
+        return {"success": True, "errors": errors, "dry_run_commands": [' '.join(cmd)]}
+
+    _log(f">>> Running BMS across models in {resolved_models_dir}")
+    success = run_command(cmd)
+    if not success:
+        errors.append("BMS run failed -- see log output above.")
+    return {"success": success, "errors": errors, "dry_run_commands": []}
 
 
 # =============================================================================
@@ -743,13 +934,16 @@ def estimate_processing_time(
         "smooth": 5,
         "stats": 15,
         "dataset": 30,  # Per task, not per subject
+        "bms": 20,  # Per task, not per subject -- compares already-estimated models
     }
-    
+
     total_minutes = 0
     breakdown = {}
-    
+
     for action in actions:
-        if action == "dataset":
+        if action not in time_estimates:
+            continue
+        if action in ("dataset", "bms"):
             action_time = time_estimates[action] * len(tasks)
         else:
             action_time = time_estimates[action] * len(subjects) * len(tasks)
