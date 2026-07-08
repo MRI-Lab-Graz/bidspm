@@ -2785,6 +2785,24 @@
         createPrimitiveRow(container, basePath || 'value', node, basePath || 'value', inheritedLocked, depth);
     }
 
+    function reorderModelOverviewKeys(model) {
+        // Description is only ever added to a model via setByPath, which -- like any
+        // plain JS object assignment -- inserts brand-new keys at the end. For a
+        // model with a large Nodes array that puts "Description" far past what's
+        // visible in the JSON preview without scrolling, even though it's right next
+        // to "Name" in the editor UI above. Reorder so the two stay in sync.
+        if (!model || typeof model !== 'object' || Array.isArray(model) || !('Description' in model)) {
+            return;
+        }
+        const leadingKeys = ['Name', 'BIDSModelVersion', 'Description'].filter(key => key in model);
+        const snapshot = { ...model };
+        Object.keys(model).forEach(key => { delete model[key]; });
+        leadingKeys.forEach(key => { model[key] = snapshot[key]; });
+        Object.keys(snapshot).forEach(key => {
+            if (!leadingKeys.includes(key)) model[key] = snapshot[key];
+        });
+    }
+
     function renderModelAccordionEditor() {
         const editor = document.getElementById('model-editor-accordion');
         const status = document.getElementById('model-editor-status');
@@ -2809,6 +2827,8 @@
             editor.innerHTML = '<div class="text-muted small">No model loaded.</div>';
             return;
         }
+
+        reorderModelOverviewKeys(modelEditorDraft);
 
         const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
         if (missing.length) {
