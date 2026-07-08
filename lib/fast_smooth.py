@@ -129,6 +129,37 @@ def _fmriprep_to_preproc_path(fmriprep_path: Path, fmriprep_root: Path, preproc_
     return target
 
 
+def _gzip_uncompressed_size(gz_path: Path) -> Optional[int]:
+    """Read the ISIZE trailer of a gzip file (uncompressed size mod 2**32).
+
+    Only meaningful for sources under 4 GiB, which fMRIPrep's desc-preproc
+    BOLD files comfortably are.
+    """
+    try:
+        with open(gz_path, "rb") as f:
+            f.seek(-4, 2)
+            return int.from_bytes(f.read(4), "little")
+    except OSError:
+        return None
+
+
+def _is_complete_copy(dst: Path, src: Path) -> bool:
+    """Whether an already-present decompressed copy matches its gzip source's size.
+
+    A prior run that got interrupted mid-decompression (killed, crashed, disk
+    full) leaves a truncated ``dst`` that still passes a bare ``exists()``
+    check, so every later run would silently treat it as done forever. Guard
+    against that by comparing against the source's own recorded size.
+    """
+    expected = _gzip_uncompressed_size(src)
+    if expected is None:
+        return True
+    try:
+        return dst.stat().st_size == expected
+    except OSError:
+        return False
+
+
 def copy_preproc_from_fmriprep(config: Config, subject: str, task: str) -> List[Path]:
     """Copy fMRIPrep's standard-space desc-preproc BOLD files into bidspm-preproc
     if they aren't already there. This is a straight decompress+copy (verified
@@ -137,15 +168,12 @@ def copy_preproc_from_fmriprep(config: Config, subject: str, task: str) -> List[
     newly copied).
     """
     preproc_root = config.DERIVATIVES_DIR / "bidspm-preproc"
-    subject_dir = preproc_root / f"sub-{subject}"
-    pattern = f"*task-{task}*space-{config.SPACE}*desc-preproc_bold.nii*"
-    existing = sorted(subject_dir.rglob(pattern)) if subject_dir.exists() else []
-    if existing:
-        return existing
 
     fmriprep_subject_dir = config.FMRIPREP_DIR / f"sub-{subject}"
     if not fmriprep_subject_dir.exists():
-        return []
+        subject_dir = preproc_root / f"sub-{subject}"
+        pattern = f"*task-{task}*space-{config.SPACE}*desc-preproc_bold.nii*"
+        return sorted(subject_dir.rglob(pattern)) if subject_dir.exists() else []
 
     fmriprep_pattern = f"*task-{task}*space-{config.SPACE}*desc-preproc_bold.nii.gz"
     fmriprep_files = sorted(fmriprep_subject_dir.rglob(fmriprep_pattern))
@@ -153,6 +181,8 @@ def copy_preproc_from_fmriprep(config: Config, subject: str, task: str) -> List[
     copied = []
     for src in fmriprep_files:
         dst = _fmriprep_to_preproc_path(src, config.FMRIPREP_DIR, preproc_root)
+        if dst.exists() and not _is_complete_copy(dst, src):
+            dst.unlink()
         if not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             with gzip.open(src, "rb") as f_in, open(dst, "wb") as f_out:

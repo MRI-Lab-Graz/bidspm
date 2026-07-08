@@ -276,18 +276,16 @@
                                 <label class="form-check-label" for="skip_validation">Skip Validation (Always On)</label>
                             </div>
                             <div class="mt-3">
-                                <label class="form-label small fw-bold text-muted text-uppercase mb-1">Model Name Override</label>
-                                <input type="text" id="model" class="form-control form-control-sm" placeholder="e.g. model-001 (leave empty for default)">
-                            </div>
-                            <div class="mt-3">
-                                <label class="form-label small fw-bold text-muted text-uppercase mb-1">Selected Subjects (comma separated, empty for all)</label>
-                                <input type="text" class="form-control form-control-sm dynamic-input" data-key="SUBJECTS" id="input-SUBJECTS" placeholder="e.g. 01, 02, 03" value="{{ project.config.subjects | join(', ') if project and project.config.subjects else '' }}">
-                            </div>
-                            <div class="mt-3">
-                                <label class="form-label small fw-bold text-muted text-uppercase mb-1">Execution Node Override</label>
-                                <input type="text" class="form-control form-control-sm dynamic-input" data-key="NODE_NAME" id="input-NODE_NAME" list="model-node-options" placeholder="optional, e.g. run_level or dataset_level" value="{{ project.config.node_name if project and project.config.node_name else '' }}">
-                                <datalist id="model-node-options"></datalist>
-                                <div class="small text-muted mt-1" id="model-node-help">Optional: pass bidspm <code>node_name</code> to run only one node from the current model.</div>
+                                <label class="form-label small fw-bold text-muted text-uppercase mb-1">Participants</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" id="btn-select-participants">
+                                        <i class="fas fa-users me-1"></i>Select Participants
+                                    </button>
+                                    <span class="small text-muted" id="participants-summary">All participants</span>
+                                </div>
+                                <div class="text-muted mt-1" style="font-size:.72rem; line-height:1.4;">
+                                    Review which participants already have output for the selected actions/tasks and choose who to run.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -305,9 +303,6 @@
             <div class="p-3 analysis-config-shell">
                 <div class="d-flex align-items-center justify-content-between mb-3">
                     <span class="fw-bold text-uppercase x-small text-primary"><i class="fas fa-box me-2"></i>Container Options</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-preflight-check">
-                        <i class="fas fa-stethoscope me-1"></i>Run Preflight Check
-                    </button>
                 </div>
                 <div class="row g-3 align-items-start">
                     <div class="col-md-6">
@@ -316,22 +311,15 @@
                             <div class="form-check d-flex align-items-center gap-2">
                                 <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if project and project.config.container_type == 'docker' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-docker">Docker</label>
-                                <span class="badge bg-secondary preflight-badge" id="badge-docker">?</span>
                             </div>
                             <div class="form-check d-flex align-items-center gap-2">
                                 <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if not project or project.config.container_type == 'apptainer' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-apptainer">Apptainer</label>
-                                <span class="badge bg-secondary preflight-badge" id="badge-apptainer">?</span>
                             </div>
                             <div class="form-check d-flex align-items-center gap-2">
                                 <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" {% if project and project.config.container_type == 'local' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-local">Local (No Container)</label>
-                                <span class="badge bg-success preflight-badge" id="badge-local">✓</span>
                             </div>
-                        </div>
-                        <div id="preflight-results" class="mt-3 d-none">
-                            <div class="small fw-bold text-muted text-uppercase mb-1">Preflight Results</div>
-                            <div id="preflight-details" class="d-flex flex-column gap-1"></div>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -475,6 +463,57 @@
     </div>
 </div>
 
+<!-- Modal for Participant Selection -->
+<div class="modal fade" id="participantsModal" tabindex="-1" aria-labelledby="participantsModalLabel">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="participantsModalLabel">
+                    <i class="fas fa-users me-2"></i>Select Participants
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-3" id="participants-modal-status">Checking participant status…</div>
+
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="participants-select-all">Select All</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="participants-select-none">Select None</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="participants-select-missing">Select Missing Only</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="participants-select-computed">Select Already Computed</button>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100 bg-light">
+                            <div class="small fw-bold text-danger mb-2">
+                                Missing / Not Yet Run <span id="participants-missing-count" class="text-muted fw-normal"></span>
+                            </div>
+                            <div id="participants-missing-list" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border rounded p-2 h-100 bg-light">
+                            <div class="small fw-bold text-success mb-2">
+                                Already Computed <span id="participants-computed-count" class="text-muted fw-normal"></span>
+                            </div>
+                            <div id="participants-computed-list" class="d-flex flex-column gap-1"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <span class="me-auto small text-muted" id="participants-selection-hint"></span>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="participants-run-selected">Run Selected</button>
+                <button type="button" class="btn btn-warning text-dark" id="participants-force-selected" title="Reprocess the selected participants even if their output already exists">
+                    Force Rerun Selected
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ===== Contrast Builder Modal ===== -->
 <div class="modal fade" id="contrastBuilderModal" tabindex="-1" aria-labelledby="contrastBuilderModalLabel">
     <div class="modal-dialog modal-xl modal-dialog-scrollable" style="max-width:1120px;">
@@ -605,6 +644,13 @@
     const execStatus = document.getElementById('exec-status');
     const validationResult = document.getElementById('validation-result');
     const pathAlerts = document.getElementById('path-alerts');
+
+    // Both result panels sit below the (long) model editor section, far from
+    // the buttons that populate them -- scroll them into view so feedback
+    // isn't missed just because it renders off-screen.
+    function revealResult(el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     const modelHintsPanel = document.getElementById('model-hints-panel');
     const {
         createModelHelperApi,
@@ -2872,8 +2918,6 @@
         const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'apptainer';
         return {
             actions: actions,
-            model: document.getElementById('model').value,
-            node_name: document.getElementById('input-NODE_NAME')?.value?.trim() || '',
             pilot: document.getElementById('pilot').checked,
             force: document.getElementById('force').checked,
             skip_validation: document.getElementById('skip_validation').checked,
@@ -2895,15 +2939,12 @@
         });
         
         // Switches & Text
-        const fields = ['model'];
+        const fields = [];
         if (!hasProject) fields.push('config-folder', 'study-filename');
         fields.forEach(f => {
             const el = document.getElementById(f);
             if (el && data[f]) el.value = data[f];
         });
-
-        const nodeInput = document.getElementById('input-NODE_NAME');
-        if (nodeInput && data.node_name !== undefined) nodeInput.value = data.node_name || '';
 
         const statsWorkersInput = document.getElementById('stats_workers');
         if (statsWorkersInput && data.stats_workers) statsWorkersInput.value = data.stats_workers;
@@ -2953,7 +2994,12 @@
         try {
             const res = await fetch(`/api/projects/${currentProjectId}/export`);
             const config = await res.json();
-            
+
+            // A fresh/different project invalidates any participant selection made
+            // against the previous project's subjects.
+            selectedParticipants = null;
+            updateParticipantsSummary();
+
             // Map the config to the unified format
             unifiedStudyConfig = {
                 WD: config.WD || '',
@@ -2965,7 +3011,6 @@
                 SPACE: config.SPACE || 'MNI152NLin2009cAsym',
                 FWHM: config.FWHM || 6,
                 TASKS: config.TASKS || [],
-                SUBJECTS: config.SUBJECTS || [],
                 VERBOSITY: config.VERBOSITY || 2,
                 container_type: config.container_type || 'apptainer',
                 docker_image: config.docker_image || 'bidspm/bidspm:latest',
@@ -2994,7 +3039,6 @@
             space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
             fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
             tasks: unifiedStudyConfig.TASKS || [],
-            subjects: unifiedStudyConfig.SUBJECTS || [],
             verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
             container_type: unifiedStudyConfig.container_type || 'apptainer',
             docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
@@ -3046,43 +3090,6 @@
             };
         });
 
-        // Preflight checks
-        async function runPreflightChecks() {
-            const btn = document.getElementById('btn-preflight-check');
-            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Checking…'; }
-            try {
-                const resp = await fetch('/api/preflight/tools');
-                const data = await resp.json();
-                const badgeMap = { docker: 'badge-docker', apptainer: 'badge-apptainer', singularity: 'badge-apptainer' };
-                // docker badge
-                const dockerOk = data.docker && data.docker.available;
-                const dockerBadge = document.getElementById('badge-docker');
-                if (dockerBadge) { dockerBadge.className = dockerOk ? 'badge bg-success preflight-badge' : 'badge bg-danger preflight-badge'; dockerBadge.textContent = dockerOk ? '✓' : '✗'; dockerBadge.title = dockerOk ? data.docker.path : 'not found'; }
-                // apptainer/singularity badge — either counts
-                const apptainerOk = (data.apptainer && data.apptainer.available) || (data.singularity && data.singularity.available);
-                const apptainerBadge = document.getElementById('badge-apptainer');
-                if (apptainerBadge) { apptainerBadge.className = apptainerOk ? 'badge bg-success preflight-badge' : 'badge bg-danger preflight-badge'; apptainerBadge.textContent = apptainerOk ? '✓' : '✗'; apptainerBadge.title = apptainerOk ? (data.apptainer.path || data.singularity.path) : 'not found'; }
-                // detailed panel
-                const details = document.getElementById('preflight-details');
-                const resultsDiv = document.getElementById('preflight-results');
-                if (details && resultsDiv) {
-                    const tools = [
-                        { label: 'Docker', key: 'docker', avail: dockerOk },
-                        { label: 'Apptainer', key: 'apptainer', avail: data.apptainer && data.apptainer.available },
-                        { label: 'Singularity', key: 'singularity', avail: data.singularity && data.singularity.available },
-                        { label: 'Octave', key: 'octave', avail: data.octave && data.octave.available },
-                    ];
-                    details.innerHTML = tools.map(t => `<span class="small"><span class="badge ${t.avail ? 'bg-success' : 'bg-danger'} me-1">${t.avail ? '✓' : '✗'}</span>${t.label}${t.avail && data[t.key] && data[t.key].path ? ' <span class=\'text-muted font-monospace x-small\'>' + data[t.key].path + '</span>' : ''}</span>`).join('');
-                    resultsDiv.classList.remove('d-none');
-                }
-            } catch(e) { console.warn('Preflight check failed', e); }
-            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-stethoscope me-1"></i>Run Preflight Check'; }
-        }
-
-        document.getElementById('btn-preflight-check')?.addEventListener('click', runPreflightChecks);
-        // Auto-run on page load
-        runPreflightChecks();
-
         // BIDS directory change triggers task detection
         const bidsInput = document.getElementById('input-BIDS_DIR');
         if (bidsInput) bidsInput.addEventListener('change', async () => {
@@ -3098,7 +3105,6 @@
             // Persist the new path so it survives page reloads (e.g. returning from transformer builder).
             if (hasProject && currentProjectId) await saveProjectConfig();
             await openModelEditor({ scrollIntoView: false, showStatus: false });
-            await refreshExecutionNodeOptions();
             refreshModelTasks();
         });
 
@@ -3146,9 +3152,6 @@
                 unifiedStudyConfig[key] = input.checked;
             } else if (input.type === 'number') {
                 unifiedStudyConfig[key] = input.step === '1' ? parseInt(input.value) : parseFloat(input.value);
-            } else if (key === 'SUBJECTS') {
-                const val = input.value.trim();
-                unifiedStudyConfig[key] = val ? val.split(',').map(s => s.trim()) : [];
             } else {
                 unifiedStudyConfig[key] = input.value;
             }
@@ -3179,7 +3182,6 @@
             const el = document.getElementById(`input-${key}`);
             if (el) {
                 if (el.type === 'checkbox') el.checked = val;
-                else if (key === 'SUBJECTS' && Array.isArray(val)) el.value = val.join(', ');
                 else el.value = val;
             }
             if (key === 'TASKS' && Array.isArray(val)) {
@@ -3228,40 +3230,6 @@
             const modelVal = document.getElementById('input-MODELS_FILE')?.value;
             if (modelVal) refreshModelTasks();
         } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
-    }
-
-    async function refreshExecutionNodeOptions(modelContent = null) {
-        const modelPath = document.getElementById('input-MODELS_FILE')?.value?.trim() || '';
-        const nodeList = document.getElementById('model-node-options');
-        const nodeHelp = document.getElementById('model-node-help');
-        if (!nodeList || !nodeHelp) return;
-
-        nodeList.innerHTML = '';
-        if (!modelPath) {
-            nodeHelp.innerHTML = 'Optional: pass bidspm <code>node_name</code> to run only one node from the current model.';
-            return;
-        }
-
-        try {
-            const content = modelContent || await getModelContentFromPath(modelPath);
-            const nodeNames = Array.isArray(content?.Nodes)
-                ? content.Nodes
-                    .map(node => (node && typeof node === 'object' ? String(node.Name || '').trim() : ''))
-                    .filter(Boolean)
-                : [];
-
-            Array.from(new Set(nodeNames)).forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                nodeList.appendChild(option);
-            });
-
-            nodeHelp.innerHTML = nodeNames.length
-                ? `Optional: run only one model node. Available nodes: ${nodeNames.join(', ')}.`
-                : 'Optional: this model has no named nodes yet.';
-        } catch (e) {
-            nodeHelp.innerHTML = 'Optional: load a valid model file to get node suggestions.';
-        }
     }
 
     async function getModelContentFromPath(modelPath) {
@@ -3426,7 +3394,6 @@
             }
 
             renderModelAccordionEditor();
-            refreshExecutionNodeOptions(modelContent);
 
             // Run heavier hint scans in the background to keep first paint fast.
             Promise.allSettled([
@@ -3642,7 +3609,6 @@
             }
 
             status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model saved.</div>';
-            refreshExecutionNodeOptions(modelEditorDraft);
 
             // Refresh task and hint state in the background (no await)
             refreshModelTasks();
@@ -3735,6 +3701,174 @@
         if (!token) return '';
         return token.toLowerCase().startsWith('sub-') ? token.slice(4) : token;
     }
+
+    // --- Participant Selection ---
+    let participantsModalInstance = null;
+    let participantsStatusReport = null;
+    // null = no explicit selection (run all participants); Set = explicit subject id override.
+    let selectedParticipants = null;
+
+    function getParticipantsModalInstance() {
+        const modalEl = document.getElementById('participantsModal');
+        if (!modalEl) return null;
+        if (!participantsModalInstance) {
+            participantsModalInstance = new bootstrap.Modal(modalEl);
+        }
+        return participantsModalInstance;
+    }
+
+    function updateParticipantsSummary() {
+        const el = document.getElementById('participants-summary');
+        if (!el) return;
+        el.textContent = selectedParticipants
+            ? `${selectedParticipants.size} participant(s) selected`
+            : 'All participants';
+    }
+
+    function updateParticipantsSelectionHint() {
+        const hint = document.getElementById('participants-selection-hint');
+        if (!hint) return;
+        const checked = document.querySelectorAll('.participant-checkbox:checked').length;
+        const total = document.querySelectorAll('.participant-checkbox').length;
+        hint.textContent = `${checked} of ${total} selected`;
+    }
+
+    async function fetchParticipantsStatus() {
+        const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
+        const payload = {
+            project_id: currentProjectId || null,
+            bids_dir: unifiedStudyConfig.BIDS_DIR || '',
+            fmriprep_dir: unifiedStudyConfig.FMRIPREP_DIR || '',
+            derivatives_dir: unifiedStudyConfig.DERIVATIVES_DIR || unifiedStudyConfig.WD || '',
+            model_file: unifiedStudyConfig.MODELS_FILE || '',
+            tasks: unifiedStudyConfig.TASKS || [],
+            actions: actions,
+            space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
+            fwhm: unifiedStudyConfig.FWHM || 6
+        };
+        const response = await fetch('/api/participants_status', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        return await response.json();
+    }
+
+    function participantRowHtml(entry) {
+        const subject = entry.subject;
+        const checked = selectedParticipants ? selectedParticipants.has(subject) : entry.status !== 'computed';
+        const title = Array.isArray(entry.pending) && entry.pending.length ? `Pending: ${entry.pending.join(', ')}` : '';
+        return `<div class="form-check">
+            <input class="form-check-input participant-checkbox" type="checkbox" value="${subject}" id="participant-row-${subject}" ${checked ? 'checked' : ''}>
+            <label class="form-check-label small" for="participant-row-${subject}" title="${title}">sub-${subject}</label>
+        </div>`;
+    }
+
+    function renderParticipantsModal(report) {
+        participantsStatusReport = report;
+        const statusEl = document.getElementById('participants-modal-status');
+        const missingList = document.getElementById('participants-missing-list');
+        const computedList = document.getElementById('participants-computed-list');
+        const missingCountEl = document.getElementById('participants-missing-count');
+        const computedCountEl = document.getElementById('participants-computed-count');
+
+        const details = Array.isArray(report.details) ? report.details : [];
+
+        if (!details.length) {
+            if (statusEl) statusEl.textContent = 'No participants detected. Check the BIDS/fMRIPrep folder paths.';
+        } else if (!report.evaluable) {
+            if (statusEl) statusEl.textContent = 'Select Smooth/Stats actions and at least one task to see computed status. Showing all detected participants.';
+        } else {
+            const tasksLabel = (report.tasks_considered || []).join(', ') || 'auto-detected';
+            const actionsLabel = (report.actions_considered || []).join(', ') || 'n/a';
+            if (statusEl) statusEl.textContent = `Tasks checked: ${tasksLabel}. Actions checked: ${actionsLabel}.`;
+        }
+
+        const missingEntries = details.filter(d => d.status !== 'computed');
+        const computedEntries = details.filter(d => d.status === 'computed');
+
+        if (missingList) missingList.innerHTML = missingEntries.length ? missingEntries.map(participantRowHtml).join('') : '<span class="small text-muted">none</span>';
+        if (computedList) computedList.innerHTML = computedEntries.length ? computedEntries.map(participantRowHtml).join('') : '<span class="small text-muted">none</span>';
+        if (missingCountEl) missingCountEl.textContent = `(${missingEntries.length})`;
+        if (computedCountEl) computedCountEl.textContent = `(${computedEntries.length})`;
+
+        updateParticipantsSelectionHint();
+    }
+
+    function findParticipantEntry(subject) {
+        return (participantsStatusReport?.details || []).find(d => d.subject === subject);
+    }
+
+    function applyParticipantsSelection(force) {
+        const checked = Array.from(document.querySelectorAll('.participant-checkbox:checked')).map(cb => cb.value);
+        const total = document.querySelectorAll('.participant-checkbox').length;
+
+        if (checked.length === 0) {
+            alert('Select at least one participant.');
+            return;
+        }
+
+        selectedParticipants = checked.length < total ? new Set(checked) : null;
+
+        if (force) {
+            const forceCb = document.getElementById('force');
+            if (forceCb) forceCb.checked = true;
+        }
+
+        updateParticipantsSummary();
+        getParticipantsModalInstance()?.hide();
+    }
+
+    document.getElementById('btn-select-participants')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('participants-modal-status');
+        const missingList = document.getElementById('participants-missing-list');
+        const computedList = document.getElementById('participants-computed-list');
+        if (statusEl) statusEl.textContent = 'Checking participant status…';
+        if (missingList) missingList.innerHTML = '';
+        if (computedList) computedList.innerHTML = '';
+
+        getParticipantsModalInstance()?.show();
+        updateInternalState();
+
+        try {
+            const report = await fetchParticipantsStatus();
+            if (report.error) throw new Error(report.error);
+            renderParticipantsModal(report);
+        } catch (e) {
+            if (statusEl) statusEl.textContent = `Failed to check participant status: ${e.message}`;
+        }
+    });
+
+    document.getElementById('participantsModal')?.addEventListener('change', (e) => {
+        if (e.target.classList && e.target.classList.contains('participant-checkbox')) {
+            updateParticipantsSelectionHint();
+        }
+    });
+
+    document.getElementById('participants-select-all')?.addEventListener('click', () => {
+        document.querySelectorAll('.participant-checkbox').forEach(cb => { cb.checked = true; });
+        updateParticipantsSelectionHint();
+    });
+    document.getElementById('participants-select-none')?.addEventListener('click', () => {
+        document.querySelectorAll('.participant-checkbox').forEach(cb => { cb.checked = false; });
+        updateParticipantsSelectionHint();
+    });
+    document.getElementById('participants-select-missing')?.addEventListener('click', () => {
+        document.querySelectorAll('.participant-checkbox').forEach(cb => {
+            const entry = findParticipantEntry(cb.value);
+            cb.checked = !entry || entry.status !== 'computed';
+        });
+        updateParticipantsSelectionHint();
+    });
+    document.getElementById('participants-select-computed')?.addEventListener('click', () => {
+        document.querySelectorAll('.participant-checkbox').forEach(cb => {
+            const entry = findParticipantEntry(cb.value);
+            cb.checked = !!entry && entry.status === 'computed';
+        });
+        updateParticipantsSelectionHint();
+    });
+    document.getElementById('participants-run-selected')?.addEventListener('click', () => applyParticipantsSelection(false));
+    document.getElementById('participants-force-selected')?.addEventListener('click', () => applyParticipantsSelection(true));
 
     let statsCoverageModalInstance = null;
 
@@ -3883,8 +4017,7 @@
             bids_dir: unifiedStudyConfig.BIDS_DIR || '',
             fmriprep_dir: unifiedStudyConfig.FMRIPREP_DIR || '',
             model_file: unifiedStudyConfig.MODELS_FILE || '',
-            tasks: unifiedStudyConfig.TASKS || [],
-            subjects: unifiedStudyConfig.SUBJECTS || []
+            tasks: unifiedStudyConfig.TASKS || []
         };
 
         let report = null;
@@ -3933,13 +4066,6 @@
         }
 
         const subjectsOverride = readySubjects.slice();
-        if (hasProject && currentProjectId) {
-            unifiedStudyConfig.SUBJECTS = subjectsOverride.slice();
-            await syncInternalToForm();
-            updateInternalState();
-            await saveProjectConfig();
-        }
-
         return { allow: true, subjectsOverride };
     }
 
@@ -3953,9 +4079,10 @@
             body: JSON.stringify({content: unifiedStudyConfig})
         });
         const result = await res.json();
-        validationResult.innerHTML = result.valid 
+        validationResult.innerHTML = result.valid
             ? '<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i> Valid JSON configuration</div>'
             : `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i> ${result.error}</div>`;
+        revealResult(validationResult);
     };
 
     document.getElementById('btn-check-paths').onclick = async () => {
@@ -3973,6 +4100,7 @@
             div.innerHTML = `<i class="fas fa-${exists ? 'check' : 'times'} me-1"></i> ${k}: ${exists ? 'Path found' : 'Path not found'}`;
             pathAlerts.appendChild(div);
         }
+        revealResult(pathAlerts);
     };
 
     document.getElementById('btn-save-only').onclick = async () => {
@@ -4003,6 +4131,7 @@
         } catch (err) {
             validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Save failed: ${err.message}</div>`;
         }
+        revealResult(validationResult);
     };
 
     document.getElementById('btn-save-start').onclick = async () => {
@@ -4017,10 +4146,12 @@
         if (!coverageDecision.allow) return;
         
         const data = getFullFormData();
-        if (coverageDecision.subjectsOverride.length > 0) {
+        if (selectedParticipants) {
+            data.subjects_override = Array.from(selectedParticipants);
+        } else if (coverageDecision.subjectsOverride.length > 0) {
             data.subjects_override = coverageDecision.subjectsOverride;
         }
-        
+
         if (hasProject && currentProjectId) {
             // Save to project
             await saveProjectConfig();
@@ -4066,7 +4197,9 @@
             if (!coverageDecision.allow) return;
 
             const data = getFullFormData();
-            if (coverageDecision.subjectsOverride.length > 0) {
+            if (selectedParticipants) {
+                data.subjects_override = Array.from(selectedParticipants);
+            } else if (coverageDecision.subjectsOverride.length > 0) {
                 data.subjects_override = coverageDecision.subjectsOverride;
             }
 

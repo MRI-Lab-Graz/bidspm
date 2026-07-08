@@ -336,7 +336,8 @@ def build_docker_command(
         "docker", "run", "--rm",
         "-v", f"{config.BIDS_DIR}:/raw",
         "-v", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
-        "-v", f"{config.DERIVATIVES_DIR}:/derivatives"
+        "-v", f"{config.DERIVATIVES_DIR}:/derivatives",
+        "-v", f"{config.FMRIPREP_DIR}:/fmriprep"
     ]
     
     # Create tmp directory for this run
@@ -433,7 +434,8 @@ def build_apptainer_command(
         "--no-home",
         "--bind", f"{config.BIDS_DIR}:/raw",
         "--bind", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
-        "--bind", f"{config.DERIVATIVES_DIR}:/derivatives"
+        "--bind", f"{config.DERIVATIVES_DIR}:/derivatives",
+        "--bind", f"{config.FMRIPREP_DIR}:/fmriprep"
     ]
     
     # Handle model file path
@@ -718,7 +720,10 @@ def check_subject_processed(config: Config, subject_label: str, task: str, actio
         stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / f"sub-{subject_label}"
         if not stats_dir.exists():
             return False
-        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}_node-subjectLevel"
+        # Node names are user-defined in the BIDS-StatsModel (e.g. "Run",
+        # "runLevelAl", "subject_level") so match any node for this
+        # task/space/fwhm rather than assuming a fixed name.
+        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}_node-*"
         for stats_subdir in stats_dir.glob(pattern):
             if list(stats_subdir.glob("beta_*.nii*")):
                 return True
@@ -1500,13 +1505,8 @@ class Pipeline:
     def _run_container_action(self, action: str, subject: str, task: str) -> bool:
         """Run action via container."""
         if action == "smooth":
-            try:
-                fmriprep_rel = self.config.FMRIPREP_DIR.relative_to(self.config.DERIVATIVES_DIR)
-                fmriprep_container_path = f"/derivatives/{fmriprep_rel}"
-            except ValueError:
-                fmriprep_container_path = "/derivatives/fmriprep"
             args = [
-                fmriprep_container_path, "/derivatives", "subject", "smooth",
+                "/fmriprep", "/derivatives", "subject", "smooth",
                 "--participant_label", subject,
                 "--task", task,
                 "--space", self.config.SPACE,

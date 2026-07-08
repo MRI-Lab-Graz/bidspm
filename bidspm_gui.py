@@ -46,6 +46,7 @@ from lib import (
     Pipeline, PipelineOptions, PipelineResult,
     detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, discover_spaces,
+    check_subject_processed,
     validate_bids_model, estimate_processing_time,
     load_config
 )
@@ -381,6 +382,7 @@ register_utility_stats_routes(
     resolve_fs_path=_resolve_fs_path,
     normalize_token_list=_normalize_token_list,
     normalize_subject_ids=_normalize_subject_ids,
+    check_subject_processed=check_subject_processed,
 )
 
 

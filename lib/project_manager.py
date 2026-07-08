@@ -53,7 +53,6 @@ class ProjectConfig:
     space: str = "MNI152NLin2009cAsym"
     fwhm: float = 6.0
     tasks: List[str] = field(default_factory=list)
-    subjects: List[str] = field(default_factory=list)
     verbosity: int = 2
     
     # Container settings
@@ -326,7 +325,6 @@ class ProjectManager:
                 "SPACE": "space",
                 "FWHM": "fwhm",
                 "TASKS": "tasks",
-                "SUBJECTS": "subjects",
                 "VERBOSITY": "verbosity",
                 "container_type": "container_type",
                 "docker_image": "docker_image",
@@ -370,7 +368,6 @@ class ProjectManager:
                 "SPACE": config.space,
                 "FWHM": config.fwhm,
                 "TASKS": config.tasks,
-                "SUBJECTS": config.subjects,
                 "VERBOSITY": config.verbosity,
                 "container_type": config.container_type,
                 "docker_image": config.docker_image,
