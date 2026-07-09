@@ -898,28 +898,85 @@ def discover_spaces(fmriprep_dir: Path, tasks: Optional[List[str]] = None) -> Li
     return sorted(list(spaces))
 
 
-def check_subject_processed(config: Config, subject_label: str, task: str, action: str) -> bool:
-    """Check if a subject has already been processed for the given action."""
+def _normalize_node_label(name: Optional[str]) -> str:
+    """Strip non-alphanumerics and lowercase, for tolerant node-name matching."""
+    return re.sub(r'[^a-zA-Z0-9]', '', name or '').lower()
+
+
+# Node names that getFFXdir.m omits the _node- suffix for entirely (after the
+# same stripping it applies: regexprep(nodeName, '[ -_]', '')).
+_FFX_UNNAMED_NODE_LABELS = {'run', 'runlevel'}
+
+
+# Files bidspm's CPP_ROI/copyAtlasToSpmDir.m populates into the shared
+# host atlas cache dir (config.WD / "atlas", bind-mounted read/write into
+# every concurrent container as /opt/spm12/atlas). When this cache is empty,
+# multiple concurrent stats-workers can each see it as empty at the same
+# time and race on the Wang-atlas merge-then-delete step in a *separate*
+# shared source dir (CPP_ROI's own atlas/ tree) -- confirmed live: this
+# caused sporadic "delete: no such file" / copyfile crashes for ~4% of
+# subjects in a 12-way-parallel batch. Once the target cache dir already has
+# these files, copyAtlasToSpmDir.m's own atlasPresent check short-circuits
+# before touching the shared source dir at all, so pre-warming it with one
+# sequential run eliminates the race entirely (see _atlas_cache_is_warm()).
+_ATLAS_CACHE_FILES = [
+    "AAL3v1_1mm.nii", "AAL3v1_1mm.xml",
+    "HCPex.nii", "HCPex.xml",
+    "space-MNI152ICBM2009anlin_seg-glasser_dseg.nii",
+    "space-MNI152ICBM2009anlin_seg-glasser_dseg.xml",
+    "space-MNI_seg-visfAtlas_dseg.nii", "space-MNI_seg-visfAtlas_dseg.xml",
+    "space-MNI_seg-wang_dseg.nii", "space-MNI_seg-wang_dseg.xml",
+]
+
+
+def _atlas_cache_is_warm(config: Config) -> bool:
+    atlas_dir = config.WD / "atlas"
+    return all((atlas_dir / f).exists() for f in _ATLAS_CACHE_FILES)
+
+
+def check_subject_processed(
+    config: Config, subject_label: str, task: str, action: str,
+    node_name: Optional[str] = None
+) -> bool:
+    """Check if a subject has already been processed for the given action.
+
+    ``node_name`` (for ``action="stats"``) is the current model's Run-level
+    node Name (see _get_run_node_name()). Different competing models produce
+    separate `_node-<Name>` output folders (see A1 in
+    docs/roadmap-model-variants-bms.md) -- without checking the specific
+    node, this would report "already processed" as soon as *any* model's
+    output exists for this subject/task/space/fwhm, silently skipping every
+    other model. Confirmed live: this caused a 100-subject x 5-model stats
+    batch to silently skip ~96-100% of subjects for 4 of the 5 models.
+    """
     if action == "smooth":
         preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc" / f"sub-{subject_label}"
         if not preproc_dir.exists():
             return False
         pattern = f"*task-{task}*space-{config.SPACE}*desc-smth{config.FWHM}_bold.nii*"
         return len(list(preproc_dir.rglob(pattern))) > 0
-    
+
     elif action == "stats":
         stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / f"sub-{subject_label}"
         if not stats_dir.exists():
             return False
-        # Node names are user-defined in the BIDS-StatsModel (e.g. "Run",
-        # "runLevelAl", "subject_level") so match any node for this
-        # task/space/fwhm rather than assuming a fixed name.
-        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}_node-*"
+        expected = _normalize_node_label(node_name) if node_name else None
+        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}*"
         for stats_subdir in stats_dir.glob(pattern):
-            if list(stats_subdir.glob("beta_*.nii*")):
-                return True
+            if not list(stats_subdir.glob("beta_*.nii*")):
+                continue
+            match = re.search(r'_node-([^_]+)$', stats_subdir.name)
+            if match:
+                if expected is not None and _normalize_node_label(match.group(1)) == expected:
+                    return True
+            else:
+                # No _node- suffix: only matches a model whose node name is
+                # itself one that getFFXdir.m omits the suffix for (or if we
+                # have no expected node name to disambiguate against).
+                if expected is None or expected in _FFX_UNNAMED_NODE_LABELS:
+                    return True
         return False
-    
+
     return False
 
 
@@ -1189,6 +1246,22 @@ def _normalize_software_blocks(node: Any) -> int:
 
     return fixes
 
+def _get_run_node_name(model_content: Dict[str, Any]) -> Optional[str]:
+    """Resolve the Run-level (root) node's Name from a parsed BIDS Stats Model.
+
+    This mirrors which node getFFXdir.m derives the stats output folder name
+    from -- used to check for already-processed subjects against the correct
+    node folder rather than any node folder (see check_subject_processed()).
+    """
+    nodes = model_content.get('Nodes', model_content.get('Steps', []))
+    for node in nodes:
+        if str(node.get('Level', '')).lower() == 'run':
+            return node.get('Name')
+    if nodes:
+        return nodes[0].get('Name')
+    return None
+
+
 def _prepare_model_content_for_execution(model_content: Dict[str, Any]) -> List[str]:
     """Normalize model content for execution and return applied changes."""
     changes = []
@@ -1260,6 +1333,7 @@ class Pipeline:
         self.config: Optional[Config] = None
         self.container_config: Optional[ContainerConfig] = None
         self.model_file_path: Optional[Path] = None
+        self.stats_node_name: Optional[str] = None
         self.execution_model_temp_path: Optional[Path] = None
         self.matlab_caps: Optional[MatlabCapabilities] = None
         self.log_file: str = ""
@@ -1417,6 +1491,10 @@ class Pipeline:
             self._log_error(f"Failed to read model file: {e}")
             return False
 
+        # Used by check_subject_processed() to tell this model's stats output
+        # apart from other competing models' -- see its docstring.
+        self.stats_node_name = self.options.node_name or _get_run_node_name(model_content)
+
         execution_fixes = _prepare_model_content_for_execution(model_content)
         if execution_fixes:
             temp_path = Path("config") / f"temp_exec_model_{self.model_file_path.stem}_{random.randint(1000, 9999)}.json"
@@ -1546,6 +1624,29 @@ class Pipeline:
                 max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
                     if eligible_subjects else 1
 
+                # Avoid a known race in bidspm's CPP_ROI atlas init: process one
+                # subject sequentially first so the shared atlas cache is fully
+                # populated before any concurrent workers can race on it (see
+                # _atlas_cache_is_warm() docstring for the full mechanism).
+                if (
+                    max_workers > 1
+                    and 'stats' in self.options.actions
+                    and not _atlas_cache_is_warm(self.config)
+                ):
+                    self._log(
+                        ">>> Warming shared atlas cache with one sequential subject "
+                        "before parallelizing (avoids a race in bidspm's atlas init "
+                        "when multiple workers hit an empty cache at once)"
+                    )
+                    warm_subject = eligible_subjects.pop(0)
+                    if self._process_subject(warm_subject, task):
+                        subjects_processed.append(warm_subject)
+                        actions_completed.update(self.options.actions)
+                    else:
+                        subjects_failed.append(warm_subject)
+                    max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
+                        if eligible_subjects else 1
+
                 if max_workers <= 1:
                     for subject in eligible_subjects:
                         success = self._process_subject(subject, task)
@@ -1606,7 +1707,7 @@ class Pipeline:
             self.config, subject, task, "smooth"
         )
         stats_done = 'stats' in self.options.actions and check_subject_processed(
-            self.config, subject, task, "stats"
+            self.config, subject, task, "stats", node_name=self.stats_node_name
         )
         
         if smooth_done and stats_done:
