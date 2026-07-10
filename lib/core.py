@@ -404,6 +404,8 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/cli/cliBayesModel.m"),
         (_ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
                                      "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m"),
+        (_ov / "lib" / "CPP_ROI" / "src" / "atlas" / "copyAtlasToSpmDir.m",
+                                     "/home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m"),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -548,6 +550,18 @@ def build_apptainer_command(
     #   all values must be scalars when UniformOutput = true" for any space
     #   value longer than one character (i.e. always, for real space labels
     #   like 'MNI152NLin2009cAsym').
+    # copyAtlasToSpmDir.m: container v4.0.0 bug -- the "is this atlas already
+    #   cached" check does exist(targetAtlasImage(1:end-3), 'file'), assuming
+    #   the target always ends in '.gz' (true only for 'aal'). For
+    #   'hcpex'/'glasser'/'visfatlas'/'wang' the target is already a plain
+    #   .nii path, so stripping the last 3 chars chops "nii" instead and
+    #   checks for a file that can never exist -- atlasPresent was therefore
+    #   always false for those 4 atlases, forcing every invocation to
+    #   unconditionally re-copy (and for 'wang', re-merge and delete its
+    #   source) regardless of whether it was already cached. Confirmed live:
+    #   this is what caused concurrent stats-workers to race on the shared
+    #   atlas cache/source dirs ("copyfile: no files to move", "delete: no
+    #   such file"). Only strip '.gz' when the target path actually has it.
     _ov = Path(__file__).parent.parent / "bidspm_overrides"
     _tl = _ov / "lib" / "bids-matlab" / "+bids" / "+transformers_list"
     _file_overrides = [
@@ -622,6 +636,10 @@ def build_apptainer_command(
         (
             _ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
             "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m",
+        ),
+        (
+            _ov / "lib" / "CPP_ROI" / "src" / "atlas" / "copyAtlasToSpmDir.m",
+            "/home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m",
         ),
     ]
     for local_path, container_path in _file_overrides:
