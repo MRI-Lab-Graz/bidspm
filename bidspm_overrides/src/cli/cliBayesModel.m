@@ -36,6 +36,12 @@ function cliBayesModel(varargin)
   switch action
     case 'bms'
       bidsModelSelection(opt, 'all');
+    case 'bms-cvlme'
+      % Steps 1-2 only (model space + cvLME), scoped to opt.subjects --
+      % lets the expensive, per-subject-independent cvLME computation be
+      % split across several parallel container invocations on disjoint
+      % subject subsets, per bidsModelSelection's own documented workflow.
+      bidsModelSelection(opt, 'cvLME');
     case 'bms-posterior'
       bidsModelSelection(opt, 'posterior');
     case 'bms-bms'

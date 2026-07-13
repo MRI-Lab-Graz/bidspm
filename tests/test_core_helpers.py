@@ -189,7 +189,7 @@ class TestCoreHelpers(unittest.TestCase):
             (bids_func / "sub-01_task-motor_events.tsv").write_text("onset\tduration\n", encoding="utf-8")
             (bids_func / "sub-01_task-rest_events.tsv").write_text("onset\tduration\n", encoding="utf-8")
 
-            smooth_file = config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+            smooth_file = config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-smth6.0_bold.nii.gz"
             smooth_file.parent.mkdir(parents=True, exist_ok=True)
             smooth_file.write_text("", encoding="utf-8")
 
@@ -469,7 +469,14 @@ class TestCoreHelpers(unittest.TestCase):
             timeout_pipeline = core.Pipeline(core.PipelineOptions(actions=["smooth"]))
             timeout_pipeline.config = config
             timeout_pipeline.matlab_caps = core.MatlabCapabilities(environment=core.MatlabEnvironment.OCTAVE, path="/usr/bin/octave")
-            with patch("lib.core.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["octave"], timeout=10, output="partial", stderr="oops")):
+
+            def _wait(timeout=None):
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired(cmd=["octave"], timeout=timeout)
+                return 0
+
+            fake_timeout_proc = SimpleNamespace(stdout=[], wait=_wait, kill=lambda: None, returncode=0)
+            with patch("lib.core.subprocess.Popen", return_value=fake_timeout_proc):
                 self.assertFalse(timeout_pipeline._execute_matlab_script("disp('x')", "smooth", "01", "motor"))
             self.assertTrue(any("timed out" in error for error in timeout_pipeline.errors))
 

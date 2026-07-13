@@ -28,6 +28,7 @@ import secrets
 import socket
 import subprocess
 import signal
+import sys
 import threading
 import time
 import re
@@ -79,9 +80,36 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 __version__ = "2.0.0"
 app.config['APP_VERSION'] = __version__
 
+def resolve_python_executable() -> str:
+    """Resolve which Python interpreter to launch bidspm.py subprocesses with.
+
+    Priority:
+      1. ``$BIDSPM_PYTHON`` env var, if it points at a real file -- explicit
+         override for unusual setups.
+      2. ``.bidspm/bin/python`` (the intended project venv), if it actually
+         resolves -- a dangling symlink here (e.g. pointing at a since-moved
+         system Python) must NOT be silently accepted.
+      3. ``sys.executable`` -- the interpreter currently running this server.
+         It is guaranteed to have every required dependency (flask,
+         jsonschema, bsmschema, ...) since it already imported them to get
+         this far, unlike a blind ``'python3'`` PATH lookup which could
+         resolve to an unrelated, dependency-less interpreter.
+      4. ``'python3'`` on PATH, only if ``sys.executable`` is somehow empty.
+    """
+    env_override = os.environ.get("BIDSPM_PYTHON", "").strip()
+    if env_override and os.path.exists(env_override):
+        return env_override
+
+    venv_python = os.path.abspath(".bidspm/bin/python")
+    if os.path.exists(venv_python):
+        return venv_python
+
+    return sys.executable or "python3"
+
+
 # Execution state
 BIDSPM_SCRIPT = os.path.abspath("bidspm.py")
-PYTHON_EXE = os.path.abspath(".bidspm/bin/python")
+PYTHON_EXE = resolve_python_executable()
 LOG_DIR = GLOBAL_LOG_DIR  # fallback when no project is selected; per-project runs use project_manager
 DEFAULT_PORT = 5100
 APP_ROOT = Path(__file__).resolve().parent
@@ -92,6 +120,24 @@ execution_registry = ExecutionRegistry(
     log_dir=LOG_DIR,
     max_executions=MAX_EXECUTIONS,
 )
+
+
+def static_version(relative_path: str) -> str:
+    """Cache-busting token for a static asset, derived from its mtime.
+
+    Editing a JS/CSS file changes this automatically. Templates used to
+    embed a hand-typed ``v='YYYYMMDDx'`` per <script> tag -- forgetting to
+    bump it on edit meant browsers kept serving stale cached JS (a suspected
+    cause of the recurring "blank page after update" reports).
+    """
+    asset_path = APP_ROOT / 'static' / relative_path
+    try:
+        return str(int(asset_path.stat().st_mtime))
+    except OSError:
+        return '0'
+
+
+app.jinja_env.globals['static_version'] = static_version
 
 
 @app.after_request
@@ -143,6 +189,14 @@ def collect_startup_preflight_checks(app_root: Path = APP_ROOT) -> List[Dict[str
         {
             'label': 'Core pipeline',
             'ready': all(item is not None for item in (Pipeline, PipelineOptions, PipelineResult)),
+        },
+        {
+            # Surfaces which interpreter run subprocesses use -- a dangling
+            # .bidspm/bin/python symlink silently falling back to some other
+            # python3 used to be invisible until a run failed with a
+            # confusing ModuleNotFoundError deep in a log file.
+            'label': f'Python interpreter ({PYTHON_EXE})',
+            'ready': os.path.isfile(PYTHON_EXE),
         },
         {
             'label': 'Project manager',

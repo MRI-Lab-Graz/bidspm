@@ -144,6 +144,30 @@ class TestBidspmGuiHelpers(unittest.TestCase):
         self.assertEqual(info["trans_rot_present"], ["trans_x", "trans_y", "rot_x"])
         self.assertIn("a_comp_cor_00", info["columns"])
 
+    def test_discover_confound_info_task_filter_excludes_all_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fmriprep_dir = Path(tmp_dir)
+            confound_file = fmriprep_dir / "sub-01" / "func" / "sub-01_task-motor_desc-confounds_timeseries.tsv"
+            confound_file.parent.mkdir(parents=True, exist_ok=True)
+            confound_file.write_text("trans_x\n0\n", encoding="utf-8")
+
+            info = _discover_confound_info(fmriprep_dir, tasks_filter=["rest"])
+
+        self.assertEqual(info["sample_status"], "missing-files")
+        self.assertEqual(info["files_scanned"], 0)
+
+    def test_discover_confound_info_empty_file_reports_empty_status(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fmriprep_dir = Path(tmp_dir)
+            confound_file = fmriprep_dir / "sub-01" / "func" / "sub-01_task-motor_desc-confounds_timeseries.tsv"
+            confound_file.parent.mkdir(parents=True, exist_ok=True)
+            confound_file.write_text("", encoding="utf-8")  # no header at all
+
+            info = _discover_confound_info(fmriprep_dir)
+
+        self.assertEqual(info["sample_status"], "empty")
+        self.assertEqual(info["columns"], [])
+
     def test_discover_participants_info_handles_file_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             bids_dir = Path(tmp_dir)

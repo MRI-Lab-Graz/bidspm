@@ -7,10 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import bidspm_gui
-import web_discovery_model_api
+from webapp import web_discovery_model_api
 from bidspm_gui import app as flask_app
 from lib.project_manager import ProjectManager
-from web_execution_api import ExecutionRegistry
+from webapp.web_execution_api import ExecutionRegistry
 
 
 class TestWebRoutes(unittest.TestCase):
@@ -48,6 +48,11 @@ class TestWebRoutes(unittest.TestCase):
         text = response.get_data(as_text=True)
         self.assertIn("Manage your BIDSPM analysis projects", text)
         self.assertIn("No Projects Yet", text)
+
+    def test_footer_github_link_points_at_the_real_repository(self):
+        response = self.client.get("/projects")
+        text = response.get_data(as_text=True)
+        self.assertIn('href="https://github.com/MRI-Lab-Graz/bidspm"', text)
 
     def test_projects_page_lists_existing_project(self):
         project = self.project_manager.create_project("Demo project", description="study setup")
@@ -510,7 +515,7 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("Model file not found", response.get_json()["error"])
 
     def test_run_returns_start_failure_when_subprocess_fails(self):
-        with patch("web_execution_api.subprocess.Popen", side_effect=OSError("boom")):
+        with patch("webapp.web_execution_api.subprocess.Popen", side_effect=OSError("boom")):
             response = self.client.post(
                 "/run",
                 json={"actions": ["smooth"], "skip_validation": True},
@@ -535,8 +540,8 @@ class TestWebRoutes(unittest.TestCase):
 
         process = MagicMock(pid=4242)
         thread = MagicMock()
-        with patch("web_execution_api.subprocess.Popen", return_value=process) as mock_popen, \
-             patch("web_execution_api.threading.Thread", return_value=thread):
+        with patch("webapp.web_execution_api.subprocess.Popen", return_value=process) as mock_popen, \
+             patch("webapp.web_execution_api.threading.Thread", return_value=thread):
             response = self.client.post(
                 "/run",
                 json={
@@ -576,6 +581,14 @@ class TestWebRoutes(unittest.TestCase):
         self.assertTrue(settings_path.exists())
         self.assertEqual(json.loads(settings_path.read_text(encoding="utf-8"))["SUBJECTS"], ["01", "02"])
         thread.start.assert_called_once()
+
+        # subjects_override triggers both the base project settings write and
+        # the override-on-top write; both must be tracked so cleanup_old_executions()
+        # can later remove them (see test_execution_registry_extra.py).
+        execution_id = payload["execution_id"]
+        generated = self.execution_registry.executions[execution_id]["generated_settings_files"]
+        self.assertEqual(len(generated), 2)
+        self.assertEqual(Path(generated[-1]), settings_path)
 
     def test_stream_unknown_execution_returns_error_event(self):
         response = self.client.get("/stream/missing-execution")
@@ -629,15 +642,89 @@ class TestWebRoutes(unittest.TestCase):
             "stop_requested": False,
         }
 
-        with patch("web_execution_api.os.getpgid", return_value=5151), \
-             patch("web_execution_api.os.killpg") as mock_killpg, \
-             patch("web_execution_api.time.sleep"):
+        with patch("webapp.web_execution_api.os.getpgid", return_value=5151), \
+             patch("webapp.web_execution_api.os.killpg") as mock_killpg, \
+             patch("webapp.web_execution_api.time.sleep"):
             response = self.client.post("/stop")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["status"], "stopping")
         self.assertTrue(self.execution_registry.executions["exec-1"]["stop_requested"])
         self.assertEqual(mock_killpg.call_count, 3)
+
+    def test_stop_process_already_exited_after_sigint_skips_escalation(self):
+        log_file = Path(self.temp_dir.name) / "run.log"
+        process = MagicMock(pid=5151)
+        process.poll.side_effect = [None, 0, 0]  # running, then exited after SIGINT (checked twice)
+        self.execution_registry.current_execution_id = "exec-1"
+        self.execution_registry.executions["exec-1"] = {
+            "finished": False, "process": process, "log_file": str(log_file), "stop_requested": False,
+        }
+
+        with patch("webapp.web_execution_api.os.getpgid", return_value=5151), \
+             patch("webapp.web_execution_api.os.killpg") as mock_killpg, \
+             patch("webapp.web_execution_api.time.sleep"):
+            response = self.client.post("/stop")
+
+        self.assertEqual(response.get_json()["status"], "stopping")
+        mock_killpg.assert_called_once()  # only SIGINT, no escalation
+
+    def test_stop_swallows_process_lookup_error(self):
+        log_file = Path(self.temp_dir.name) / "run.log"
+        process = MagicMock(pid=5151)
+        process.poll.return_value = None
+        self.execution_registry.current_execution_id = "exec-1"
+        self.execution_registry.executions["exec-1"] = {
+            "finished": False, "process": process, "log_file": str(log_file), "stop_requested": False,
+        }
+
+        with patch("webapp.web_execution_api.os.getpgid", side_effect=ProcessLookupError()), \
+             patch("webapp.web_execution_api.time.sleep"):
+            response = self.client.post("/stop")
+
+        self.assertEqual(response.get_json()["status"], "stopping")
+
+    def test_stop_falls_back_to_terminate_on_unexpected_signal_error(self):
+        log_file = Path(self.temp_dir.name) / "run.log"
+        process = MagicMock(pid=5151)
+        process.poll.side_effect = [None, None]  # still running after terminate()
+        self.execution_registry.current_execution_id = "exec-1"
+        self.execution_registry.executions["exec-1"] = {
+            "finished": False, "process": process, "log_file": str(log_file), "stop_requested": False,
+        }
+
+        with patch("webapp.web_execution_api.os.getpgid", side_effect=RuntimeError("weird")), \
+             patch("webapp.web_execution_api.time.sleep"):
+            response = self.client.post("/stop")
+
+        self.assertEqual(response.get_json()["status"], "stopping")
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+
+    def test_stop_returns_500_on_unexpected_error(self):
+        self.execution_registry.current_execution_id = "exec-1"
+        self.execution_registry.executions["exec-1"] = {
+            "finished": False, "process": None, "log_file": "x",
+        }
+        # A truthy but non-callable 'process' forces .poll() to raise inside the try block.
+        self.execution_registry.executions["exec-1"]["process"] = object()
+
+        response = self.client.post("/stop")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["status"], "error")
+
+    def test_stream_log_read_error_yields_error_event(self):
+        log_file = Path(self.temp_dir.name) / "run.log"
+        log_file.write_text("line one\n", encoding="utf-8")
+        self.execution_registry.executions["exec-err"] = {
+            "log_file": str(log_file), "finished": True,
+        }
+
+        with patch("webapp.web_execution_api.open", side_effect=OSError("disk error")):
+            response = self.client.get("/stream/exec-err")
+
+        self.assertIn("Log streaming error", response.get_data(as_text=True))
 
     def test_execution_registry_helpers_cleanup_and_finalize(self):
         manager = MagicMock()

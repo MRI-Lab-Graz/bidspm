@@ -392,6 +392,8 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/stats/subject_level/specifySubLvlContrasts.m"),
         (_ov / "src" / "stats" / "subject_level" / "createAndReturnCounfoundMatFile.m",
                                      "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m"),
+        (_ov / "src" / "stats" / "subject_level" / "checkRegressorName.m",
+                                     "/home/neuro/bidspm/src/stats/subject_level/checkRegressorName.m"),
         (_ov / "src" / "workflows" / "stats" / "bidsResults.m",
                                      "/home/neuro/bidspm/src/workflows/stats/bidsResults.m"),
         (_ov / "src" / "batches" / "stats" / "setBatchEstimateModel.m",
@@ -402,10 +404,16 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/stats/utils/getRegressorIdx.m"),
         (_ov / "src" / "cli" / "cliBayesModel.m",
                                      "/home/neuro/bidspm/src/cli/cliBayesModel.m"),
+        (_ov / "src" / "cli" / "getOptionsFromCliArgument.m",
+                                     "/home/neuro/bidspm/src/cli/getOptionsFromCliArgument.m"),
         (_ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
                                      "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m"),
         (_ov / "lib" / "CPP_ROI" / "src" / "atlas" / "copyAtlasToSpmDir.m",
                                      "/home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m"),
+        (_ov / "bidspm.m",
+                                     "/home/neuro/bidspm/bidspm.m"),
+        (_ov / "src" / "bidspm" / "data" / "allowed_actions.json",
+                                     "/home/neuro/bidspm/src/bidspm/data/allowed_actions.json"),
     ]
     for local_path, container_path in _file_overrides:
         if local_path.exists():
@@ -614,6 +622,10 @@ def build_apptainer_command(
             "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m",
         ),
         (
+            _ov / "src" / "stats" / "subject_level" / "checkRegressorName.m",
+            "/home/neuro/bidspm/src/stats/subject_level/checkRegressorName.m",
+        ),
+        (
             _ov / "src" / "workflows" / "stats" / "bidsResults.m",
             "/home/neuro/bidspm/src/workflows/stats/bidsResults.m",
         ),
@@ -634,12 +646,24 @@ def build_apptainer_command(
             "/home/neuro/bidspm/src/cli/cliBayesModel.m",
         ),
         (
+            _ov / "src" / "cli" / "getOptionsFromCliArgument.m",
+            "/home/neuro/bidspm/src/cli/getOptionsFromCliArgument.m",
+        ),
+        (
             _ov / "src" / "workflows" / "stats" / "bidsModelSelection.m",
             "/home/neuro/bidspm/src/workflows/stats/bidsModelSelection.m",
         ),
         (
             _ov / "lib" / "CPP_ROI" / "src" / "atlas" / "copyAtlasToSpmDir.m",
             "/home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m",
+        ),
+        (
+            _ov / "bidspm.m",
+            "/home/neuro/bidspm/bidspm.m",
+        ),
+        (
+            _ov / "src" / "bidspm" / "data" / "allowed_actions.json",
+            "/home/neuro/bidspm/src/bidspm/data/allowed_actions.json",
         ),
     ]
     for local_path, container_path in _file_overrides:
@@ -783,12 +807,22 @@ def run_bms(
     dry_run: bool = False,
     skip_validation: bool = False,
     on_progress: Optional[Callable[[str], None]] = None,
+    bms_action: str = "bms",
 ) -> Dict[str, Any]:
     """Run Bayesian Model Selection across a directory of competing models.
 
     Container execution only -- BMS needs the MACS toolbox, which ships
     inside the bidspm container image. Local/Octave execution is not wired
     up for this action.
+
+    ``bms_action`` mirrors bidsModelSelection.m's own split-friendly actions
+    (see cliBayesModel.m): 'bms' runs all steps (model space, cvLME,
+    posterior, BMS group); 'bms-cvlme' runs just model space + cvLME for
+    ``participant_label`` -- safe to run as several parallel calls on
+    disjoint subject subsets, since it only ever writes into each subject's
+    own stats directory; 'bms-posterior' and 'bms-bms' run the remaining
+    group-level steps and must be run once, after every subject's cvLME
+    step has completed, with the full participant list.
     """
     def _log(msg: str):
         if on_progress:
@@ -832,7 +866,7 @@ def run_bms(
 
     matlab_args = [
         "'/raw'", "'/derivatives'", "'subject'",
-        "'action'", "'bms'",
+        "'action'", f"'{bms_action}'",
         "'fwhm'", str(effective_fwhm),
         "'verbosity'", str(config.VERBOSITY),
         "'models_dir'", f"'{models_dir_container_path}'",
@@ -985,7 +1019,10 @@ def check_subject_processed(
                 continue
             match = re.search(r'_node-([^_]+)$', stats_subdir.name)
             if match:
-                if expected is not None and _normalize_node_label(match.group(1)) == expected:
+                # No node_name given means the caller isn't disambiguating between
+                # competing models (e.g. the GUI's stats-coverage report checks
+                # "has this subject been processed at all") -- any named node counts.
+                if expected is None or _normalize_node_label(match.group(1)) == expected:
                     return True
             else:
                 # No _node- suffix: only matches a model whose node name is

@@ -37,7 +37,18 @@ class ExecutionRegistry:
         finished = [(execution_id, execution) for execution_id, execution in self.executions.items() if execution.get('finished')]
         finished.sort(key=lambda item: item[1].get('start_time', 0))
         to_remove = len(self.executions) - self.max_executions
-        for execution_id, _ in finished[:to_remove]:
+        for execution_id, execution in finished[:to_remove]:
+            # Each /run call may have auto-generated a run_settings_*.json
+            # scratch file (see run_bidspm() below) that otherwise
+            # accumulates forever in ~/.bidspm/config or the project's
+            # configs/ dir -- one per run, never cleaned up. Only files we
+            # generated ourselves are removed; a settings path the caller
+            # explicitly supplied is left untouched.
+            for settings_path in execution.get('generated_settings_files', []):
+                try:
+                    Path(settings_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
             del self.executions[execution_id]
 
     def execution_log_location(self, project_id: Optional[str], execution_id: str) -> tuple[Path, str]:
@@ -112,6 +123,7 @@ def register_execution_routes(
         execution_id = secrets.token_hex(8)
         execution_registry.current_project_id = project_id
         project_manager = get_project_manager()
+        generated_settings_files: list[str] = []
 
         if project_id:
             project = project_manager.load_project(project_id)
@@ -131,6 +143,7 @@ def register_execution_routes(
                     file_handle.write('\n')
 
                 data['settings'] = str(run_cfg_path)
+                generated_settings_files.append(str(run_cfg_path))
 
             if not data.get('model') and project.config.models_file:
                 data['model'] = project.config.models_file
@@ -157,6 +170,7 @@ def register_execution_routes(
                 json.dump(run_config, stream, indent=2)
                 stream.write('\n')
             data['settings'] = str(override_path)
+            generated_settings_files.append(str(override_path))
 
         model_file = data.get('model')
         if model_file and any('stats' in action.lower() for action in actions):
@@ -207,6 +221,7 @@ def register_execution_routes(
             'return_code': None,
             'stop_requested': False,
             'pid': None,
+            'generated_settings_files': generated_settings_files,
         }
         execution_registry.current_execution_id = execution_id
 

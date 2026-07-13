@@ -326,7 +326,19 @@ function checks(opt)
   % for any space value longer than one character -- i.e. always, since
   % space labels like 'MNI152NLin2009cAsym' are never scalar. unique() works
   % fine directly on the cellstr from the first call.
-  space = cellfun(@(x) x.space, inputs, 'UniformOutput', false);
+  %
+  % container v4.0.0 bug (2): x.space comes from BidsModel's JSON parsing of
+  % Input.space, which is a JSON array (e.g. ["MNI152NLin2009cAsym"]) and so
+  % is itself a cellstr, not a char -- same shape issue as x.task below. Without
+  % the same cell/char normalization applied to task just below, `space` ends
+  % up a cell array of 1x1 cellstrs and unique() throws "X must be an array or
+  % cell array of strings".
+  tmpSpace = cellfun(@(x) class(x.space), inputs, 'UniformOutput', false);
+  if all(ismember(tmpSpace, 'cell'))
+    space = cellfun(@(x) strjoin(x.space, ' '), inputs, 'UniformOutput', false);
+  else
+    space = cellfun(@(x) x.space, inputs, 'UniformOutput', false);
+  end
   if numel(unique(space)) > 1
     msg = sprintf('All models must have same space inputs.');
     id = 'differentModelSpace';

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from web_utility_stats_api import (
+from webapp.web_utility_stats_api import (
     _build_stats_subject_coverage_report,
     _extract_subject_from_path,
     _extract_task_from_name,

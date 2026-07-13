@@ -310,12 +310,12 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/transformer_builder_path_utils.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_model_selection.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_browser.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_scan_preview.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_columns.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_builder_pipeline.js', v='20260610b') }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_path_utils.js', v=static_version('js/transformer_builder_path_utils.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_model_selection.js', v=static_version('js/transformer_builder_model_selection.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_browser.js', v=static_version('js/transformer_builder_browser.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_scan_preview.js', v=static_version('js/transformer_builder_scan_preview.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_columns.js', v=static_version('js/transformer_builder_columns.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_builder_pipeline.js', v=static_version('js/transformer_builder_pipeline.js')) }}"></script>
 <script>
 (function () {
   'use strict';

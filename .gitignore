@@ -23,6 +23,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.coverage
+.pytest_cache/
 .Python
 build/
 develop-eggs/
@@ -168,6 +170,5 @@ work/
 bidspm_local/
 spm12_standalone/
 octave_packages/
-config/run_settings_e6e0e559afbd2916.json
 debug_stats_141K599V_crom.m
 bidspm_local_smooth_141T271A_crom.m
