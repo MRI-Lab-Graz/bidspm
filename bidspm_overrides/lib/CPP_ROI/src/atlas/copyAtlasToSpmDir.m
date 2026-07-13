@@ -87,7 +87,11 @@ function copyAtlasToSpmDir(varargin)
 
   end
 
-  if strcmpi(atlas, 'wang')
+  % This used to run unconditionally, racing with concurrent workers that
+  % already deleted the same shared merged source file (harmless "delete: no
+  % such file" warning, but noisy and still a symptom of the same
+  % missing-lock issue as the atlasPresent bug above).
+  if strcmpi(atlas, 'wang') && exist(sourceAtlasImage, 'file') == 2
     delete(sourceAtlasImage);
   end
 
