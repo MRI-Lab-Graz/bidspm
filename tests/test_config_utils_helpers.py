@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -5,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -21,9 +23,13 @@ from lib.utils import ensure_derivatives_dataset_description
 from lib.utils import generate_log_filename
 from lib.utils import get_container_model_path
 from lib.utils import log
+from lib.utils import log_error
 from lib.utils import run_command
 from lib.utils import run_streaming_command
 from lib.utils import validate_space_availability
+from lib.utils import validate_events_availability
+from lib.utils import log_debug
+from lib.utils import log_error_non_fatal
 
 
 class TestConfigHelpers(unittest.TestCase):
@@ -79,6 +85,89 @@ class TestConfigHelpers(unittest.TestCase):
             self.assertTrue(config.SKIP_VALIDATION)
             self.assertEqual(config.SUBJECTS, ["01"])
 
+    def test_load_config_missing_file_delegates_to_log_error(self):
+        with patch("lib.utils.log_error", side_effect=RuntimeError("missing")) as mock_log_error:
+            with self.assertRaisesRegex(RuntimeError, "missing"):
+                load_config("/no/such/config.json")
+        mock_log_error.assert_called_once()
+
+    def test_load_config_without_session_skips_selection_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps({
+                "WD": str(root / "work"),
+                "BIDS_DIR": str(root / "bids"),
+                "FMRIPREP_DIR": str(root / "fmriprep"),
+                "SPACE": "MNI152NLin2009cAsym",
+                "FWHM": 6,
+                "TASKS": ["motor"],
+            }), encoding="utf-8")
+
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                load_config(str(config_path))
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertFalse((root / "selection.json").exists())
+
+    def test_load_config_session_without_runs_omits_run_key(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps({
+                "WD": str(root / "work"),
+                "BIDS_DIR": str(root / "bids"),
+                "FMRIPREP_DIR": str(root / "fmriprep"),
+                "SPACE": "MNI152NLin2009cAsym",
+                "FWHM": 6,
+                "TASKS": ["motor"],
+                "SESSION": "01",
+            }), encoding="utf-8")
+
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                load_config(str(config_path))
+            finally:
+                os.chdir(old_cwd)
+
+            selection = json.loads((root / "selection.json").read_text(encoding="utf-8"))
+            self.assertNotIn("run", selection["bold"])
+
+    def test_load_config_selection_write_failure_is_non_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps({
+                "WD": str(root / "work"),
+                "BIDS_DIR": str(root / "bids"),
+                "FMRIPREP_DIR": str(root / "fmriprep"),
+                "SPACE": "MNI152NLin2009cAsym",
+                "FWHM": 6,
+                "TASKS": ["motor"],
+                "SESSION": "01",
+            }), encoding="utf-8")
+
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                with patch("builtins.open", side_effect=[
+                    open(config_path, "r"), OSError("disk full"),
+                ]):
+                    config = load_config(str(config_path))
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual(config.BIDS_DIR, root / "bids")
+
+    def test_load_container_config_missing_file_delegates_to_log_error(self):
+        with patch("lib.utils.log_error", side_effect=RuntimeError("missing")) as mock_log_error:
+            with self.assertRaisesRegex(RuntimeError, "missing"):
+                load_container_config("/no/such/container.json")
+        mock_log_error.assert_called_once()
+
     def test_load_container_config_supports_valid_payload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "container.json"
@@ -132,6 +221,75 @@ class TestConfigHelpers(unittest.TestCase):
 
         self.assertEqual(detected, "docker")
         self.assertIn("macOS", message)
+
+    def test_detect_platform_and_suggest_container_docker_only_on_linux(self):
+        with patch("lib.config.platform.system", return_value="Linux"), \
+             patch("lib.config.subprocess.run") as mock_run:
+            mock_run.side_effect = [MagicMock(), FileNotFoundError()]
+            detected, message = detect_platform_and_suggest_container()
+        self.assertEqual(detected, "docker")
+        self.assertIn("Docker detected on Linux", message)
+
+    def test_detect_platform_and_suggest_container_both_available_prefers_apptainer(self):
+        with patch("lib.config.platform.system", return_value="Linux"), \
+             patch("lib.config.subprocess.run") as mock_run:
+            mock_run.side_effect = [MagicMock(), MagicMock()]
+            detected, message = detect_platform_and_suggest_container()
+        self.assertEqual(detected, "apptainer")
+        self.assertIn("reproducibility", message)
+
+    def test_detect_platform_and_suggest_container_unknown_platform(self):
+        with patch("lib.config.platform.system", return_value="FreeBSD"):
+            detected, message = detect_platform_and_suggest_container()
+        self.assertEqual(detected, "docker")
+        self.assertIn("Unknown platform", message)
+
+    def test_auto_select_container_config_docker_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            containers_dir = root / "containers"
+            containers_dir.mkdir()
+            (containers_dir / "container.json").write_text(
+                json.dumps({"container_type": "docker"}), encoding="utf-8",
+            )
+
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                with patch("lib.config.detect_platform_and_suggest_container", return_value=("docker", "test")):
+                    selected = auto_select_container_config()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(selected, "containers/container.json")
+
+    def test_auto_select_container_config_returns_none_when_no_candidate_matches(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                with patch("lib.config.detect_platform_and_suggest_container", return_value=("docker", "test")):
+                    selected = auto_select_container_config()
+            finally:
+                os.chdir(old_cwd)
+        self.assertIsNone(selected)
+
+    def test_auto_select_container_config_skips_unreadable_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            containers_dir = root / "containers"
+            containers_dir.mkdir()
+            (containers_dir / "container.json").write_text("{not valid json", encoding="utf-8")
+
+            old_cwd = os.getcwd()
+            os.chdir(root)
+            try:
+                with patch("lib.config.detect_platform_and_suggest_container", return_value=("docker", "test")):
+                    selected = auto_select_container_config()
+            finally:
+                os.chdir(old_cwd)
+        self.assertIsNone(selected)
 
     def test_auto_select_container_config_uses_matching_candidate(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -219,6 +377,29 @@ class TestUtilsHelpers(unittest.TestCase):
                 check_docker_availability()
         mock_log_error.assert_called_once()
 
+    def test_log_error_logs_and_exits(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "error.log"
+            with patch("lib.utils.LOG_FILE", str(log_path)):
+                with self.assertRaises(SystemExit):
+                    log_error("boom")
+            self.assertIn("[ERROR] boom", log_path.read_text(encoding="utf-8"))
+
+    def test_check_docker_availability_handles_timeout_and_generic_exception(self):
+        with patch("lib.utils.shutil.which", return_value="/usr/bin/docker"), \
+             patch("lib.utils.subprocess.run", side_effect=__import__("subprocess").TimeoutExpired(cmd=["docker"], timeout=10)), \
+             patch("lib.utils.log_error", side_effect=SystemExit("timeout")) as mock_log_error:
+            with self.assertRaisesRegex(SystemExit, "timeout"):
+                check_docker_availability()
+        mock_log_error.assert_called_once()
+
+        with patch("lib.utils.shutil.which", return_value="/usr/bin/docker"), \
+             patch("lib.utils.subprocess.run", side_effect=RuntimeError("weird failure")), \
+             patch("lib.utils.log_error", side_effect=SystemExit("failed")) as mock_log_error:
+            with self.assertRaisesRegex(SystemExit, "failed"):
+                check_docker_availability()
+        mock_log_error.assert_called_once()
+
     def test_run_command_handles_success_and_failure_paths(self):
         with patch(
             "lib.utils.run_streaming_command",
@@ -280,6 +461,35 @@ class TestUtilsHelpers(unittest.TestCase):
             self.assertTrue(validate_space_availability(config, ["01"], "motor"))
             self.assertFalse(validate_space_availability(config, ["01", "02"], "motor"))
 
+    def test_validate_space_availability_single_subject_no_data_at_all(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fmriprep_dir = Path(tmp_dir) / "fmriprep"
+            fmriprep_dir.mkdir(parents=True)
+            config = SimpleNamespace(FMRIPREP_DIR=fmriprep_dir, SPACE="MNI152NLin2009cAsym")
+
+            self.assertFalse(validate_space_availability(config, ["01"], "motor"))
+
+    def test_validate_space_availability_multi_subject_no_data_at_all(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fmriprep_dir = Path(tmp_dir) / "fmriprep"
+            fmriprep_dir.mkdir(parents=True)
+            config = SimpleNamespace(FMRIPREP_DIR=fmriprep_dir, SPACE="MNI152NLin2009cAsym")
+
+            self.assertFalse(validate_space_availability(config, ["01", "02"], "motor"))
+
+    def test_ensure_derivatives_dataset_description_skips_when_already_present(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            derivatives_dir = Path(tmp_dir) / "derivatives"
+            derivatives_dir.mkdir()
+            desc_file = derivatives_dir / "dataset_description.json"
+            desc_file.write_text('{"Name": "Existing"}', encoding="utf-8")
+
+            ensure_derivatives_dataset_description(derivatives_dir)
+
+            self.assertEqual(
+                json.loads(desc_file.read_text(encoding="utf-8"))["Name"], "Existing",
+            )
+
     def test_ensure_derivatives_dataset_description_creates_file(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             derivatives_dir = Path(tmp_dir) / "derivatives"
@@ -310,6 +520,63 @@ class TestUtilsHelpers(unittest.TestCase):
 
             self.assertFalse(old_dir.exists())
             self.assertTrue(new_dir.exists())
+
+    def test_cleanup_tmp_directories_no_op_when_tmp_parent_missing(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = SimpleNamespace(WD=Path(tmp_dir))
+            cleanup_tmp_directories(config, max_age_hours=24)  # no "tmp" dir under WD; should not raise
+
+    def test_cleanup_tmp_directories_continues_when_rmtree_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            tmp_parent = root / "tmp"
+            old_dir = tmp_parent / "old"
+            old_dir.mkdir(parents=True)
+            stale_time = time.time() - (48 * 3600)
+            os.utime(old_dir, (stale_time, stale_time))
+
+            config = SimpleNamespace(WD=root)
+            with patch("lib.utils.shutil.rmtree", side_effect=OSError("busy")):
+                cleanup_tmp_directories(config, max_age_hours=24)  # logged, not raised
+            self.assertTrue(old_dir.exists())
+
+    def test_cleanup_tmp_directories_swallows_unexpected_errors(self):
+        config = SimpleNamespace(WD=SimpleNamespace())  # WD / "tmp" raises TypeError
+        cleanup_tmp_directories(config, max_age_hours=24)  # should not raise
+
+    def test_validate_events_availability_single_and_multi_subject_messages(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            bids_dir = root / "bids"
+            events_file = bids_dir / "sub-01" / "func" / "sub-01_task-motor_events.tsv"
+            events_file.parent.mkdir(parents=True, exist_ok=True)
+            events_file.write_text("onset\tduration\n", encoding="utf-8")
+
+            config = SimpleNamespace(BIDS_DIR=bids_dir)
+
+            self.assertTrue(validate_events_availability(config, ["01"], "motor"))
+            self.assertFalse(validate_events_availability(config, ["02"], "motor"))
+            self.assertFalse(validate_events_availability(config, ["01", "02"], "motor"))
+
+    def test_log_debug_writes_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "debug.log"
+            with patch("lib.utils.LOG_FILE", str(log_path)), patch("lib.utils.DEBUG", True):
+                log_debug("hello debug")
+            self.assertIn("[DEBUG] hello debug", log_path.read_text(encoding="utf-8"))
+
+    def test_log_debug_silent_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "debug.log"
+            with patch("lib.utils.LOG_FILE", str(log_path)), patch("lib.utils.DEBUG", False):
+                log_debug("should not appear")
+            self.assertFalse(log_path.exists())
+
+    def test_log_error_non_fatal_prints_warning(self):
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            log_error_non_fatal("careful")
+        self.assertIn("careful", buf.getvalue())
 
     def test_get_container_model_path_prefers_derivatives_relative_path(self):
         derivatives_dir = Path("/tmp/derivatives")

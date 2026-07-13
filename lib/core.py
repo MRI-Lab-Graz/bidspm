@@ -392,6 +392,8 @@ def build_docker_command(
                                      "/home/neuro/bidspm/src/stats/subject_level/specifySubLvlContrasts.m"),
         (_ov / "src" / "stats" / "subject_level" / "createAndReturnCounfoundMatFile.m",
                                      "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m"),
+        (_ov / "src" / "stats" / "subject_level" / "checkRegressorName.m",
+                                     "/home/neuro/bidspm/src/stats/subject_level/checkRegressorName.m"),
         (_ov / "src" / "workflows" / "stats" / "bidsResults.m",
                                      "/home/neuro/bidspm/src/workflows/stats/bidsResults.m"),
         (_ov / "src" / "batches" / "stats" / "setBatchEstimateModel.m",
@@ -612,6 +614,10 @@ def build_apptainer_command(
         (
             _ov / "src" / "stats" / "subject_level" / "createAndReturnCounfoundMatFile.m",
             "/home/neuro/bidspm/src/stats/subject_level/createAndReturnCounfoundMatFile.m",
+        ),
+        (
+            _ov / "src" / "stats" / "subject_level" / "checkRegressorName.m",
+            "/home/neuro/bidspm/src/stats/subject_level/checkRegressorName.m",
         ),
         (
             _ov / "src" / "workflows" / "stats" / "bidsResults.m",
@@ -985,7 +991,10 @@ def check_subject_processed(
                 continue
             match = re.search(r'_node-([^_]+)$', stats_subdir.name)
             if match:
-                if expected is not None and _normalize_node_label(match.group(1)) == expected:
+                # No node_name given means the caller isn't disambiguating between
+                # competing models (e.g. the GUI's stats-coverage report checks
+                # "has this subject been processed at all") -- any named node counts.
+                if expected is None or _normalize_node_label(match.group(1)) == expected:
                     return True
             else:
                 # No _node- suffix: only matches a model whose node name is

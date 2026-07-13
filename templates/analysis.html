@@ -637,21 +637,21 @@
 {% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css', v='20260609a') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css', v=static_version('css/analysis.css')) }}">
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v='20260616a') }}"></script>
-<script src="{{ url_for('static', filename='js/transformer_model_x_domains.js', v='20260622a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v='20260616b') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v='20260616b') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_model_hints.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_browser.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v='20260609a') }}"></script>
-<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v='20260610a') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_launch.js', v='20260619a') }}"></script>
-<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v='20260619a') }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_schema.js', v=static_version('js/analysis_model_schema.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/transformer_model_x_domains.js', v=static_version('js/transformer_model_x_domains.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v=static_version('js/analysis_model_mutations.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_presets.js', v=static_version('js/analysis_model_presets.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_model_hints.js', v=static_version('js/analysis_model_hints.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_browser.js', v=static_version('js/analysis_browser.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_contrast_builder.js', v=static_version('js/analysis_contrast_builder.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_preview_validation.js', v=static_version('js/analysis_preview_validation.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/analysis_node_panels.js', v=static_version('js/analysis_node_panels.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_launch.js', v=static_version('js/model_editor_launch.js')) }}"></script>
+<script src="{{ url_for('static', filename='js/model_editor_transformer_payload.js', v=static_version('js/model_editor_transformer_payload.js')) }}"></script>
 <script>
     // Project context
     const currentProjectId = '{{ current_project_id or "" }}';

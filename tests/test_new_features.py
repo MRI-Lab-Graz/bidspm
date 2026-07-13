@@ -182,10 +182,11 @@ class TestNewFeatures(unittest.TestCase):
         labels = [check["label"] for check in checks]
         by_label = {check["label"]: check["ready"] for check in checks}
 
+        self.assertEqual(labels[0], "Core pipeline")
+        self.assertTrue(labels[1].startswith("Python interpreter ("))
         self.assertEqual(
-            labels,
+            labels[2:],
             [
-                "Core pipeline",
                 "Project manager",
                 "Templates",
                 "Static assets",

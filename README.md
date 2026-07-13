@@ -154,13 +154,12 @@ pip install -e .
 
 ### Option 2: With setup script (cross-platform)
 
-The included setup script automatically creates a virtual environment using UV and installs all dependencies:
+The included setup script automatically creates a virtual environment (`.bidspm/`) using UV and installs all dependencies:
 
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
-chmod +x setup.sh
-./setup.sh
+./scripts/setup.sh
 ```
 
 Then activate the environment:
@@ -168,6 +167,19 @@ Then activate the environment:
 ```bash
 source ./scripts/activate_bidspm.sh
 ```
+
+**Environment already set up but broken?** `scripts/setup.sh` writes an
+`.install.lock` file after a successful run and skips re-running by default —
+so if the `.bidspm` venv later breaks (e.g. its Python interpreter was a
+symlink into a system Python that got moved/reinstalled), a plain re-run of
+`./scripts/setup.sh` is a silent no-op. Rebuild it with:
+
+```bash
+./scripts/setup.sh --force
+```
+
+Alternatively, point the GUI/CLI at any working interpreter directly without
+touching the venv, via `BIDSPM_PYTHON=/path/to/python python bidspm_gui.py`.
 
 ### Option 3: Manual installation
 
