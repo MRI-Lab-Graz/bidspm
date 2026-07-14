@@ -70,9 +70,15 @@ MANIFEST
 run_bidspm.log
 model_*.log
 
-# Configuration files (keep examples but ignore actual configs)
-config.json
-container.json
+# Configuration files (keep examples but ignore actual configs).
+# Anchored to repo root (not "config.json"/"container.json" bare, which
+# would also match containers/container.json -- that one's a portable,
+# non-machine-specific default and should stay tracked).
+/config.json
+/container.json
+# setup.sh-generated copy of container.json or container_apptainer.json --
+# not meant to be hand-maintained or committed.
+containers/container_active.json
 # Keep example configs
 !*_example.json
 !example_*.json

@@ -1,0 +1,5 @@
+{
+  "container_type": "docker",
+  "docker_image": "bidspm/bidspm:latest",
+  "apptainer_image": ""
+}

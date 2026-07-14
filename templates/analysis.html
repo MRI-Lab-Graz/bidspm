@@ -328,7 +328,7 @@
                         <div class="{% if project and project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/data/local/container/bidspm/bidspm_4.0.0.sif' }}">
+                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/path/to/your/bidspm.sif' }}">
                                 <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
                             </div>
                         </div>
@@ -3053,7 +3053,7 @@
                 VERBOSITY: config.VERBOSITY || 2,
                 container_type: config.container_type || 'apptainer',
                 docker_image: config.docker_image || 'bidspm/bidspm:latest',
-                apptainer_image: config.apptainer_image || '/data/local/container/bidspm/bidspm_4.0.0.sif'
+                apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif'
             };
             
             await syncInternalToForm();
@@ -3081,7 +3081,7 @@
             verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
             container_type: unifiedStudyConfig.container_type || 'apptainer',
             docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
-            apptainer_image: unifiedStudyConfig.apptainer_image || '/data/local/container/bidspm/bidspm_4.0.0.sif',
+            apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
             actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
             pilot: document.getElementById('pilot').checked,
             skip_validation: true

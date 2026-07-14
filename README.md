@@ -23,66 +23,26 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 
 ## Repository layout
 
-- `bidspm.py` – primary entry point for all local and container workflows
-- `scripts/` – helper utilities (environment activation, legacy runner, wrapper scripts)
-- `octave/` – Octave startup files consumed by the Python CLI and shell helpers
+- `bidspm.py` – primary entry point for all container workflows
+- `bidspm_overrides/` – locally-patched upstream bidspm files, baked into the Docker
+  image at build time (see `bidspm_overrides/README.md` for what's patched and why)
+- `containers/dockerfile/` – the Dockerfile and build scripts for the bidspm image
+- `scripts/` – helper utilities (environment activation, setup, wrapper scripts)
 - `logs/` – auto-generated run logs (e.g., `run_bidspm.log`, `model_*_timestamp.log`)
 - `tests/` – automated tests for API and feature behavior
 - `docs/repository_notes.md` – engineering notes (OO direction and test policy)
 
-## ⚠️ Known Issues and Solutions
+## ⚠️ Known Issues
 
-### 🗺️ Atlas Initialization Error
-
-You may encounter this error when using BIDSPM containers:
-
-```bash
-'returnAtlasDir' undefined near line 88, column 88
-Error Octave:undefined-function occurred:
-  - Error in copyAtlasToSpmDir>prepareFiles
-    line 88 in /home/neuro/bidspm/lib/CPP_ROI/src/atlas/copyAtlasToSpmDir.m
-```
-
-**Cause**: This is a bug in the BIDSPM container where the `returnAtlasDir` function from CPP_ROI is not properly accessible due to MATLAB path configuration issues.
-
-**Solutions**:
-
-1. **Use Specific Version** (Recommended):
-
-   ```bash
-   # Edit your container configuration to use a specific working version
-   "apptainer_image": "docker://cpplab/bidspm:4.0.0"  # instead of latest
-   ```
-
-2. **Skip Atlas Initialization**:
-
-   ```bash
-   # The tool automatically sets this environment variable
-   BIDSPM_SKIP_ATLAS_INIT=1
-   ```
-
-3. **Test Different Versions**:
-
-   Try different container versions to find one that works:
-   ```bash
-   # Edit container.json to test different versions
-   "docker_image": "cpplab/bidspm:4.0.0"
-   ```
-
-4. **Manual Path Configuration**:
-
-   If issues persist, the tool automatically configures enhanced MATLAB paths to work around this issue.
-
-### 🔧 Enhanced MATLAB Path Configuration
-
-The tool automatically configures the MATLAB path to include:
-
-- `/home/neuro/bidspm` (main BIDSPM directory)
-- `/home/neuro/bidspm/lib/CPP_ROI` (CPP_ROI library)
-- `/home/neuro/bidspm/lib/CPP_ROI/atlas` (atlas functions including returnAtlasDir)
-- `/opt/spm12` (SPM12 installation)
-
-This ensures that all required functions are accessible within the container.
+Older versions of this tool patched the running container at runtime (bind-mounting
+fixes over its files) and worked around a `returnAtlasDir` atlas-initialization bug
+with a `BIDSPM_SKIP_ATLAS_INIT` environment variable. Both are now fixed properly:
+the patches are baked into the Docker image at build time (see
+`bidspm_overrides/README.md`), and the atlas-init bug is fixed at the source
+(`copyAtlasToSpmDir.m`) rather than worked around. If you still hit a
+`'returnAtlasDir' undefined` error, rebuild the image
+(`docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .`
+from the repo root) to pick up the latest overrides.
 
 ## 🌍 Multi-Platform Support
 
@@ -315,25 +275,6 @@ Log files are automatically generated with timestamps and model names for easy t
 - Example: `model_task1_20250721_143022.log`
 - Stored in the `logs/` directory (created automatically)
 - Contains detailed debug information and processing logs
-
-### Local Octave/SPM execution (no containers)
-
-Use the locally installed BIDSPM + Octave stack when you want to avoid containers (e.g., HPC nodes without Docker):
-
-1. Activate the environment to populate the required Octave/SPM paths and environment variables:
-  ```bash
-  source ./scripts/activate_bidspm.sh
-  ```
-2. Run the pipeline in pilot mode to process a single random subject:
-  ```bash
-  python bidspm.py --local --pilot --action smooth --settings config/config_local_107.json
-  ```
-3. To preview the generated SPM batches without executing them, append `--dry_run` to the direct CLI call:
-  ```bash
-  .bidspm/bin/bidspm /data/local/107_JM01/rawdata /data/local/107_JM01/derivatives subject smooth \
-    --participant_label 107BFJM011019 --task pa --space MNI152NLin2009cAsym --fwhm 8 --verbosity 3 --dry_run
-  ```
-4. Drop `--pilot` and `--dry_run` when you're ready for full execution. Log output for these runs is stored under `logs/`.
 
 ### Advanced examples
 

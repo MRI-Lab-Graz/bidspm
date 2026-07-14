@@ -56,9 +56,9 @@ class ProjectConfig:
     verbosity: int = 2
     
     # Container settings
-    container_type: str = "apptainer"  # local, docker, apptainer
+    container_type: str = "docker"  # docker, apptainer
     docker_image: str = "bidspm/bidspm:latest"
-    apptainer_image: str = "/data/local/container/bidspm/bidspm_4.0.0.sif"
+    apptainer_image: str = ""
     
     # Execution options
     actions: List[str] = field(default_factory=lambda: ["smooth", "stats"])

@@ -1,0 +1,11 @@
+{
+  "WD": "/path/to/your/study",
+  "BIDS_DIR": "/path/to/your/study/rawdata",
+  "DERIVATIVES_DIR": "/path/to/your/study/derivatives",
+  "FMRIPREP_DIR": "/path/to/your/study/derivatives/fmriprep",
+  "SPACE": "MNI152NLin2009cAsym",
+  "FWHM": 8,
+  "MODELS_FILE": "/path/to/your/study/code/models/model.json",
+  "TASKS": ["task_name"],
+  "VERBOSITY": 3
+}
