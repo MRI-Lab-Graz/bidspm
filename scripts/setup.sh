@@ -294,7 +294,13 @@ install_dependencies() {
     # Install dependencies from requirements.txt using UV with the virtual environment
     if [ -f "requirements.txt" ]; then
         print_status "Installing dependencies from requirements.txt..."
-        ./build/uv pip install --python .bidspm/bin/python -r requirements.txt
+        # main() runs inside `if main "$@"; then`, which suspends `set -e` for
+        # its entire call tree -- check the exit status explicitly instead of
+        # relying on errexit, or a failed install here is silently ignored.
+        if ! ./build/uv pip install --python .bidspm/bin/python -r requirements.txt; then
+            print_error "Failed to install Python dependencies from requirements.txt"
+            exit 1
+        fi
         print_success "Dependencies installed successfully"
     else
         print_error "requirements.txt not found in current directory"
