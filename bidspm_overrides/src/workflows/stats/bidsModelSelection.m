@@ -157,7 +157,25 @@ function matlabbatch = bidsModelSelection(varargin)
       opt.orderBatches.MACS_BMS_group_auto = 2;
   end
 
-  opt.dir.output = fullfile(opt.dir.stats, 'derivatives', 'bidspm-modelSelection');
+  % Race condition fix: batch_MA_cvLME_auto's run_module does
+  % `load(job.MS_mat{1})` -- MS_mat is a *file path* (group/MS.mat), not an
+  % in-memory struct, so step 2 (cvLME) re-reads step 1's (model space)
+  % output from disk. When several 'cvlme'-only calls run concurrently on
+  % disjoint subject subsets (the documented way to parallelize this step),
+  % they all write/read the SAME shared group/MS.mat path, so one worker's
+  % step-1 write can land in the gap between another worker's own step-1
+  % write and its step-2 read, silently swapping in the wrong subject list
+  % for that worker's cvLME computation. Give each concurrent worker its
+  % own isolated output dir via an env var so they never collide; leave the
+  % canonical shared dir alone for 'posterior'/'bms', which must run once,
+  % alone, over the full subject list to produce the real group result.
+  workerId = getenv('BIDSPM_BMS_WORKER_ID');
+  if ~isempty(workerId) && strcmpi(action, 'cvlme')
+    opt.dir.output = fullfile(opt.dir.stats, 'derivatives', ...
+                               ['bidspm-modelSelection-worker-' workerId]);
+  else
+    opt.dir.output = fullfile(opt.dir.stats, 'derivatives', 'bidspm-modelSelection');
+  end
   opt.dir.jobs = fullfile(opt.dir.output, 'jobs');
 
   spm_mkdir(fullfile(opt.dir.output, 'group'));
