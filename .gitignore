@@ -1,3 +1,7 @@
+# Runtime marker written by scripts/setup.sh -- must never be committed, or
+# a fresh clone inherits this machine's lock and setup.sh silently no-ops.
+.install.lock
+
 # Python environments
 config/
 .bidspm/
