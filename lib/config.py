@@ -23,7 +23,7 @@ class Config:
     ROI: Optional[bool] = None
     ROI_CONFIG: Optional[dict] = None
     SKIP_VALIDATION: Optional[bool] = False
-    CONTAINER_TYPE: Optional[str] = "local"
+    CONTAINER_TYPE: Optional[str] = "docker"
     LOCAL_ACTION_TIMEOUT_SECONDS: int = 900  # kept as generic fallback
     SMOOTH_TIMEOUT_SECONDS: int = 900
     STATS_TIMEOUT_SECONDS: int = 300
@@ -73,7 +73,7 @@ def load_config(config_file: str) -> Config:
     derivatives_dir = Path(derivatives_raw) if derivatives_raw else wd
     fmriprep_dir = Path(data["FMRIPREP_DIR"])
     verbosity = data.get("VERBOSITY", 3)
-    container_type = str(data.get("container_type", "local")).lower()
+    container_type = str(data.get("container_type", "docker")).lower()
     local_action_timeout_seconds = int(data.get("LOCAL_ACTION_TIMEOUT_SECONDS", 900))
     smooth_timeout = int(data.get("SMOOTH_TIMEOUT_SECONDS", local_action_timeout_seconds))
     stats_timeout = int(data.get("STATS_TIMEOUT_SECONDS", 300))

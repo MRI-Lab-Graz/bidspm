@@ -105,7 +105,7 @@ class TestLoadContainerFileDefaults(unittest.TestCase):
                 "/load_container_file", query_string={"path": str(Path(tmp) / "missing.json")},
             )
         payload = response.get_json()
-        self.assertEqual(payload["container_type"], "apptainer")
+        self.assertEqual(payload["container_type"], "docker")
         self.assertIn("apptainer_image", payload)
 
 

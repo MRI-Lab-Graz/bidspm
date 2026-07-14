@@ -30,7 +30,7 @@ def _make_config(root: Path, fwhm=6.0) -> Config:
         FMRIPREP_DIR=fmriprep_dir,
         VERBOSITY=2,
         SUBJECTS=["01"],
-        CONTAINER_TYPE="local",
+        CONTAINER_TYPE="docker",
     )
 
 

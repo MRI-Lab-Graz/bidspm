@@ -11,8 +11,6 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Flask, jsonify, request
 
 from lib import (
-    check_feature_availability,
-    detect_matlab_environment,
     discover_spaces,
     discover_subjects,
     discover_tasks,
@@ -772,22 +770,6 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
 
     @app.route('/check_environment')
     def api_check_environment():
-        use_local = request.args.get('local', 'false').lower() == 'true'
-        if use_local:
-            capabilities = detect_matlab_environment()
-            features = check_feature_availability(capabilities, using_container=False)
-            return jsonify({
-                'environment': capabilities.to_dict(),
-                'features': {
-                    'smooth': features.smooth,
-                    'stats_subject': features.stats_subject,
-                    'stats_dataset': features.stats_dataset,
-                    'roi_analysis': features.roi_analysis,
-                    'custom_contrasts': features.custom_contrasts,
-                },
-                'unavailable_reasons': features.unavailable_reasons,
-            })
-
         import shutil
 
         docker = shutil.which('docker') is not None

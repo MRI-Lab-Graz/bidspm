@@ -26,7 +26,7 @@
       "type": "array",
       "items": {"type": "string"}
     },
-    "container_type": {"type": "string", "enum": ["docker", "apptainer", "local"]},
+    "container_type": {"type": "string", "enum": ["docker", "apptainer"]},
     "skip_validation": {"type": "boolean"},
     "docker_image": {"type": "string"},
     "apptainer_image": {"type": "string"},

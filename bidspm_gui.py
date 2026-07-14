@@ -19,7 +19,6 @@ Structure aligned with bids_apps_runner:
 It does NOT handle:
 - Model validation logic (use lib.core.validate_bids_model)
 - Pipeline execution logic (use lib.core.Pipeline)
-- MATLAB detection (use lib.core.detect_matlab_environment)
 """
 
 import os
@@ -45,7 +44,6 @@ from waitress import serve
 # Import all business logic from core
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
-    detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, discover_spaces,
     check_subject_processed,
     validate_bids_model, estimate_processing_time,

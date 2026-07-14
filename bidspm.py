@@ -13,7 +13,6 @@ from typing import List, Optional
 
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
-    detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, estimate_processing_time,
     log_debug, run_bms
 )
@@ -32,8 +31,8 @@ def show_help():
 🧠 BIDSPM Runner - BIDS-StatsModel Pipeline Tool
 
 DESCRIPTION:
-    A Python wrapper for running BIDS-StatsModel statistical pipelines using 
-    containerized BIDSPM or local MATLAB/Octave. This tool manages the entire 
+    A Python wrapper for running BIDS-StatsModel statistical pipelines using
+    containerized BIDSPM (Docker or Apptainer). This tool manages the entire
     pipeline from smoothing preprocessed data to running statistical analyses.
 
 USAGE:
@@ -59,13 +58,11 @@ OPTIONAL ARGUMENTS:
     --pilot              Test mode: process only one random subject
     --skip-modelvalidation
                          Skip validation of BIDS-StatsModel JSON
-    --local              Use local BIDSPM installation instead of containers
     --smooth-backend     Smoothing implementation: "fast" (default, parallel
                          nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)
     --stats-workers      Number of subjects to process concurrently for
-                         smooth/stats (container or local MATLAB/Octave).
-                         Default 4. Set to 1 to disable parallelism (e.g.
-                         for single-seat MATLAB licenses).
+                         smooth/stats. Default 4. Set to 1 to disable
+                         parallelism (e.g. for limited container concurrency).
     --force              Force reprocessing even if output already exists
     --dry-run            Show commands without executing them
     --debug              Enable debug output
@@ -97,20 +94,6 @@ EXAMPLES:
     
     # Estimate time for full run
     python bidspm.py --action smooth stats --estimate-time
-    
-    # Use local MATLAB/Octave
-    python bidspm.py --local --action smooth
-
-ENVIRONMENT DETECTION:
-    Local execution (--local) automatically detects:
-    • Licensed MATLAB (full features)
-    • GNU Octave (most features)
-    • SPM12 Standalone (limited features - compiled only)
-    
-    Standalone limitations:
-    • Cannot run custom scripts
-    • ROI analysis may not work
-    • Some statistical models unsupported
 
 MORE INFORMATION:
     • GitHub: https://github.com/MRI-Lab-Graz/bidspm
@@ -156,16 +139,13 @@ def parse_arguments():
                        help='Process only one random subject')
     parser.add_argument('--skip-modelvalidation', action='store_true',
                        help='Skip BIDS-StatsModel validation')
-    parser.add_argument('--local', action='store_true',
-                       help='Use local MATLAB/Octave instead of containers')
     parser.add_argument('--smooth-backend', choices=['spm', 'fast'], default='fast',
                        help='Smoothing implementation: "fast" (default, parallel '
                             'nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)')
     parser.add_argument('--stats-workers', type=int, default=4,
-                       help='Number of subjects to process concurrently for smooth/stats '
-                            '(container or local MATLAB/Octave). Default 4. Set to 1 to '
-                            'disable parallelism (e.g. for single-seat MATLAB licenses or '
-                            'limited container concurrency).')
+                       help='Number of subjects to process concurrently for smooth/stats. '
+                            'Default 4. Set to 1 to disable parallelism (e.g. for limited '
+                            'container concurrency).')
     parser.add_argument('--force', action='store_true',
                        help='Force reprocessing of existing outputs')
     parser.add_argument('--dry-run', action='store_true',
@@ -181,7 +161,7 @@ def parse_arguments():
     parser.add_argument('--estimate-time', action='store_true',
                        help='Estimate processing time and exit')
     parser.add_argument('--check-environment', action='store_true',
-                       help='Check MATLAB/container environment and exit')
+                       help='Check container environment and exit')
     
     return parser.parse_args()
 
@@ -247,67 +227,39 @@ def handle_estimate_time(config_file: str, actions: list):
     sys.exit(0)
 
 
-def handle_check_environment(use_local: bool):
-    """Check and display environment capabilities."""
+def handle_check_environment():
+    """Check and display container environment capabilities."""
     print("\n🔍 Environment Check")
     print("=" * 50)
-    
-    if use_local:
-        caps = detect_matlab_environment()
-        
-        print(f"\n  Environment: {caps.environment.value}")
-        if caps.path:
-            print(f"  Path: {caps.path}")
-        if caps.version:
-            print(f"  Version: {caps.version}")
-        
-        print("\n  Capabilities:")
-        print(f"    Run scripts: {'✅' if caps.can_run_arbitrary_scripts else '❌'}")
-        print(f"    Compile MEX: {'✅' if caps.can_compile_mex else '❌'}")
-        print(f"    Toolboxes: {'✅' if caps.can_use_toolboxes else '❌'}")
-        print(f"    Parallel: {'✅' if caps.can_use_parallel else '❌'}")
-        
-        if caps.limitations:
-            print("\n  ⚠️  Limitations:")
-            for limit in caps.limitations:
-                print(f"    • {limit}")
-        
-        features = check_feature_availability(caps, using_container=False)
-        print("\n  Feature Availability:")
-        print(f"    Smooth: {'✅' if features.smooth else '❌'}")
-        print(f"    Stats (subject): {'✅' if features.stats_subject else '❌'}")
-        print(f"    Stats (dataset): {'✅' if features.stats_dataset else '❌'}")
-        print(f"    ROI Analysis: {'✅' if features.roi_analysis else '❌'}")
+
+    import shutil
+    import subprocess
+
+    docker = shutil.which("docker")
+    apptainer = shutil.which("apptainer")
+
+    print("\n  Container Runtimes:")
+
+    if docker:
+        try:
+            result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                print("    Docker: ✅ Available and running")
+            else:
+                print("    Docker: ⚠️  Installed but not running")
+        except:
+            print("    Docker: ⚠️  Installed but check failed")
     else:
-        # Container check
-        import shutil
-        import subprocess
-        
-        docker = shutil.which("docker")
-        apptainer = shutil.which("apptainer")
-        
-        print("\n  Container Runtimes:")
-        
-        if docker:
-            try:
-                result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
-                if result.returncode == 0:
-                    print("    Docker: ✅ Available and running")
-                else:
-                    print("    Docker: ⚠️  Installed but not running")
-            except:
-                print("    Docker: ⚠️  Installed but check failed")
-        else:
-            print("    Docker: ❌ Not found")
-        
-        if apptainer:
-            print("    Apptainer: ✅ Available")
-        else:
-            print("    Apptainer: ❌ Not found")
-        
-        if docker or apptainer:
-            print("\n  All features available via container execution")
-    
+        print("    Docker: ❌ Not found")
+
+    if apptainer:
+        print("    Apptainer: ✅ Available")
+    else:
+        print("    Apptainer: ❌ Not found")
+
+    if docker or apptainer:
+        print("\n  All features available via container execution")
+
     print()
     sys.exit(0)
 
@@ -409,7 +361,7 @@ def main():
         handle_list_tasks(config_file)
     
     if args.check_environment:
-        handle_check_environment(args.local)
+        handle_check_environment()
     
     if args.estimate_time:
         if not args.action:
@@ -449,7 +401,6 @@ def main():
         node_name=args.node_name,
         pilot=args.pilot,
         skip_validation=args.skip_modelvalidation,
-        local=args.local,
         smooth_backend=args.smooth_backend,
         stats_workers=args.stats_workers,
         force=args.force,

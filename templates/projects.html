@@ -75,7 +75,7 @@
                                 <span title="{{ project.config.output_folder }}">{{ project.config.output_folder | truncate(40) }}</span>
                             </div>
                             {% endif %}
-                            {% if project.config.container_type and project.config.container_type != 'local' %}
+                            {% if project.config.container_type %}
                             <div class="mb-1">
                                 <i class="fas fa-box me-1 text-info"></i>
                                 {{ project.config.container_type | capitalize }}
@@ -227,14 +227,13 @@
                         <div class="col-md-4">
                             <label class="form-label">Container Type</label>
                             <select class="form-select" id="project-container-type">
-                                <option value="local">Local (No Container)</option>
                                 <option value="apptainer" selected>Apptainer</option>
                                 <option value="docker">Docker</option>
                             </select>
                         </div>
                         <div class="col-md-8">
                             <label for="project-container-image" class="form-label">Container Image</label>
-                            <input type="text" class="form-control" id="project-container-image" placeholder="Path to .sif or Docker image name" value="/data/local/container/bidspm/bidspm_4.0.0.sif">
+                            <input type="text" class="form-control" id="project-container-image" placeholder="Path to .sif or Docker image name">
                             <small class="text-muted">Apptainer: path to .sif file | Docker: image name</small>
                         </div>
                     </div>
@@ -327,7 +326,6 @@
                         <div class="col-md-4">
                             <label class="form-label">Container Type</label>
                             <select class="form-select" id="edit-container-type">
-                                <option value="local">Local (No Container)</option>
                                 <option value="apptainer">Apptainer</option>
                                 <option value="docker">Docker</option>
                             </select>
@@ -583,25 +581,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Container type toggle for new project
     document.getElementById('project-container-type')?.addEventListener('change', function() {
         const imageInput = document.getElementById('project-container-image');
-        if (this.value === 'local') {
-            imageInput.disabled = true;
-            imageInput.value = '';
-        } else {
-            imageInput.disabled = false;
-            imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
-        }
+        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
     });
-    
+
     // Container type toggle for edit project
     document.getElementById('edit-container-type')?.addEventListener('change', function() {
         const imageInput = document.getElementById('edit-container-image');
-        if (this.value === 'local') {
-            imageInput.disabled = true;
-            imageInput.value = '';
-        } else {
-            imageInput.disabled = false;
-            imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
-        }
+        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
     });
     
     // =============================================================================
@@ -799,10 +785,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('edit-space').value = config.space || 'MNI152NLin2009cAsym';
                 document.getElementById('edit-container-type').value = config.container_type || 'apptainer';
                 
-                const containerImage = config.container_type === 'apptainer' ? config.apptainer_image : 
+                const containerImage = config.container_type === 'apptainer' ? config.apptainer_image :
                                        config.container_type === 'docker' ? config.docker_image : '';
                 document.getElementById('edit-container-image').value = containerImage || '';
-                document.getElementById('edit-container-image').disabled = config.container_type === 'local';
                 
                 new bootstrap.Modal(document.getElementById('editProjectModal')).show();
             } catch (error) {

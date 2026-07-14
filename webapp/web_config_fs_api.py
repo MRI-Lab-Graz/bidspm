@@ -22,17 +22,17 @@ def _default_config_payload() -> dict:
         'MODELS_FILE': '',
         'TASKS': [],
         'VERBOSITY': 3,
-        'container_type': 'apptainer',
-        'docker_image': '',
-        'apptainer_image': '/data/local/container/bidspm/bidspm_4.0.0.sif',
+        'container_type': 'docker',
+        'docker_image': 'bidspm/bidspm:latest',
+        'apptainer_image': '',
     }
 
 
 def _default_container_payload() -> dict:
     return {
-        'container_type': 'apptainer',
-        'docker_image': '',
-        'apptainer_image': '/data/local/container/bidspm/bidspm_4.0.0.sif',
+        'container_type': 'docker',
+        'docker_image': 'bidspm/bidspm:latest',
+        'apptainer_image': '',
     }
 
 

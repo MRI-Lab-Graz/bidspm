@@ -240,7 +240,7 @@ class TestWebRoutes(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["SPACE"], "MNI152NLin2009cAsym")
         self.assertEqual(payload["TASKS"], [])
-        self.assertEqual(payload["container_type"], "apptainer")
+        self.assertEqual(payload["container_type"], "docker")
 
     def test_load_config_file_reads_existing_json(self):
         config_path = Path(self.temp_dir.name) / "saved.json"
@@ -551,7 +551,6 @@ class TestWebRoutes(unittest.TestCase):
                     "node_name": "dataset_level",
                     "pilot": True,
                     "skip_validation": True,
-                    "local": True,
                     "force": True,
                     "stats_workers": 3,
                 },
@@ -571,7 +570,6 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("dataset_level", called_command)
         self.assertIn("--pilot", called_command)
         self.assertIn("--skip-modelvalidation", called_command)
-        self.assertIn("--local", called_command)
         self.assertIn("--force", called_command)
         self.assertIn("--settings", called_command)
         self.assertIn("--stats-workers", called_command)

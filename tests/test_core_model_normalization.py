@@ -19,7 +19,7 @@ def _make_config(root: Path) -> Config:
         TASKS=["motor"],
         FMRIPREP_DIR=root / "fmriprep",
         VERBOSITY=2,
-        CONTAINER_TYPE="local",
+        CONTAINER_TYPE="docker",
     )
 
 

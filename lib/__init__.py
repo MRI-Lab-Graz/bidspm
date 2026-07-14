@@ -16,8 +16,6 @@ from .utils import (
 )
 from .core import (
     Pipeline, PipelineOptions, PipelineResult,
-    MatlabEnvironment, MatlabCapabilities,
-    detect_matlab_environment, check_feature_availability,
     discover_subjects, discover_tasks, discover_spaces,
     check_subject_processed,
     validate_bids_model, estimate_processing_time,
@@ -36,8 +34,6 @@ __all__ = [
     'generate_log_filename', 'check_command', 'run_command',
     # Core
     'Pipeline', 'PipelineOptions', 'PipelineResult',
-    'MatlabEnvironment', 'MatlabCapabilities',
-    'detect_matlab_environment', 'check_feature_availability',
     'discover_subjects', 'discover_tasks', 'discover_spaces',
     'check_subject_processed',
     'validate_bids_model', 'estimate_processing_time',

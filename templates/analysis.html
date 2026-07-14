@@ -316,10 +316,6 @@
                                 <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if not project or project.config.container_type == 'apptainer' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-apptainer">Apptainer</label>
                             </div>
-                            <div class="form-check d-flex align-items-center gap-2">
-                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-local" value="local" {% if project and project.config.container_type == 'local' %}checked{% endif %}>
-                                <label class="form-check-label" for="type-local">Local (No Container)</label>
-                            </div>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -2968,14 +2964,12 @@
     // --- FORM DATA HANDLERS ---
     function getFullFormData() {
         const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
-        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'apptainer';
         return {
             actions: actions,
             pilot: document.getElementById('pilot').checked,
             force: document.getElementById('force').checked,
             skip_validation: document.getElementById('skip_validation').checked,
             stats_workers: Number(document.getElementById('stats_workers')?.value) || 4,
-            local: containerType === 'local',
             project_id: currentProjectId || null,
             config_folder: hasProject ? null : document.getElementById('config-folder')?.value,
             study_filename: hasProject ? null : document.getElementById('study-filename')?.value,
@@ -3011,14 +3005,6 @@
         if (data.study_content) {
             unifiedStudyConfig = data.study_content;
             await syncInternalToForm();
-        }
-
-        if (data.local) {
-             const rb = document.getElementById('type-local');
-             if (rb) {
-                 rb.checked = true;
-                 rb.dispatchEvent(new Event('change'));
-             }
         }
     }
 

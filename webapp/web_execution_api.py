@@ -198,8 +198,6 @@ def register_execution_routes(
             command.append('--pilot')
         if data.get('skip_validation'):
             command.append('--skip-modelvalidation')
-        if data.get('local'):
-            command.append('--local')
         if data.get('force'):
             command.append('--force')
         if data.get('stats_workers'):
