@@ -291,15 +291,13 @@ install_dependencies() {
     # Add UV to PATH if not already there
     export PATH="$HOME/.cargo/bin:$PATH"
 
-    # Install dependencies from build/pyproject.toml using UV with the virtual environment
-    if [ -f "build/pyproject.toml" ]; then
-        # Install dependencies specified in pyproject.toml
-        # These include: requests, jsonschema (for model validation), flask, waitress, flask-socketio, eventlet (for web interface)
-        print_status "Installing dependencies from pyproject.toml..."
-        ./build/uv pip install --python .bidspm/bin/python requests jsonschema flask waitress flask-socketio eventlet
+    # Install dependencies from requirements.txt using UV with the virtual environment
+    if [ -f "requirements.txt" ]; then
+        print_status "Installing dependencies from requirements.txt..."
+        ./build/uv pip install --python .bidspm/bin/python -r requirements.txt
         print_success "Dependencies installed successfully"
     else
-        print_error "build/pyproject.toml not found in current directory"
+        print_error "requirements.txt not found in current directory"
         exit 1
     fi
 
