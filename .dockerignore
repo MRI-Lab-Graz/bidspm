@@ -1,0 +1,17 @@
+.git/
+local_src/
+external/
+tests/
+logs/
+error_logs/
+studies/
+config/
+docs/
+*.md
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+.venv/
+venv/
+node_modules/
