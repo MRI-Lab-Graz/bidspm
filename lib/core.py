@@ -11,6 +11,7 @@ import re
 import random
 import shlex
 import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,15 +32,60 @@ from .utils import (
 # Container Command Building (Split by Type)
 # =============================================================================
 
-def _get_cpp_roi_atlas_cache_dir(config: Config) -> Path:
-    """Return (creating if needed) the persistent CPP_ROI atlas cache dir.
+_CPP_ROI_ATLAS_CONTAINER_PATH = "/home/neuro/bidspm/lib/CPP_ROI/atlas"
 
-    The image's own (patched) copyAtlasToSpmDir.m populates this lazily on
-    first use per atlas, so neither the repo nor the image needs to ship the
-    underlying atlas data (300+MB).
+
+def _seed_cpp_roi_atlas_cache(atlas_cache_dir: Path, container_type: str, image: str) -> None:
+    """Seed the persistent atlas cache dir from the image's own CPP_ROI atlas
+    directory the first time it's used.
+
+    Upstream CPP_ROI ships library code (returnAtlasDir.m) and lookup tables
+    alongside the atlas data inside the same directory. Bind-mounting an
+    *empty* host dir over that path -- which is what makes the cache
+    persistent across runs -- would shadow those code files and break
+    ROI/atlas features entirely (``'returnAtlasDir' undefined``). Copy the
+    image's pristine atlas/ dir (code + small lookup tables, ~50MB) onto the
+    host cache once, via a throwaway bind mount at a non-shadowed path, so
+    the real bind mount lands on a directory that still has the code in it.
+    """
+    if (atlas_cache_dir / "returnAtlasDir.m").exists():
+        return
+
+    seed_target = "/mnt/atlas_seed"
+    # Copy first, then chmod everything *under* the mount point (not the
+    # mount point itself -- chmod requires owning the path, and the host
+    # process, not this container, owns that directory). Copied files/dirs
+    # otherwise keep the image's original (often non-world-writable) modes,
+    # which blocks later atlas downloads/extracts under this cache dir
+    # whenever the container runs as a different uid than whatever seeded it
+    # (see build_docker_command's --user).
+    seed_cmd = ["sh", "-c",
+                f"cp -rT {_CPP_ROI_ATLAS_CONTAINER_PATH} {seed_target} && "
+                f"find {seed_target} -mindepth 1 -exec chmod 0777 {{}} +"]
+    if container_type == "docker":
+        cmd = ["docker", "run", "--rm", "--entrypoint", "",
+               "-v", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
+    else:
+        cmd = ["apptainer", "exec", "--bind", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _get_cpp_roi_atlas_cache_dir(config: Config, container_type: str, image: str) -> Path:
+    """Return the persistent, seeded CPP_ROI atlas cache dir.
+
+    The image's own (patched) copyAtlasToSpmDir.m populates atlas data into
+    this dir lazily on first use per atlas, so neither the repo nor the image
+    needs to ship the full downloaded atlas data (300+MB) -- only the initial
+    code/lookup-table seed (see _seed_cpp_roi_atlas_cache).
     """
     atlas_cache_dir = config.WD / "cpp_roi_atlas"
     atlas_cache_dir.mkdir(parents=True, exist_ok=True)
+    # Docker images run as their own baked-in user (not the host user, unlike
+    # Apptainer), so the host uid that created this dir and the container's
+    # uid rarely match. Open it up so the container can write into it
+    # regardless of whose host account this directory belongs to.
+    atlas_cache_dir.chmod(0o777)
+    _seed_cpp_roi_atlas_cache(atlas_cache_dir, container_type, image)
     return atlas_cache_dir
 
 
@@ -59,15 +105,23 @@ def build_docker_command(
     """
     if not container_config.docker_image:
         raise ValueError("Docker image not specified in container configuration.")
-    
-    cmd = [
-        "docker", "run", "--rm",
+
+    cmd = ["docker", "run", "--rm"]
+    # The image runs as its own baked-in user (uid 1000), not the host user
+    # (unlike Apptainer, which runs as the invoking host user by default).
+    # Without this, writes into host-owned bind mounts like derivatives/ fail
+    # with permission errors whenever the host uid isn't 1000. Not available
+    # on Windows, where Docker Desktop's filesystem sharing doesn't have this
+    # uid-mismatch problem in the first place.
+    if hasattr(os, "getuid"):
+        cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+    cmd.extend([
         "-v", f"{config.BIDS_DIR}:/raw",
         "-v", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
         "-v", f"{config.DERIVATIVES_DIR}:/derivatives",
         "-v", f"{config.FMRIPREP_DIR}:/fmriprep"
-    ]
-    
+    ])
+
     # Create tmp directory for this run
     run_tmp_dir = config.WD / "tmp" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
     run_tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -90,9 +144,24 @@ def build_docker_command(
 
     # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
     # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config)
-    cmd.extend(["-v", f"{atlas_cache_dir}:/home/neuro/bidspm/lib/CPP_ROI/atlas"])
+    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
+    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "docker", container_config.docker_image)
+    cmd.extend(["-v", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
+
+    # Persist other writable dirs the image needs (error logs, SPM/atlas
+    # caches) outside the ephemeral --rm container, matching what Apptainer
+    # already does. chmod 0o777 since --user above runs as the host uid,
+    # which won't otherwise have write access to a dir it didn't create.
+    for dir_name, container_path in [
+        ("atlas", "/opt/spm12/atlas"),
+        ("error_logs", "/home/neuro/bidspm/error_logs"),
+        ("spm", "/home/neuro/spm"),
+        ("matlab_cache", "/home/neuro/.matlab"),
+    ]:
+        local_dir = config.WD / dir_name
+        local_dir.mkdir(exist_ok=True)
+        local_dir.chmod(0o777)
+        cmd.extend(["-v", f"{local_dir}:{container_path}"])
 
     # Environment variables
     cmd.extend([
@@ -197,9 +266,9 @@ def build_apptainer_command(
 
     # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
     # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config)
-    cmd.extend(["--bind", f"{atlas_cache_dir}:/home/neuro/bidspm/lib/CPP_ROI/atlas"])
+    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
+    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "apptainer", container_config.apptainer_image)
+    cmd.extend(["--bind", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
 
     for dir_name, container_path in [
         ("atlas", "/opt/spm12/atlas"),

@@ -90,6 +90,13 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         cd /home/neuro/bidspm && \
         git submodule update --init --recursive || true && \
         echo "✅ BIDSPM 4.0 installed successfully"
+
+    # Containers are run with --user <host uid>:<host gid> so writes into
+    # host-owned bind mounts (e.g. derivatives/) work regardless of the
+    # host's uid; that no longer matches the uid that owns this git clone,
+    # which git treats as a "dubious ownership" security risk. This is a
+    # system-wide (not per-uid) config, so it applies whatever uid runs.
+    RUN git config --system --add safe.directory /home/neuro/bidspm
     
     # Install BIDSPM Python CLI (this is crucial for proper entrypoint)
     RUN cd /home/neuro/bidspm && \

@@ -35,7 +35,8 @@ def _make_config(root: Path, models_file: str = "") -> Config:
 
 class TestCoreHelpers(unittest.TestCase):
     def test_build_docker_command_maps_model_inside_and_outside_derivatives(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir, \
+             patch("lib.core._seed_cpp_roi_atlas_cache"):
             root = Path(tmp_dir)
             config = _make_config(root)
             model_inside = config.DERIVATIVES_DIR / "models" / "demo.json"
@@ -67,7 +68,8 @@ class TestCoreHelpers(unittest.TestCase):
             self.assertFalse(any("bidspm_overrides" in part for part in external_command))
 
     def test_build_apptainer_command_creates_runtime_wrapper_and_external_model_bind(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir, \
+             patch("lib.core._seed_cpp_roi_atlas_cache"):
             root = Path(tmp_dir)
             config = _make_config(root)
             image_path = root / "bidspm.sif"
@@ -349,7 +351,8 @@ class TestCoreHelpers(unittest.TestCase):
                 with patch("lib.core.validate_space_availability", return_value=True), \
                      patch("lib.core.validate_events_availability", return_value=True), \
                      patch("lib.core.ensure_derivatives_dataset_description"), \
-                     patch("lib.core.cleanup_tmp_directories"):
+                     patch("lib.core.cleanup_tmp_directories"), \
+                     patch("lib.core._seed_cpp_roi_atlas_cache"):
                     result = pipeline.run()
                 return result, pipeline.dry_run_commands
 

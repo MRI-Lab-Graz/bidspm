@@ -276,7 +276,8 @@ class TestNewFeatures(unittest.TestCase):
             with patch("lib.core.check_command", return_value=None), \
                  patch("lib.core.validate_space_availability", return_value=True), \
                  patch("lib.core.ensure_derivatives_dataset_description", return_value=None), \
-                 patch("lib.core.cleanup_tmp_directories", return_value=None):
+                 patch("lib.core.cleanup_tmp_directories", return_value=None), \
+                 patch("lib.core._seed_cpp_roi_atlas_cache", return_value=None):
                 result = Pipeline(options).run()
 
             self.assertTrue(result.success)
