@@ -10,6 +10,11 @@ LABEL description="BIDSPM container with Python slim base, Octave 9.x, BIDSPM 4.
 LABEL version="2025.1"
 LABEL author="Karl Koschutnig"
 LABEL organization="MRI Lab Graz"
+# Standard OCI labels: GHCR uses org.opencontainers.image.source to link this
+# published package back to the repo it was built from (Packages sidebar,
+# provenance, etc).
+LABEL org.opencontainers.image.source="https://github.com/MRI-Lab-Graz/bidspm"
+LABEL org.opencontainers.image.description="BIDSPM container: Octave 9.x, BIDSPM 4.0, SPM12, with lab bug-fix overrides baked in"
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive

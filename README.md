@@ -104,13 +104,35 @@ The tool supports multiple container configurations:
 
 ## Installation
 
-### Option 1: With pip (recommended)
+### Option 1: Docker image (recommended)
+
+This repo is a Python CLI/webapp that drives a Docker (or Apptainer)
+container where the actual SPM/Octave analysis runs -- you need both parts.
+
+Pull the pre-built image instead of building it yourself (published from
+`containers/dockerfile/dockerfile`, with `bidspm_overrides/` baked in):
+
+```bash
+docker pull ghcr.io/mri-lab-graz/bidspm:latest
+```
+
+New image versions are published manually / on version tags via
+`.github/workflows/docker-publish.yml`, so `:latest` here reflects the last
+published release, not necessarily every commit on `main`. To always match
+your exact checkout instead, build locally -- see
+`containers/dockerfile/build_mri_lab_container.sh`.
+
+Then get the Python side running:
 
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
-pip install -e .
+pip install -r requirements.txt
 ```
+
+And point `containers/container.json`'s `"docker_image"` at
+`"ghcr.io/mri-lab-graz/bidspm:latest"` (it defaults to the locally-built
+`"bidspm/bidspm:latest"` instead).
 
 ### Option 2: With setup script (cross-platform)
 
@@ -148,7 +170,7 @@ git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install requests jsonschema
+pip install -r requirements.txt
 ```
 
 ## Testing
@@ -207,10 +229,22 @@ Create a `config.json` file with your specific settings:
 
 #### For Docker
 
+Build locally (default, always matches your checkout's `bidspm_overrides/`):
+
 ```json
 {
   "container_type": "docker",
-  "docker_image": "cpplab/bidspm:arm64",
+  "docker_image": "bidspm/bidspm:latest",
+  "apptainer_image": ""
+}
+```
+
+Or pull the published image instead of building (see Installation above):
+
+```json
+{
+  "container_type": "docker",
+  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
   "apptainer_image": ""
 }
 ```
@@ -224,6 +258,9 @@ Create a `config.json` file with your specific settings:
   "apptainer_image": "/path/to/containers/bidspm.sif"
 }
 ```
+
+Build a `.sif` from either Docker image above, e.g.
+`apptainer build bidspm.sif docker://ghcr.io/mri-lab-graz/bidspm:latest`.
 
 ## Usage
 
