@@ -11,9 +11,9 @@ echo "📊 SPM12 Startup Performance Test"
 echo "----------------------------------"
 echo ""
 
-echo "Original Container (bidspm:mri-lab-graz):"
+echo "Original Container (bidspm/bidspm:latest):"
 echo -n "  SPM12 startup time: "
-docker run --rm --entrypoint="" bidspm:mri-lab-graz timeout 30 octave --no-gui --eval "tic; try; addpath('/opt/spm12'); spm('defaults', 'fmri'); fprintf('%.3f seconds\n', toc); catch e; disp('FAILED'); end" 2>/dev/null | tail -1
+docker run --rm --entrypoint="" bidspm/bidspm:latest timeout 30 octave --no-gui --eval "tic; try; addpath('/opt/spm12'); spm('defaults', 'fmri'); fprintf('%.3f seconds\n', toc); catch e; disp('FAILED'); end" 2>/dev/null | tail -1
 
 echo ""
 echo "Enhanced Container (bidspm:performance-enhanced):"
@@ -26,7 +26,7 @@ echo "-------------------------------------"
 echo ""
 
 echo "Original Container:"
-docker run --rm --entrypoint="" bidspm:mri-lab-graz octave --no-gui --eval "printf('  OMP_NUM_THREADS: %s\n', getenv('OMP_NUM_THREADS')); printf('  OPENBLAS_NUM_THREADS: %s\n', getenv('OPENBLAS_NUM_THREADS'));" 2>/dev/null | grep -E "OMP|OPENBLAS"
+docker run --rm --entrypoint="" bidspm/bidspm:latest octave --no-gui --eval "printf('  OMP_NUM_THREADS: %s\n', getenv('OMP_NUM_THREADS')); printf('  OPENBLAS_NUM_THREADS: %s\n', getenv('OPENBLAS_NUM_THREADS'));" 2>/dev/null | grep -E "OMP|OPENBLAS"
 
 echo ""
 echo "Enhanced Container:"

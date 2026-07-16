@@ -15,7 +15,7 @@ echo ""
 # Define containers to test
 declare -a CONTAINERS=(
     "cpplab/bidspm:latest"
-    "bidspm:mri-lab-graz" 
+    "bidspm/bidspm:latest" 
     "bidspm:performance-enhanced"
 )
 
