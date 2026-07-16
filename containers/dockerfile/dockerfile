@@ -100,6 +100,22 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         pip install --no-cache-dir --break-system-packages . && \
         echo "✅ BIDSPM Python CLI installed"
 
+    # Pre-install the MACS toolbox (needed for BMS/bidsModelSelection).
+    # bidspm.m's updateMacstoolbox() lazily does exactly this same
+    # `git clone lib/MACS -> spm('dir')/toolbox/MACS` at runtime on first
+    # use, from the submodule already fetched above -- but /opt/spm12 isn't
+    # writable by the arbitrary host uid containers run as (see
+    # build_docker_command's --user), so that lazy install fails silently
+    # and BMS never works. Do it now, while still root.
+    RUN git clone /home/neuro/bidspm/lib/MACS /opt/spm12/toolbox/MACS && \
+        chown -R neuro:neuro /opt/spm12/toolbox/MACS && \
+        echo "✅ MACS toolbox pre-installed"
+
+    # updateMacstoolbox() also runs `git -C <target> pull` on every startup
+    # to check for updates, even though the toolbox is already present --
+    # same dubious-ownership issue as the main bidspm clone above.
+    RUN git config --system --add safe.directory /opt/spm12/toolbox/MACS
+
 # Bake in locally-patched bidspm files (fixes for upstream container v4.0.0
 # bugs; see bidspm_overrides/README.md for the rationale behind each file).
 # bidspm_overrides/ mirrors the /home/neuro/bidspm tree 1:1.

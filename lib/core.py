@@ -180,8 +180,18 @@ def build_docker_command(
         "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
     ])
 
-    cmd.append(container_config.docker_image)
-    cmd.extend(override_entrypoint if override_entrypoint is not None else args)
+    if override_entrypoint is not None:
+        # The image bakes in ENTRYPOINT ["bidspm"]; just appending a
+        # replacement command as trailing args (as we do for `args` below)
+        # would pass it as arguments *to* bidspm instead of replacing it.
+        # -- unlike Apptainer, where `apptainer exec <image> <cmd>` always
+        # takes an explicit command with nothing baked in to override.
+        cmd.extend(["--entrypoint", override_entrypoint[0]])
+        cmd.append(container_config.docker_image)
+        cmd.extend(override_entrypoint[1:])
+    else:
+        cmd.append(container_config.docker_image)
+        cmd.extend(args)
     return cmd, model_container_path
 
 
