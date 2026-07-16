@@ -4,7 +4,7 @@
 
 echo "⚡ Building Performance-Enhanced BIDSPM Container"
 echo "==============================================="
-echo "Base: bidspm:mri-lab-graz (working foundation)"
+echo "Base: bidspm/bidspm:latest (working foundation)"
 echo ""
 
 # Build performance layer

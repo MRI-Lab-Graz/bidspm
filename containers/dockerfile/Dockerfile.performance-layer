@@ -1,8 +1,9 @@
 # Performance-Enhanced BIDSPM Container Configuration
 # Author: Karl Koschutnig, MRI Lab Graz
-# Optimized version of working bidspm:mri-lab-graz container
+# Optimized version of the base bidspm/bidspm:latest image built by
+# build_mri_lab_container.sh
 
-FROM bidspm:mri-lab-graz
+FROM bidspm/bidspm:latest
 
 LABEL maintainer="Karl Koschutnig <karl.koschutnig@uni-graz.at>"
 LABEL description="Performance-enhanced BIDSPM container based on working foundation"
@@ -45,7 +46,7 @@ RUN echo '#!/bin/bash' > /usr/local/bin/test-performance && \
     echo 'echo "Container: Performance-Enhanced BIDSPM"' >> /usr/local/bin/test-performance && \
     echo 'echo ""' >> /usr/local/bin/test-performance && \
     echo 'echo "Octave Configuration:"' >> /usr/local/bin/test-performance && \
-    echo 'octave --no-gui --eval "version; printf('Available CPU cores: %d\\n', nproc()); printf('OMP_NUM_THREADS: %s\\n', getenv('OMP_NUM_THREADS')); printf('OPENBLAS_NUM_THREADS: %s\\n', getenv('OPENBLAS_NUM_THREADS'));"' >> /usr/local/bin/test-performance && \
+    echo 'octave --no-gui --eval "version; printf('"'"'Available CPU cores: %d\\n'"'"', nproc()); printf('"'"'OMP_NUM_THREADS: %s\\n'"'"', getenv('"'"'OMP_NUM_THREADS'"'"')); printf('"'"'OPENBLAS_NUM_THREADS: %s\\n'"'"', getenv('"'"'OPENBLAS_NUM_THREADS'"'"'));"' >> /usr/local/bin/test-performance && \
     echo 'echo ""' >> /usr/local/bin/test-performance && \
     echo 'echo "SPM12 Test:"' >> /usr/local/bin/test-performance && \
     echo 'timeout 30 octave --no-gui --eval "addpath('"'"'/opt/spm12'"'"'); tic; try; spm('"'"'defaults'"'"', '"'"'fmri'"'"'); disp('"'"'✅ SPM12 initialized successfully'"'"'); catch e; disp(['"'"'⚠️ SPM12 issue: '"'"' e.message]); end; fprintf('"'"'Time taken: %.2f seconds\\n'"'"', toc);"' >> /usr/local/bin/test-performance && \

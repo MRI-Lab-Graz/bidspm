@@ -9,15 +9,19 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Must match containers/container.json's "docker_image", or bidspm.py won't
+# find the image it just built.
+IMAGE_TAG="bidspm/bidspm:latest"
+
 echo "🚀 Building BIDSPM Container for MRI Lab Graz"
 echo "   Author: Karl Koschutnig"
-echo "   Container: bidspm:mri-lab-graz"
+echo "   Container: $IMAGE_TAG"
 echo "   Features: Python 3.12 slim, Octave 8.x, BIDSPM 4.0, SPM12, UV"
 echo ""
 
 # Build the container
 echo "📦 Starting Docker build..."
-docker build -t bidspm:mri-lab-graz -f "$SCRIPT_DIR/dockerfile" "$REPO_ROOT" --progress=plain
+docker build -t "$IMAGE_TAG" -f "$SCRIPT_DIR/dockerfile" "$REPO_ROOT" --progress=plain
 
 # Check build result
 if [ $? -eq 0 ]; then
@@ -25,13 +29,13 @@ if [ $? -eq 0 ]; then
     echo "✅ Container build successful!"
     echo ""
     echo "🧪 Testing container..."
-    docker run --rm bidspm:mri-lab-graz octave --version
+    docker run --rm --entrypoint octave "$IMAGE_TAG" --version
     echo ""
     echo "📋 Container ready to use:"
-    echo "   docker run --rm bidspm:mri-lab-graz"
+    echo "   docker run --rm $IMAGE_TAG"
     echo ""
     echo "🔬 For REAL SPM analysis, use:"
-    echo "   python enhanced_bidspm.py -s config.json -c container.json"
+    echo "   python bidspm.py -s config/config.json -c containers/container.json"
     echo ""
 else
     echo ""
