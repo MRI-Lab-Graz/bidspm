@@ -115,6 +115,12 @@ def build_docker_command(
     # uid-mismatch problem in the first place.
     if hasattr(os, "getuid"):
         cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+    # WORKDIR (/home/neuro, baked in and owned by uid 1000) is unwritable
+    # under the host uid above; Octave code that writes to the current
+    # directory (e.g. unpack.m during smoothing) needs a writable cwd. /tmp
+    # is bind-mounted from a host-owned dir below, so point the container at
+    # that instead of the image's default WORKDIR.
+    cmd.extend(["-w", "/tmp"])
     cmd.extend([
         "-v", f"{config.BIDS_DIR}:/raw",
         "-v", f"{config.BIDS_DIR}:{config.BIDS_DIR}",
