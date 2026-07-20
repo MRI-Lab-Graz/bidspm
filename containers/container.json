@@ -1,5 +1,5 @@
 {
   "container_type": "docker",
-  "docker_image": "bidspm/bidspm:latest",
+  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
   "apptainer_image": ""
 }

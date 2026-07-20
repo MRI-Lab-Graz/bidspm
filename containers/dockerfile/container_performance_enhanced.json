@@ -25,5 +25,5 @@
   "python_packages_via": "UV",
   "spm_version": "12",
   "bidspm_version": "4.0",
-  "base_container": "bidspm/bidspm:latest"
+  "base_container": "ghcr.io/mri-lab-graz/bidspm:latest"
 }

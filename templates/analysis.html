@@ -309,23 +309,23 @@
                         <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
                         <div class="d-flex flex-wrap gap-3">
                             <div class="form-check d-flex align-items-center gap-2">
-                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if project and project.config.container_type == 'docker' %}checked{% endif %}>
+                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-docker" value="docker" {% if not project or project.config.container_type == 'docker' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-docker">Docker</label>
                             </div>
                             <div class="form-check d-flex align-items-center gap-2">
-                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if not project or project.config.container_type == 'apptainer' %}checked{% endif %}>
+                                <input class="form-check-input container-type-radio" type="radio" name="container_type" id="type-apptainer" value="apptainer" {% if project and project.config.container_type == 'apptainer' %}checked{% endif %}>
                                 <label class="form-check-label" for="type-apptainer">Apptainer</label>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-6">
                         <!-- Docker Option -->
-                        <div class="{% if not project or project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
+                        <div class="{% if project and project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
-                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'bidspm/bidspm:latest' }}">
+                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'ghcr.io/mri-lab-graz/bidspm:latest' }}">
                         </div>
                         <!-- Apptainer Option -->
-                        <div class="{% if project and project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
+                        <div class="{% if not project or project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
                             <div class="input-group input-group-sm">
                                 <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/path/to/your/bidspm.sif' }}">
@@ -3051,8 +3051,8 @@
                 FWHM: config.FWHM || 6,
                 TASKS: config.TASKS || [],
                 VERBOSITY: config.VERBOSITY || 2,
-                container_type: config.container_type || 'apptainer',
-                docker_image: config.docker_image || 'bidspm/bidspm:latest',
+                container_type: config.container_type || 'docker',
+                docker_image: config.docker_image || 'ghcr.io/mri-lab-graz/bidspm:latest',
                 apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif'
             };
             
@@ -3079,8 +3079,8 @@
             fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
             tasks: unifiedStudyConfig.TASKS || [],
             verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
-            container_type: unifiedStudyConfig.container_type || 'apptainer',
-            docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
+            container_type: unifiedStudyConfig.container_type || 'docker',
+            docker_image: unifiedStudyConfig.docker_image || 'ghcr.io/mri-lab-graz/bidspm:latest',
             apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
             actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
             pilot: document.getElementById('pilot').checked,
@@ -3205,7 +3205,7 @@
         }
 
         // Container info
-        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'apptainer';
+        const containerType = document.querySelector('input[name="container_type"]:checked')?.value || 'docker';
         unifiedStudyConfig.container_type = containerType;
         
         unifiedStudyConfig.docker_image = document.getElementById('input-docker_image').value;
@@ -3234,7 +3234,7 @@
         }
         
         // Container info
-        const type = unifiedStudyConfig.container_type || 'apptainer';
+        const type = unifiedStudyConfig.container_type || 'docker';
         const radio = document.getElementById(`type-${type}`);
         if (radio) {
             radio.checked = true;

@@ -312,12 +312,14 @@ def _handle_bms(config_file: str, args) -> bool:
         return False
 
     print(f"\n🧮 Running Bayesian Model Selection ({args.models_dir})…")
+    config = load_config(config_file)
     result = run_bms(
         config_file=config_file,
         container_config_file=args.container,
         models_dir=args.models_dir,
         dry_run=args.dry_run,
         skip_validation=args.skip_modelvalidation,
+        participant_label=config.SUBJECTS,
     )
 
     if result["dry_run_commands"]:

@@ -81,7 +81,7 @@ The tool supports multiple container configurations:
 ```json
 {
   "container_type": "docker",
-  "docker_image": "cpplab/bidspm:latest",
+  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
   "apptainer_image": ""
 }
 ```
@@ -130,9 +130,9 @@ cd bidspm
 pip install -r requirements.txt
 ```
 
-And point `containers/container.json`'s `"docker_image"` at
-`"ghcr.io/mri-lab-graz/bidspm:latest"` (it defaults to the locally-built
-`"bidspm/bidspm:latest"` instead).
+`containers/container.json` already defaults `"docker_image"` to
+`"ghcr.io/mri-lab-graz/bidspm:latest"`, so no further edits are needed unless
+you want to point it at a locally-built image instead.
 
 ### Option 2: With setup script (cross-platform)
 
@@ -229,22 +229,22 @@ Create a `config.json` file with your specific settings:
 
 #### For Docker
 
-Build locally (default, always matches your checkout's `bidspm_overrides/`):
-
-```json
-{
-  "container_type": "docker",
-  "docker_image": "bidspm/bidspm:latest",
-  "apptainer_image": ""
-}
-```
-
-Or pull the published image instead of building (see Installation above):
+Use the published image (default -- no local build required, see Installation above):
 
 ```json
 {
   "container_type": "docker",
   "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
+  "apptainer_image": ""
+}
+```
+
+Or build locally instead, e.g. if you've edited `bidspm_overrides/`:
+
+```json
+{
+  "container_type": "docker",
+  "docker_image": "bidspm/bidspm:latest",
   "apptainer_image": ""
 }
 ```

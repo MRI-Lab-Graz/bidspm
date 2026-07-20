@@ -23,7 +23,7 @@ def _default_config_payload() -> dict:
         'TASKS': [],
         'VERBOSITY': 3,
         'container_type': 'docker',
-        'docker_image': 'bidspm/bidspm:latest',
+        'docker_image': 'ghcr.io/mri-lab-graz/bidspm:latest',
         'apptainer_image': '',
     }
 
@@ -31,7 +31,7 @@ def _default_config_payload() -> dict:
 def _default_container_payload() -> dict:
     return {
         'container_type': 'docker',
-        'docker_image': 'bidspm/bidspm:latest',
+        'docker_image': 'ghcr.io/mri-lab-graz/bidspm:latest',
         'apptainer_image': '',
     }
 
