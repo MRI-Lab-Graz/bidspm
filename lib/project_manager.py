@@ -33,11 +33,6 @@ GLOBAL_CONFIG_DIR = DATA_DIR / "config"
 CURRENT_PROJECT_FILE = DATA_DIR / "current_project.json"
 
 
-def ensure_dirs():
-    """Ensure data directories exist."""
-    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
-
-
 @dataclass
 class ProjectConfig:
     """Project configuration matching bids_apps_runner structure."""

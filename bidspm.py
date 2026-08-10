@@ -17,7 +17,6 @@ from lib import (
     log_debug, run_bms
 )
 from lib.config import load_config
-from lib.utils import DEBUG
 
 
 # Default config file paths
