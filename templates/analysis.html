@@ -57,6 +57,35 @@
     <div class="row">
         <!-- Top Section: Form -->
         <div class="col-12">
+            <!-- Guided stepper (dismiss hides to localStorage) -->
+            <div id="analysis-stepper" class="px-4 pt-3 pb-2 border-bottom mb-0" style="background:var(--bs-light,#f8f9fa);">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-bold text-muted text-uppercase" style="letter-spacing:.05em;">
+                        <i class="fas fa-map-signs me-1"></i> Setup Guide
+                    </span>
+                    <button type="button" class="btn-close btn-sm" id="stepper-dismiss" title="Dismiss guide"></button>
+                </div>
+                <div class="d-flex gap-2 align-items-center flex-wrap" id="stepper-steps">
+                    <button type="button" class="btn btn-sm stepper-step active" data-step="1" data-target="collapseSettings">
+                        <span class="stepper-num">1</span> Folders
+                    </button>
+                    <i class="fas fa-chevron-right text-muted small"></i>
+                    <button type="button" class="btn btn-sm stepper-step" data-step="2" data-target="analysis-model-workspace-section">
+                        <span class="stepper-num">2</span> Model
+                    </button>
+                    <i class="fas fa-chevron-right text-muted small"></i>
+                    <button type="button" class="btn btn-sm stepper-step" data-step="3" data-target="analysis-execution-section">
+                        <span class="stepper-num">3</span> Options
+                    </button>
+                    <i class="fas fa-chevron-right text-muted small"></i>
+                    <button type="button" class="btn btn-sm stepper-step" data-step="4" data-target="analysis-action-bar">
+                        <span class="stepper-num">4</span> Run
+                    </button>
+                </div>
+                <div class="mt-1">
+                    <small class="text-muted" id="stepper-hint">Fill in the folder paths for your BIDS dataset, then move on to selecting a model.</small>
+                </div>
+            </div>
             <div class="p-4 analysis-config-shell">
                 <form id="bidspm-form">
                     <!-- Accordion for Detailed Sections -->
@@ -673,6 +702,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/analysis_stepper.js', v=static_version('js/analysis_stepper.js')) }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_model_schema.js', v=static_version('js/analysis_model_schema.js')) }}"></script>
 <script src="{{ url_for('static', filename='js/transformer_model_x_domains.js', v=static_version('js/transformer_model_x_domains.js')) }}"></script>
 <script src="{{ url_for('static', filename='js/analysis_model_mutations.js', v=static_version('js/analysis_model_mutations.js')) }}"></script>
