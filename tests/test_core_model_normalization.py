@@ -179,5 +179,15 @@ class TestAtlasCacheIsWarm(unittest.TestCase):
             self.assertFalse(core._atlas_cache_is_warm(config))
 
 
+class TestSchemaCacheLruCache(unittest.TestCase):
+    def test_fetch_bids_stats_schema_is_lru_cached(self):
+        """_fetch_bids_stats_schema must be decorated with lru_cache."""
+        import lib.core as core
+        self.assertTrue(
+            hasattr(core._fetch_bids_stats_schema, "cache_clear"),
+            "_fetch_bids_stats_schema must be an lru_cache-wrapped function",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

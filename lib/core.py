@@ -15,6 +15,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Callable, Tuple
 
@@ -684,7 +685,13 @@ def estimate_processing_time(
 # Model Validation
 # =============================================================================
 
-_schema_cache: Dict[str, Any] = {}
+@lru_cache(maxsize=1)
+def _fetch_bids_stats_schema() -> Dict[str, Any]:
+    import requests
+    return requests.get(
+        "https://bids-standard.github.io/stats-models/BIDSStatsModel.json",
+        timeout=10,
+    ).json()
 
 
 def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str, Any]:
@@ -692,8 +699,6 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
     Validate BIDS stats model against schema.
     Returns dict with 'valid' bool, optional 'error' or 'warning'.
     """
-    global _schema_cache
-    
     try:
         with open(model_path, 'r') as f:
             model_content = json.load(f)
@@ -718,17 +723,11 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
 
     # Schema validation
     try:
-        import requests
         from jsonschema import validate, ValidationError
-        
-        schema_url = "https://bids-standard.github.io/stats-models/BIDSStatsModel.json"
-        
-        if schema_url not in _schema_cache or skip_cache:
-            schema = requests.get(schema_url, timeout=10).json()
-            _schema_cache[schema_url] = schema
-        else:
-            schema = _schema_cache[schema_url]
-        
+
+        if skip_cache:
+            _fetch_bids_stats_schema.cache_clear()
+        schema = _fetch_bids_stats_schema()
         validate(instance=model_content, schema=schema)
         if warnings:
             return {"valid": True, "warning": "; ".join(warnings)}
@@ -1316,7 +1315,8 @@ class Pipeline:
 
                 # Dataset-level stats
                 if 'dataset' in self.options.actions:
-                    self._run_dataset_stats(task)
+                    self._log(f">>> Dataset stats: task {task}")
+                    self._run_container_dataset_action(task)
                     actions_completed.add('dataset')
 
             return PipelineResult(
@@ -1361,13 +1361,13 @@ class Pipeline:
 
         if 'smooth' in self.options.actions:
             self._log(f">>> Smoothing: subject {subject}, task {task}")
-            if not self._run_smooth(subject, task):
+            if not self._run_container_action("smooth", subject, task):
                 success = False
 
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
             self._copy_brain_mask(subject, task)
-            if not self._run_stats(subject, task):
+            if not self._run_container_action("stats", subject, task):
                 success = False
 
         return success
@@ -1408,19 +1408,6 @@ class Pipeline:
                 if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
                     shutil.copy2(json_src, json_dst)
 
-    def _run_smooth(self, subject: str, task: str) -> bool:
-        """Run smoothing for a subject."""
-        return self._run_container_action("smooth", subject, task)
-
-    def _run_stats(self, subject: str, task: str) -> bool:
-        """Run stats for a subject."""
-        return self._run_container_action("stats", subject, task)
-
-    def _run_dataset_stats(self, task: str) -> bool:
-        """Run dataset-level stats."""
-        self._log(f">>> Dataset stats: task {task}")
-        return self._run_container_dataset_action(task)
-    
     def _run_container_action(self, action: str, subject: str, task: str) -> bool:
         """Run action via container."""
         if action == "smooth":

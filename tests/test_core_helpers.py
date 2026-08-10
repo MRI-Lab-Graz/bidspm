@@ -162,7 +162,7 @@ class TestCoreHelpers(unittest.TestCase):
             model_path = root / "model.json"
             model_path.write_text(json.dumps({"Name": "demo", "BIDSModelVersion": "1.0.0", "Nodes": []}), encoding="utf-8")
             fake_response = SimpleNamespace(json=lambda: {"type": "object"})
-            core._schema_cache.clear()
+            core._fetch_bids_stats_schema.cache_clear()
             with patch("requests.get", return_value=fake_response) as mock_get, \
                  patch("jsonschema.validate"):
                 valid_result = core.validate_bids_model(model_path)
@@ -367,3 +367,25 @@ class TestCoreHelpers(unittest.TestCase):
             # underlying commands.
             normalize = lambda commands: sorted(re.sub(r"run_\d+_\d+_\d+", "run_TS", cmd) for cmd in commands)
             self.assertEqual(normalize(sequential_commands), normalize(parallel_commands))
+
+
+class TestProcessSubjectDelegation(unittest.TestCase):
+    def test_process_subject_calls_smooth_container_action(self):
+        """_process_subject must invoke _run_container_action("smooth", ...) directly."""
+        import tempfile
+        from lib.core import Pipeline, PipelineOptions
+        opts = PipelineOptions(actions=["smooth"], config_file="config/config.json")
+        pipeline = Pipeline(opts)
+        pipeline.config = _make_config(Path(tempfile.mkdtemp()))
+        pipeline.container_config = ContainerConfig(
+            container_type="docker", docker_image="test:latest"
+        )
+        pipeline.model_file_path = None
+        pipeline.stats_node_name = None
+
+        calls = []
+        with patch.object(pipeline, "_run_container_action", side_effect=lambda *a: calls.append(a) or True):
+            pipeline._process_subject("01", "motor")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0], ("smooth", "01", "motor"))
