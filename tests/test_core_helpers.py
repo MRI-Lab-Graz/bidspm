@@ -389,3 +389,70 @@ class TestProcessSubjectDelegation(unittest.TestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0], ("smooth", "01", "motor"))
+
+
+class TestModelContainerPath(unittest.TestCase):
+    def test_path_inside_derivatives_maps_to_derivatives_mount(self):
+        from lib.core import _model_container_path
+        derivatives = Path("/data/derivatives")
+        model = derivatives / "models" / "smdl.json"
+        self.assertEqual(
+            _model_container_path(model, derivatives),
+            "/derivatives/models/smdl.json",
+        )
+
+    def test_path_outside_derivatives_maps_to_models_mount(self):
+        from lib.core import _model_container_path
+        derivatives = Path("/data/derivatives")
+        model = Path("/some/other/dir/smdl.json")
+        self.assertEqual(
+            _model_container_path(model, derivatives),
+            "/models/smdl.json",
+        )
+
+    def test_directory_outside_derivatives_maps_to_bms_models_mount(self):
+        from lib.core import _model_container_path
+        import tempfile
+        derivatives = Path("/data/derivatives")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir)
+            self.assertEqual(
+                _model_container_path(model_dir, derivatives),
+                "/models/bms_models",
+            )
+
+    def test_none_returns_none(self):
+        from lib.core import _model_container_path
+        self.assertIsNone(_model_container_path(None, Path("/data/derivatives")))
+
+    def test_run_container_action_calls_build_command_once_for_stats(self):
+        """Stats action must call build_container_command exactly once (not twice)."""
+        import tempfile
+        import lib.core as core_module
+        from lib.core import Pipeline, PipelineOptions
+
+        with tempfile.TemporaryDirectory() as tmp_dir, \
+             patch("lib.core._seed_cpp_roi_atlas_cache"), \
+             patch("lib.core.run_command", return_value=True):
+            root = Path(tmp_dir)
+            opts = PipelineOptions(actions=["stats"], config_file="config/config.json")
+            pipeline = Pipeline(opts)
+            pipeline.config = _make_config(root)
+            pipeline.container_config = ContainerConfig(
+                container_type="docker", docker_image="test:latest"
+            )
+            model_file = root / "smdl.json"
+            model_file.write_text('{}')
+            pipeline.model_file_path = model_file
+            pipeline.stats_node_name = None
+
+            call_count = []
+            original_build = core_module.build_container_command
+            def counting_build(*args, **kwargs):
+                call_count.append(1)
+                return original_build(*args, **kwargs)
+
+            with patch("lib.core.build_container_command", side_effect=counting_build):
+                pipeline._run_container_action("stats", "01", "motor")
+
+            self.assertEqual(len(call_count), 1, "build_container_command called more than once")

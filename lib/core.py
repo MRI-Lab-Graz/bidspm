@@ -90,6 +90,27 @@ def _get_cpp_roi_atlas_cache_dir(config: Config, container_type: str, image: str
     return atlas_cache_dir
 
 
+def _model_container_path(
+    model_file_path: Optional[Path],
+    derivatives_dir: Path,
+) -> Optional[str]:
+    """Return the container-side path for a model file or directory.
+
+    Mirrors the path-resolution logic inside build_docker_command /
+    build_apptainer_command so callers can compute the path before
+    building the full command (avoiding a double invocation).
+    """
+    if model_file_path is None:
+        return None
+    try:
+        rel = model_file_path.relative_to(derivatives_dir)
+        return f"/derivatives/{rel}"
+    except ValueError:
+        if model_file_path.is_dir():
+            return "/models/bms_models"
+        return "/models/smdl.json"
+
+
 def build_docker_command(
     container_config: ContainerConfig,
     config: Config,
@@ -1431,25 +1452,21 @@ class Pipeline:
             ]
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
+            model_path = _model_container_path(self.model_file_path, self.config.DERIVATIVES_DIR)
+            if model_path:
+                args += ["--model_file", model_path]
         else:
             return False
-        
-        cmd, model_path = build_container_command(
+
+        cmd, _ = build_container_command(
             self.container_config, self.config, args, self.model_file_path
         )
-        
-        # Add model file for stats
-        if action == "stats" and model_path:
-            args_with_model = args + ["--model_file", model_path]
-            cmd, _ = build_container_command(
-                self.container_config, self.config, args_with_model, self.model_file_path
-            )
-        
+
         if self.options.dry_run:
             self.dry_run_commands.append(' '.join(cmd))
             self._log(f"[DRY RUN] Would execute: {' '.join(cmd[:5])}...")
             return True
-        
+
         return run_command(cmd)
     
     def _run_container_dataset_action(self, task: str) -> bool:
@@ -1466,21 +1483,18 @@ class Pipeline:
             args.extend(["--participant_label"] + list(self.config.SUBJECTS))
         if self.options.node_name:
             args.extend(["--node_name", self.options.node_name])
-        
-        cmd, model_path = build_container_command(
+        model_path = _model_container_path(self.model_file_path, self.config.DERIVATIVES_DIR)
+        if model_path:
+            args += ["--model_file", model_path]
+
+        cmd, _ = build_container_command(
             self.container_config, self.config, args, self.model_file_path
         )
-        
-        if model_path:
-            args_with_model = args + ["--model_file", model_path]
-            cmd, _ = build_container_command(
-                self.container_config, self.config, args_with_model, self.model_file_path
-            )
-        
+
         if self.options.dry_run:
             self.dry_run_commands.append(' '.join(cmd))
             self._log(f"[DRY RUN] Would execute dataset stats")
             return True
-        
+
         return run_command(cmd)
 
