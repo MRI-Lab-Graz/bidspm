@@ -58,6 +58,16 @@ class TestBidspmCli(unittest.TestCase):
             args = bidspm.parse_arguments()
         self.assertEqual(args.models_dir, "/some/dir")
 
+    def test_name_by_confounds_flag_parsed(self):
+        with patch('sys.argv', ['bidspm.py', '--action', 'stats', '--name-by-confounds']):
+            args = bidspm.parse_arguments()
+        self.assertTrue(args.name_by_confounds)
+
+    def test_name_by_confounds_defaults_false(self):
+        with patch('sys.argv', ['bidspm.py', '--action', 'stats']):
+            args = bidspm.parse_arguments()
+        self.assertFalse(args.name_by_confounds)
+
 
 if __name__ == "__main__":
     unittest.main()

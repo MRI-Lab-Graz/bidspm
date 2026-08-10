@@ -1066,7 +1066,8 @@ class PipelineOptions:
     force: bool = False
     dry_run: bool = False
     debug: bool = False
-    
+    name_by_confounds: bool = False
+
     # Callbacks for progress reporting
     on_progress: Optional[Callable[[str], None]] = None
     on_error: Optional[Callable[[str], None]] = None
@@ -1538,6 +1539,8 @@ class Pipeline:
             ]
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
+            if self.options.name_by_confounds:
+                args.append("--name_by_confounds")
             model_path = _model_container_path(self.model_file_path, self.config.DERIVATIVES_DIR)
             if model_path:
                 args += ["--model_file", model_path]
@@ -1569,6 +1572,8 @@ class Pipeline:
             args.extend(["--participant_label"] + list(self.config.SUBJECTS))
         if self.options.node_name:
             args.extend(["--node_name", self.options.node_name])
+        if self.options.name_by_confounds:
+            args.append("--name_by_confounds")
         model_path = _model_container_path(self.model_file_path, self.config.DERIVATIVES_DIR)
         if model_path:
             args += ["--model_file", model_path]

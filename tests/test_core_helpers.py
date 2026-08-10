@@ -456,3 +456,15 @@ class TestModelContainerPath(unittest.TestCase):
                 pipeline._run_container_action("stats", "01", "motor")
 
             self.assertEqual(len(call_count), 1, "build_container_command called more than once")
+
+
+class TestPipelineOptionsNameByConfounds(unittest.TestCase):
+    def test_name_by_confounds_defaults_false(self):
+        from lib.core import PipelineOptions
+        opts = PipelineOptions(actions=['stats'])
+        self.assertFalse(opts.name_by_confounds)
+
+    def test_name_by_confounds_accepted(self):
+        from lib.core import PipelineOptions
+        opts = PipelineOptions(actions=['stats'], name_by_confounds=True)
+        self.assertTrue(opts.name_by_confounds)

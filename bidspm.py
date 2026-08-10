@@ -122,6 +122,9 @@ def parse_arguments():
     parser.add_argument('--node-name', '--node_name',
                        dest='node_name',
                        help='Name of the BIDS model node to run')
+    parser.add_argument('--name-by-confounds', action='store_true', dest='name_by_confounds',
+                       help='Append confound strategy suffix to model node names before running stats '
+                            '(prevents output-folder collisions when comparing confound strategies)')
     
     # Actions
     parser.add_argument('--action', nargs='+',
@@ -413,6 +416,7 @@ def main():
         force=args.force,
         dry_run=args.dry_run,
         debug=args.debug,
+        name_by_confounds=args.name_by_confounds,
     )
     
     # Create and run pipeline
