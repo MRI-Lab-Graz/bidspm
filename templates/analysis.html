@@ -249,6 +249,26 @@
                                         figures, and statistical results.
                                     </div>
                                 </div>
+                                <div class="form-check mt-2 pt-2 border-top">
+                                    <input class="form-check-input" type="checkbox" name="action" value="bms" id="bms">
+                                    <label class="form-check-label" for="bms">
+                                        BMS
+                                        <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem; vertical-align:middle;">Bayesian</span>
+                                    </label>
+                                    <div class="text-muted mt-1" style="font-size:.72rem; line-height:1.4;">
+                                        Bayesian Model Selection — compares competing models whose <em>stats</em> have already been run. Requires at least two model files below.
+                                    </div>
+                                </div>
+                                <div id="bms-models-section" class="ms-4 mt-2 d-none">
+                                    <label class="form-label small fw-bold text-muted text-uppercase mb-1">BMS Model Files</label>
+                                    <div id="bms-model-list" class="d-flex flex-column gap-1 mb-2"></div>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-add-bms-model">
+                                        <i class="fas fa-plus me-1"></i>Add model file…
+                                    </button>
+                                    <div class="text-muted mt-1" style="font-size:.72rem;">
+                                        Each file must be a BIDS Stats Model JSON whose <code>stats</code> action has been run. Add at least 2.
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="col-md-6 ps-md-4 analysis-execution-col">
@@ -389,6 +409,12 @@
                     <div id="terminal" class="p-3 text-light font-monospace small" style="height: 600px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4;">Welcome to BIDSPM Web Interface.
 {% if project %}Project: {{ project.name }}
 {% endif %}Ready for command.</div>
+                    <div id="run-failure-summary" class="mt-2 d-none px-3 pb-2">
+                        <div class="alert alert-warning py-2 small mb-0">
+                            <strong>Failed subjects:</strong>
+                            <span id="run-failure-list"></span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2973,7 +2999,8 @@
             project_id: currentProjectId || null,
             config_folder: hasProject ? null : document.getElementById('config-folder')?.value,
             study_filename: hasProject ? null : document.getElementById('study-filename')?.value,
-            study_content: unifiedStudyConfig
+            study_content: unifiedStudyConfig,
+            bms_model_files: Array.from(document.querySelectorAll('#bms-model-list input')).map(i => i.value.trim()).filter(Boolean)
         };
     }
 
@@ -3127,6 +3154,21 @@
                 document.getElementById('apptainer-options').classList.toggle('d-none', type !== 'apptainer');
                 updateInternalState();
             };
+        });
+
+        // BMS checkbox show/hide model file list
+        const bmsCheckbox = document.getElementById('bms');
+        if (bmsCheckbox) {
+            bmsCheckbox.addEventListener('change', () => {
+                document.getElementById('bms-models-section').classList.toggle('d-none', !bmsCheckbox.checked);
+            });
+        }
+        document.getElementById('btn-add-bms-model')?.addEventListener('click', () => {
+            const row = document.createElement('div');
+            row.className = 'd-flex gap-1 align-items-center bms-model-row';
+            row.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="/path/to/model_smdl.json"><button type="button" class="btn btn-outline-danger btn-sm bms-model-remove">×</button>';
+            row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
+            document.getElementById('bms-model-list').appendChild(row);
         });
 
         // BIDS directory change triggers task detection
@@ -4381,11 +4423,28 @@
         }
     }
 
+    function parseFailedSubjects() {
+        const logText = document.getElementById('terminal')?.textContent || '';
+        const failedSubjects = [];
+        const failRe = /(?:FAILED|Failed|❌)\s*(sub-[A-Za-z0-9]+)/g;
+        let m;
+        while ((m = failRe.exec(logText)) !== null) {
+            if (!failedSubjects.includes(m[1])) failedSubjects.push(m[1]);
+        }
+        const summaryEl = document.getElementById('run-failure-summary');
+        const listEl = document.getElementById('run-failure-list');
+        if (summaryEl && listEl && failedSubjects.length > 0) {
+            listEl.textContent = failedSubjects.join(', ');
+            summaryEl.classList.remove('d-none');
+        }
+    }
+
     // --- EXECUTION CORE ---
     async function startExecution(payload) {
         if (payload.actions.length === 0) { alert('Please select at least one action.'); return; }
 
         terminal.innerText = '--- EXECUTION TRIGGERED ---\n';
+        document.getElementById('run-failure-summary')?.classList.add('d-none');
         execStatus.innerText = 'RUNNING';
         execStatus.className = 'badge bg-danger';
         resetRunIssues();
@@ -4408,10 +4467,11 @@
             terminal.innerText += e.data + '\n';
             terminal.scrollTop = terminal.scrollHeight;
             processRunLogLine(e.data);
-            if (e.data.includes('Process finished')) resetStatus();
+            if (e.data.includes('Process finished')) { parseFailedSubjects(); resetStatus(); }
         };
         eventSource.onerror = () => {
             terminal.innerText += '\n--- LOG STREAM INTERRUPTED ---\n';
+            parseFailedSubjects();
             resetStatus();
         };
     }

@@ -202,6 +202,9 @@ def register_execution_routes(
             command.append('--force')
         if data.get('stats_workers'):
             command.extend(['--stats-workers', str(data.get('stats_workers'))])
+        bms_model_files = data.get('bms_model_files') or []
+        if bms_model_files:
+            command.extend(['--models'] + bms_model_files)
 
         execution_registry.cleanup_old_executions()
 
