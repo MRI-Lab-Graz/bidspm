@@ -124,6 +124,39 @@ class TestRunBms(unittest.TestCase):
             mock_run_command.assert_called_once()
 
 
+    def test_run_bms_accepts_model_files_instead_of_models_dir(self):
+        """run_bms must accept model_files= and materialize the dir itself."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            model = {"Name": "test", "BIDSVersion": "1.9.0",
+                     "Nodes": [{"Level": "Run", "Name": "ModelA", "Model": {"X": ["t"]}}]}
+            import json as _json
+            (d / "a.json").write_text(_json.dumps(model), encoding="utf-8")
+            model["Nodes"][0]["Name"] = "ModelB"
+            (d / "b.json").write_text(_json.dumps(model), encoding="utf-8")
+
+            with patch("lib.config.auto_select_container_config", return_value=None):
+                result = core.run_bms(
+                    config_file="ignored.json",
+                    container_config_file=None,
+                    model_files=[str(d / "a.json"), str(d / "b.json")],
+                )
+
+        # Should fail at "no container config" not at missing models_dir
+        self.assertFalse(result["success"])
+        self.assertTrue(
+            any("container" in e.lower() for e in result["errors"]),
+            f"Expected container error, got: {result['errors']}",
+        )
+
+    def test_run_bms_fails_when_neither_models_dir_nor_model_files_given(self):
+        result = core.run_bms(
+            config_file="ignored.json",
+            container_config_file=None,
+        )
+        self.assertFalse(result["success"])
+        self.assertTrue(any("models" in e.lower() for e in result["errors"]))
+
     def test_run_bms_fails_early_when_node_collision_detected(self):
         """run_bms must reject models_dir with duplicate node names before running."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -214,6 +247,55 @@ class TestCheckModelsDirNodeCollision(unittest.TestCase):
             # Should not raise; bad file is skipped
             result = core.check_models_dir_node_collision(d)
             self.assertIsInstance(result, list)
+
+
+class TestMaterializeBmsModels(unittest.TestCase):
+    def _model_file(self, path: Path, node_name: str = "ModelA") -> Path:
+        model = {"Name": "test", "BIDSVersion": "1.9.0",
+                 "Nodes": [{"Level": "Run", "Name": node_name, "Model": {"X": ["trial_type"]}}]}
+        path.write_text(__import__("json").dumps(model), encoding="utf-8")
+        return path
+
+    def test_copies_files_to_new_temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._model_file(Path(tmp) / "my_model.json")
+            result = core.materialize_bms_models([src])
+            try:
+                self.assertTrue(result.is_dir())
+                files = list(result.glob("*_smdl.json"))
+                self.assertEqual(len(files), 1)
+            finally:
+                import shutil; shutil.rmtree(result, ignore_errors=True)
+
+    def test_adds_smdl_suffix_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._model_file(Path(tmp) / "my_model.json")
+            result = core.materialize_bms_models([src])
+            try:
+                names = [f.name for f in result.glob("*")]
+                self.assertTrue(any("_smdl.json" in n for n in names), names)
+            finally:
+                import shutil; shutil.rmtree(result, ignore_errors=True)
+
+    def test_preserves_smdl_suffix_when_already_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = self._model_file(Path(tmp) / "my_model_smdl.json")
+            result = core.materialize_bms_models([src])
+            try:
+                self.assertTrue((result / "my_model_smdl.json").exists())
+            finally:
+                import shutil; shutil.rmtree(result, ignore_errors=True)
+
+    def test_multiple_files_all_copied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._model_file(Path(tmp) / "a.json", "ModelA")
+            b = self._model_file(Path(tmp) / "b.json", "ModelB")
+            result = core.materialize_bms_models([a, b])
+            try:
+                files = list(result.glob("*_smdl.json"))
+                self.assertEqual(len(files), 2)
+            finally:
+                import shutil; shutil.rmtree(result, ignore_errors=True)
 
 
 if __name__ == "__main__":

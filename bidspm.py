@@ -132,6 +132,9 @@ def parse_arguments():
                        help='Directory of competing BIDS-StatsModel JSON files to compare '
                             '(required for --action bms; must contain only the models '
                             'being compared, bidspm globs every *.json in it)')
+    parser.add_argument('--models', nargs='+', dest='models',
+                       help='Model files to compare in BMS (alternative to --models-dir; '
+                            'materializes a temp dir with _smdl.json copies at run time)')
     
     # Flags
     parser.add_argument('--pilot', action='store_true',
@@ -300,22 +303,25 @@ def _handle_report(config_file: str, args, processed_subjects: Optional[List[str
 
 
 def _handle_bms(config_file: str, args) -> bool:
-    """Run Bayesian Model Selection across the models in --models-dir.
+    """Run Bayesian Model Selection across the models in --models-dir or --models.
 
     Returns True on success. Requires container execution and a `stats` run
     already completed for every competing model (BMS compares their
     already-estimated SPM.mat files).
     """
-    if not args.models_dir:
-        print("❌ --action bms requires --models-dir <directory of competing model files>")
+    models = getattr(args, 'models', None)
+    if not args.models_dir and not models:
+        print("❌ --action bms requires --models-dir or --models")
         return False
 
-    print(f"\n🧮 Running Bayesian Model Selection ({args.models_dir})…")
+    label = args.models_dir or f"{len(models)} model file(s)"
+    print(f"\n🧮 Running Bayesian Model Selection ({label})…")
     config = load_config(config_file)
     result = run_bms(
         config_file=config_file,
         container_config_file=args.container,
         models_dir=args.models_dir,
+        model_files=models,
         dry_run=args.dry_run,
         skip_validation=args.skip_modelvalidation,
         participant_label=config.SUBJECTS,

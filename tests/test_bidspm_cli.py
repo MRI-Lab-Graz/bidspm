@@ -46,5 +46,18 @@ class TestBidspmCli(unittest.TestCase):
         self.assertEqual(captured_options["options"].stats_workers, 7)
 
 
+    def test_models_flag_accepted_as_list(self):
+        with patch("sys.argv", ["bidspm.py", "--action", "bms",
+                                 "--models", "a.json", "b.json"]):
+            args = bidspm.parse_arguments()
+        self.assertEqual(args.models, ["a.json", "b.json"])
+
+    def test_models_dir_still_accepted(self):
+        with patch("sys.argv", ["bidspm.py", "--action", "bms",
+                                 "--models-dir", "/some/dir"]):
+            args = bidspm.parse_arguments()
+        self.assertEqual(args.models_dir, "/some/dir")
+
+
 if __name__ == "__main__":
     unittest.main()

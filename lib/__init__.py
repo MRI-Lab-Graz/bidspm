@@ -20,7 +20,7 @@ from .core import (
     check_subject_processed,
     validate_bids_model, estimate_processing_time,
     resolve_models_dir, run_bms,
-    check_models_dir_node_collision,
+    check_models_dir_node_collision, materialize_bms_models,
 )
 from .project_manager import (
     ProjectManager, Project, ProjectConfig,
@@ -39,6 +39,7 @@ __all__ = [
     'check_subject_processed',
     'validate_bids_model', 'estimate_processing_time',
     'resolve_models_dir', 'run_bms', 'check_models_dir_node_collision',
+    'materialize_bms_models',
     # Project Manager
     'ProjectManager', 'Project', 'ProjectConfig',
     'project_manager', 'PROJECTS_DIR', 'DATA_DIR',

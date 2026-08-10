@@ -467,16 +467,34 @@ def check_models_dir_node_collision(models_dir: Path) -> List[str]:
     return errors
 
 
+def materialize_bms_models(model_paths: List[Path]) -> Path:
+    """Copy model files into a fresh temp dir with _smdl.json suffixes.
+
+    bidspm globs '*_smdl.json' inside --models_dir; files without that suffix
+    are silently ignored. This helper lets callers pass arbitrary model file
+    paths and always gets the suffix right.
+    Returns the new temp dir path (caller is responsible for cleanup).
+    """
+    import tempfile as _tempfile
+    dest = Path(_tempfile.mkdtemp(prefix="bidspm_bms_"))
+    for src in model_paths:
+        stem = src.stem
+        dest_name = src.name if stem.endswith("_smdl") else f"{stem}_smdl.json"
+        shutil.copy2(src, dest / dest_name)
+    return dest
+
+
 def run_bms(
     config_file: str,
     container_config_file: Optional[str],
-    models_dir: str,
+    models_dir: Optional[str] = None,
     fwhm: Optional[float] = None,
     participant_label: Optional[List[str]] = None,
     dry_run: bool = False,
     skip_validation: bool = False,
     on_progress: Optional[Callable[[str], None]] = None,
     bms_action: str = "bms",
+    model_files: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Run Bayesian Model Selection across a directory of competing models.
 
@@ -492,6 +510,10 @@ def run_bms(
     own stats directory; 'bms-posterior' and 'bms-bms' run the remaining
     group-level steps and must be run once, after every subject's cvLME
     step has completed, with the full participant list.
+
+    Provide either ``models_dir`` (a pre-built directory of ``*_smdl.json``
+    files) or ``model_files`` (arbitrary model paths; a temp dir is
+    materialized automatically and cleaned up after the run).
     """
     def _log(msg: str):
         if on_progress:
@@ -501,80 +523,97 @@ def run_bms(
 
     errors: List[str] = []
 
+    _materialized_dir: Optional[Path] = None
     try:
-        resolved_models_dir = resolve_models_dir(models_dir)
-    except ValueError as e:
-        errors.append(str(e))
-        return {"success": False, "errors": errors, "dry_run_commands": []}
+        if model_files:
+            _materialized_dir = materialize_bms_models(
+                [Path(f).expanduser().resolve() for f in model_files]
+            )
+            resolved_models_dir = _materialized_dir
+        elif models_dir:
+            try:
+                resolved_models_dir = resolve_models_dir(models_dir)
+            except ValueError as e:
+                errors.append(str(e))
+                return {"success": False, "errors": errors, "dry_run_commands": []}
+        else:
+            errors.append(
+                "Either --models-dir or --models must be provided for BMS."
+            )
+            return {"success": False, "errors": errors, "dry_run_commands": []}
 
-    collision_errors = check_models_dir_node_collision(resolved_models_dir)
-    if collision_errors:
-        errors.extend(collision_errors)
-        return {"success": False, "errors": errors, "dry_run_commands": []}
+        collision_errors = check_models_dir_node_collision(resolved_models_dir)
+        if collision_errors:
+            errors.extend(collision_errors)
+            return {"success": False, "errors": errors, "dry_run_commands": []}
 
-    config = load_config(config_file)
+        container_file = container_config_file
+        if not container_file:
+            from .config import auto_select_container_config
+            container_file = auto_select_container_config()
 
-    container_file = container_config_file
-    if not container_file:
-        from .config import auto_select_container_config
-        container_file = auto_select_container_config()
+        if not container_file or not Path(container_file).exists():
+            errors.append("No container configuration found (BMS requires container execution).")
+            return {"success": False, "errors": errors, "dry_run_commands": []}
 
-    if not container_file or not Path(container_file).exists():
-        errors.append("No container configuration found (BMS requires container execution).")
-        return {"success": False, "errors": errors, "dry_run_commands": []}
+        config = load_config(config_file)
 
-    container_config = load_container_config(container_file)
+        container_config = load_container_config(container_file)
 
-    if container_config.container_type == "docker":
-        check_docker_availability()
-    elif container_config.container_type == "apptainer":
-        check_command("apptainer")
+        if container_config.container_type == "docker":
+            check_docker_availability()
+        elif container_config.container_type == "apptainer":
+            check_command("apptainer")
 
-    effective_fwhm = fwhm if fwhm is not None else config.FWHM
+        effective_fwhm = fwhm if fwhm is not None else config.FWHM
 
-    # First pass just to learn where the models dir gets mounted -- the mount
-    # path doesn't depend on the entrypoint, so args/entrypoint are dummies.
-    _, models_dir_container_path = build_container_command(
-        container_config, config, [], resolved_models_dir
-    )
+        # First pass just to learn where the models dir gets mounted -- the mount
+        # path doesn't depend on the entrypoint, so args/entrypoint are dummies.
+        _, models_dir_container_path = build_container_command(
+            container_config, config, [], resolved_models_dir
+        )
 
-    matlab_args = [
-        "'/raw'", "'/derivatives'", "'subject'",
-        "'action'", f"'{bms_action}'",
-        "'fwhm'", str(effective_fwhm),
-        "'verbosity'", str(config.VERBOSITY),
-        "'models_dir'", f"'{models_dir_container_path}'",
-    ]
-    if participant_label:
-        labels = ",".join(f"'{p}'" for p in participant_label)
-        matlab_args.extend(["'participant_label'", f"{{{labels}}}"])
-    if dry_run:
-        matlab_args.extend(["'dry_run'", "true"])
-    if skip_validation:
-        matlab_args.extend(["'skip_validation'", "true"])
+        matlab_args = [
+            "'/raw'", "'/derivatives'", "'subject'",
+            "'action'", f"'{bms_action}'",
+            "'fwhm'", str(effective_fwhm),
+            "'verbosity'", str(config.VERBOSITY),
+            "'models_dir'", f"'{models_dir_container_path}'",
+        ]
+        if participant_label:
+            labels = ",".join(f"'{p}'" for p in participant_label)
+            matlab_args.extend(["'participant_label'", f"{{{labels}}}"])
+        if dry_run:
+            matlab_args.extend(["'dry_run'", "true"])
+        if skip_validation:
+            matlab_args.extend(["'skip_validation'", "true"])
 
-    matlab_call = f"bidspm({', '.join(matlab_args)})"
-    octave_eval = (
-        "bidspm('init'); try; "
-        f"{matlab_call}; "
-        "catch ME; fprintf('bidspm - ERROR - %s\\n', ME.message); exit(1); end; "
-        "exit(0);"
-    )
-    override_entrypoint = ["octave", "--no-gui", "--no-window-system", "--silent", "--eval", octave_eval]
+        matlab_call = f"bidspm({', '.join(matlab_args)})"
+        octave_eval = (
+            "bidspm('init'); try; "
+            f"{matlab_call}; "
+            "catch ME; fprintf('bidspm - ERROR - %s\\n', ME.message); exit(1); end; "
+            "exit(0);"
+        )
+        override_entrypoint = ["octave", "--no-gui", "--no-window-system", "--silent", "--eval", octave_eval]
 
-    cmd, _ = build_container_command(
-        container_config, config, [], resolved_models_dir, override_entrypoint=override_entrypoint
-    )
+        cmd, _ = build_container_command(
+            container_config, config, [], resolved_models_dir, override_entrypoint=override_entrypoint
+        )
 
-    if dry_run:
-        _log(f"[DRY RUN] Would execute: {' '.join(cmd)}")
-        return {"success": True, "errors": errors, "dry_run_commands": [' '.join(cmd)]}
+        if dry_run:
+            _log(f"[DRY RUN] Would execute: {' '.join(cmd)}")
+            return {"success": True, "errors": errors, "dry_run_commands": [' '.join(cmd)]}
 
-    _log(f">>> Running BMS across models in {resolved_models_dir}")
-    success = run_command(cmd)
-    if not success:
-        errors.append("BMS run failed -- see log output above.")
-    return {"success": success, "errors": errors, "dry_run_commands": []}
+        _log(f">>> Running BMS across models in {resolved_models_dir}")
+        success = run_command(cmd)
+        if not success:
+            errors.append("BMS run failed -- see log output above.")
+        return {"success": success, "errors": errors, "dry_run_commands": []}
+
+    finally:
+        if _materialized_dir and _materialized_dir.exists():
+            shutil.rmtree(_materialized_dir, ignore_errors=True)
 
 
 # =============================================================================
