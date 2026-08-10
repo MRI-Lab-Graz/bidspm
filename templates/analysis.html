@@ -291,6 +291,16 @@
                                     Number of subjects to smooth/run stats for at once. Set to 1 for single-seat MATLAB licenses or limited container concurrency.
                                 </div>
                             </div>
+                            <div class="mb-2 mt-2">
+                                <label class="form-label small mb-1" for="run_node_name">Variant (node name)</label>
+                                <input type="text" class="form-control form-control-sm" id="run_node_name" name="run_node_name" placeholder="e.g. full_model" value="{{ project.config.node_name if project else '' }}">
+                                <div class="text-muted mt-1" style="font-size:.72rem; line-height:1.4;">
+                                    Restrict stats to a single BIDS model node. Leave blank to use all nodes. Maps to <code>--node-name</code>.
+                                </div>
+                                <div id="run-node-output-hint" class="text-muted mt-1" style="font-size:.72rem; display:none;">
+                                    Output: <code id="run-node-output-path"></code>
+                                </div>
+                            </div>
                             <div class="form-check form-switch mb-1">
                                 <input class="form-check-input" type="checkbox" id="skip_validation" name="skip_validation" checked disabled>
                                 <label class="form-check-label" for="skip_validation">Skip Validation (Always On)</label>
@@ -3000,7 +3010,8 @@
             config_folder: hasProject ? null : document.getElementById('config-folder')?.value,
             study_filename: hasProject ? null : document.getElementById('study-filename')?.value,
             study_content: unifiedStudyConfig,
-            bms_model_files: Array.from(document.querySelectorAll('#bms-model-list input')).map(i => i.value.trim()).filter(Boolean)
+            bms_model_files: Array.from(document.querySelectorAll('#bms-model-list input')).map(i => i.value.trim()).filter(Boolean),
+            node_name: (document.getElementById('run_node_name')?.value || '').trim() || null
         };
     }
 
@@ -3170,6 +3181,24 @@
             row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
             document.getElementById('bms-model-list').appendChild(row);
         });
+
+        // Node-name input: show resolved output folder as a hint
+        const runNodeNameInput = document.getElementById('run_node_name');
+        if (runNodeNameInput) {
+            const hintEl = document.getElementById('run-node-output-hint');
+            const pathEl = document.getElementById('run-node-output-path');
+            const _FFX_UNNAMED = new Set(['run', 'runlevel']);
+            function updateNodeHint() {
+                const name = runNodeNameInput.value.trim();
+                if (!name || !hintEl || !pathEl) { hintEl && hintEl.style.setProperty('display', 'none'); return; }
+                const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const suffix = _FFX_UNNAMED.has(normalized) ? '' : `_node-${name}`;
+                pathEl.textContent = `derivatives/bidspm-stats/sub-*${suffix}/`;
+                hintEl.style.removeProperty('display');
+            }
+            runNodeNameInput.addEventListener('input', updateNodeHint);
+            updateNodeHint();
+        }
 
         // BIDS directory change triggers task detection
         const bidsInput = document.getElementById('input-BIDS_DIR');
