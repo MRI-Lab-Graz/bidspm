@@ -124,5 +124,97 @@ class TestRunBms(unittest.TestCase):
             mock_run_command.assert_called_once()
 
 
+    def test_run_bms_fails_early_when_node_collision_detected(self):
+        """run_bms must reject models_dir with duplicate node names before running."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # Both models share the same node name — collision
+            model = {
+                "Name": "test", "BIDSVersion": "1.9.0",
+                "Nodes": [{"Level": "Run", "Name": "DuplicateName",
+                            "Model": {"X": ["trial_type"]}}]
+            }
+            import json as _json
+            (d / "a_smdl.json").write_text(_json.dumps(model), encoding="utf-8")
+            (d / "b_smdl.json").write_text(_json.dumps(model), encoding="utf-8")
+
+            result = core.run_bms(
+                config_file="ignored.json",
+                container_config_file=None,
+                models_dir=str(d),
+            )
+
+        self.assertFalse(result["success"])
+        self.assertTrue(
+            any("DuplicateName" in e for e in result["errors"]),
+            f"Expected collision error in {result['errors']}",
+        )
+
+
+class TestCheckModelsDirNodeCollision(unittest.TestCase):
+    def _write_model(self, path: Path, node_name: str) -> None:
+        """Write a minimal valid BIDS Stats Model with the given root-node Name."""
+        model = {
+            "Name": "test",
+            "BIDSVersion": "1.9.0",
+            "Nodes": [{"Level": "Run", "Name": node_name, "Model": {"X": ["trial_type"]}}]
+        }
+        path.write_text(__import__("json").dumps(model), encoding="utf-8")
+
+    def test_returns_empty_when_all_node_names_distinct(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_model(d / "a_smdl.json", "ModelA")
+            self._write_model(d / "b_smdl.json", "ModelB")
+            self.assertEqual(core.check_models_dir_node_collision(d), [])
+
+    def test_reports_error_when_two_models_share_node_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_model(d / "a_smdl.json", "MyModel")
+            self._write_model(d / "b_smdl.json", "MyModel")
+            errors = core.check_models_dir_node_collision(d)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("MyModel", errors[0])
+
+    def test_normalization_catches_case_only_duplicates(self):
+        """'mymodel' and 'MyModel' normalize to the same label — still a collision."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_model(d / "a_smdl.json", "mymodel")
+            self._write_model(d / "b_smdl.json", "MyModel")
+            errors = core.check_models_dir_node_collision(d)
+            self.assertEqual(len(errors), 1)
+
+    def test_reports_error_for_run_level_node_name(self):
+        """'run' maps to an unsuffixed folder — guaranteed future collision risk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_model(d / "a_smdl.json", "run")
+            self._write_model(d / "b_smdl.json", "ModelB")
+            errors = core.check_models_dir_node_collision(d)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("unsuffixed", errors[0])
+
+    def test_reports_error_for_runlevel_node_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_model(d / "a_smdl.json", "run_level")  # normalizes to 'runlevel'
+            self._write_model(d / "b_smdl.json", "ModelB")
+            errors = core.check_models_dir_node_collision(d)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("unsuffixed", errors[0])
+
+    def test_skips_unreadable_model_files_gracefully(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "bad_smdl.json").write_text("not json", encoding="utf-8")
+            (d / "good_smdl.json")  # not written, just checking no crash
+            self._write_model(d / "good_smdl.json", "ModelA")
+            # Should not raise; bad file is skipped
+            result = core.check_models_dir_node_collision(d)
+            self.assertIsInstance(result, list)
+
+
 if __name__ == "__main__":
     unittest.main()

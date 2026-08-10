@@ -425,6 +425,48 @@ def resolve_models_dir(models_dir: str) -> Path:
     return path
 
 
+def check_models_dir_node_collision(models_dir: Path) -> List[str]:
+    """Return error strings for any root-node Name collisions in models_dir.
+
+    BMS requires all competing models to share task/space/FWHM, so two models
+    with the same root-node Name produce the same output folder path and
+    silently overwrite each other's SPM.mat/betas/contrasts.
+    """
+    errors: List[str] = []
+    seen: Dict[str, str] = {}  # normalized_label -> first filename that used it
+
+    for model_file in sorted(models_dir.glob("*_smdl.json")):
+        try:
+            with open(model_file, encoding="utf-8") as f:
+                content = json.load(f)
+        except Exception:
+            continue
+
+        node_name = _get_run_node_name(content)
+        if node_name is None:
+            continue
+
+        normalized = _normalize_node_label(node_name)
+
+        if normalized in _FFX_UNNAMED_NODE_LABELS:
+            errors.append(
+                f"{model_file.name}: root-node Name '{node_name}' maps to an "
+                "unsuffixed output folder (bidspm omits _node- for 'run'/'runlevel' "
+                "names) — rename it to a unique non-run/runlevel value to avoid "
+                "silent overwrites"
+            )
+        elif normalized in seen:
+            errors.append(
+                f"{model_file.name} and {seen[normalized]}: both have root-node "
+                f"Name '{node_name}' (normalized: '{normalized}') — they will write "
+                "to the same output folder and overwrite each other's results"
+            )
+        else:
+            seen[normalized] = model_file.name
+
+    return errors
+
+
 def run_bms(
     config_file: str,
     container_config_file: Optional[str],
@@ -463,6 +505,11 @@ def run_bms(
         resolved_models_dir = resolve_models_dir(models_dir)
     except ValueError as e:
         errors.append(str(e))
+        return {"success": False, "errors": errors, "dry_run_commands": []}
+
+    collision_errors = check_models_dir_node_collision(resolved_models_dir)
+    if collision_errors:
+        errors.extend(collision_errors)
         return {"success": False, "errors": errors, "dry_run_commands": []}
 
     config = load_config(config_file)

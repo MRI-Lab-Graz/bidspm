@@ -19,7 +19,8 @@ from .core import (
     discover_subjects, discover_tasks, discover_spaces,
     check_subject_processed,
     validate_bids_model, estimate_processing_time,
-    resolve_models_dir, run_bms
+    resolve_models_dir, run_bms,
+    check_models_dir_node_collision,
 )
 from .project_manager import (
     ProjectManager, Project, ProjectConfig,
@@ -37,7 +38,7 @@ __all__ = [
     'discover_subjects', 'discover_tasks', 'discover_spaces',
     'check_subject_processed',
     'validate_bids_model', 'estimate_processing_time',
-    'resolve_models_dir', 'run_bms',
+    'resolve_models_dir', 'run_bms', 'check_models_dir_node_collision',
     # Project Manager
     'ProjectManager', 'Project', 'ProjectConfig',
     'project_manager', 'PROJECTS_DIR', 'DATA_DIR',
