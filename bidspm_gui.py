@@ -31,25 +31,20 @@ import sys
 import threading
 import time
 import re
-import shlex
-import shutil
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context, redirect, url_for
+from flask import Flask, request
 from waitress import serve
 
 # Import all business logic from core
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
-    discover_subjects, discover_tasks, discover_spaces,
     check_subject_processed,
-    validate_bids_model, estimate_processing_time,
-    load_config
+    validate_bids_model,
 )
-from lib.config import auto_select_container_config
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
 from webapp.web_config_fs_api import register_config_fs_routes
 from webapp.web_discovery_model_api import (
@@ -151,13 +146,13 @@ def disable_browser_cache(response):
 # Utility Functions
 # =============================================================================
 
-def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Optional[int]:
+def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100, host: str = '127.0.0.1') -> Optional[int]:
     """Find an available port."""
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('0.0.0.0', port))
+                s.bind((host, port))
                 return port
             except socket.error:
                 continue
@@ -180,7 +175,7 @@ def wait_for_http_ready(url: str, timeout: float = 8.0, interval: float = 0.2) -
 def collect_startup_preflight_checks(app_root: Path = APP_ROOT) -> List[Dict[str, Any]]:
     """Collect basic readiness checks for the local web interface startup."""
     registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
-    required_api_routes = {'/check_environment', '/api/model/create', '/api/preflight/tools'}
+    required_api_routes = {'/api/model/create', '/api/projects', '/run'}
     required_page_routes = {'/', '/projects', '/analysis', '/model_editor'}
 
     return [
@@ -453,14 +448,22 @@ def shutdown():
 # Main Entry Point
 # =============================================================================
 
-if __name__ == '__main__':
+def parse_gui_args(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
     parser.add_argument('-p', '--port', type=int, default=None,
                        help='Port to use (default: 5100; any existing instance on that port is stopped first)')
+    parser.add_argument('--host', default='127.0.0.1',
+                       help='Address to listen on (default: 127.0.0.1, this machine only). The interface has no login: '
+                            'on a remote server keep the default and use "ssh -L <port>:localhost:<port>"; '
+                            'use 0.0.0.0 only on a network you trust')
     parser.add_argument('--no-browser', action='store_true',
                        help='Do not attempt to open a browser automatically (useful on headless servers)')
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == '__main__':
+    args = parse_gui_args()
 
     target_port = args.port or DEFAULT_PORT
 
@@ -468,7 +471,7 @@ if __name__ == '__main__':
     # a fresh server at the same URL (fixes the recurring blank-page issue).
     kill_existing_on_port(target_port)
 
-    port = find_free_port(target_port, max_tries=1)
+    port = find_free_port(target_port, max_tries=1, host=args.host)
     if not port:
         print(f"Error: Port {target_port} is still in use after attempting to free it.")
         import sys
@@ -488,7 +491,9 @@ if __name__ == '__main__':
         print('Status: startup checks completed with warnings. Launching the interface now.')
     print('Press Ctrl+C to stop the server')
     print()
-    print(f"Running with Waitress server on 0.0.0.0:{port}")
+    print(f"Running with Waitress server on {args.host}:{port}")
+    if args.host not in ('127.0.0.1', 'localhost', '::1'):
+        print("⚠️  Listening beyond this machine: the interface has no login. Anyone who can reach this port can run jobs and read files.")
     print(f"\n  👉  Open in browser: {url}\n")
 
     # Auto-open the browser unless suppressed.
@@ -511,4 +516,4 @@ if __name__ == '__main__':
                 pass
         _threading.Thread(target=_open_browser, daemon=True).start()
 
-    serve(app, host='0.0.0.0', port=port, threads=10)
+    serve(app, host=args.host, port=port, threads=10)

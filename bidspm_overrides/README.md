@@ -16,8 +16,7 @@ correct behavior.
 - **validateContrasts.m**: adds missing cell-array guard (container v4.0.0 bug).
 - **setBatchSubjectLevelContrasts.m**: coerces cell→struct before validate call.
 - **return_file_index.m**: suppresses benign warnings for fMRIPrep 'figures' QC files.
-- **Filter.m / get_input.m / check_field.m / identify_rows.m**: ensure the full
-  transformer chain uses our local versions so Filter + Factor work end-to-end.
+- **get_input.m**: part of the transformer chain; two lines changed so Filter + Factor work end-to-end.
 - **BidsModel.m**: fixes cellfun crash in validateConstrasts — Octave cannot use
   `x == 1` to test for the intercept when x is a multi-char string.
 - **setBatchEstimateModel.m**: fixes `for j = 1:size(contrastsList)` (container
@@ -59,8 +58,50 @@ correct behavior.
   stats-workers to race on the shared atlas cache/source dirs ("copyfile: no
   files to move", "delete: no such file"). Only strip '.gz' when the target
   path actually has it.
+  Also: path resolution is now separate from unzipping/merging (the Wang atlas merge
+  `spm_write_vol`s into the CPP_ROI tree), which only runs when the atlas is not already in
+  SPM's atlas dir. The image bakes all atlases in at build time, so a container run as an
+  arbitrary host uid never needs to write there.
+- **cliStats.m**: also honours env `BIDSPM_SKIP_RESULTS` (set by `bidspm.py` unless `--results` or the report action is requested) to skip the
+  SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above). Also fixes
+  `--design_only`: v4.0.0's model loop starts with `rmfield(opt, 'model')`, which drops
+  `opt.model.designOnly`, so the flag never stopped before estimation. Now it specifies the model and stops.
+- **getReferenceBinFromStartTime.m** (new) + a build-time `sed` in `setBatchSubjectLevelGLMSpec.m`: fMRIPrep drops
+  `SliceTiming` after slice-time correction and records `SliceTimingCorrected` + `StartTime` instead; v4.0.0 then
+  assumes the middle of the TR for SPM's `fmri_t0` (24 ms off for TR 1.2 / 80 slices / StartTime 0.561 s, and wrong
+  for a non-default `--slice-time-ref`). Now `fmri_t0 = round(StartTime / TR * fmri_t) + 1` when every run is
+  corrected and shares one StartTime; otherwise the old default. An explicit `opt.stc.referenceSlice` still wins.
+- **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
+  number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
+  SPM12". Now parses the major version and only compares revisions within SPM12.
+- **setBatchEstimateModel.m** (see above) also no longer adds SPM's "Model review" module at the group level: it
+  draws the design matrix, which fails without a graphics toolkit and aborted the batch after the estimation, so
+  the group contrasts were never written (bidspm still exited 0).
+- **setBatchPrintFigure.m**: no-op. SPM's "Print figure" job needs a graphics toolkit the
+  container doesn't have, so it only ever logged "Print error: Figure not found."
+- **validate.m**: upstream shells out to `validate_model` on every stats/contrasts/results
+  run; it crashes on pydantic 2 and rejects `Transformer: bidspm` models. Only the BIDS
+  dataset validator is kept; model validation is done by the GUI
+  (`lib.core.validate_bids_model`).
 - **allowed_actions.json**: keeps the CLI's list of allowed actions in sync
   with the workflows added/patched above (e.g. BMS actions).
+
+## Patches (`containers/dockerfile/patches/*.patch`)
+
+Fixes of a few lines are unified diffs against upstream v4.0.0, applied with `patch -p1` in the Dockerfile before the
+whole-file overrides above are copied in (the diff shows exactly what changed; a failing hunk fails the build):
+
+- **BidsModel.m**, **return_file_index.m**, **setBatchSubjectLevelContrasts.m**, **get_input.m**: the small fixes described
+  in the list above (get_input.m: `assert(isscalar(transformer))` instead of `numel(...) == 1`).
+- **bidsResults.m**: gives each result batch a unique name (`_<iBatch>`) and matches contrast names that carry a session
+  (`contrast(_ses-N)?_run-N`).
+- **bidspm.m**, **getOptionsFromCliArgument.m**, **allowed_actions.json**: register the `bms-cvlme` action next to
+  `bms`, `bms-posterior`, `bms-bms`. (`allowed_actions.json` used to be a whole-file override under a `data/` folder that
+  `.gitignore` excluded, so fresh clones silently built images without it; as a patch it is tracked.)
+- **inputParserForStats.m**: adds the `name_by_confounds` parameter (used by `cliStats.m`).
+
+To change a patched file: edit a copy of the upstream file and regenerate the diff
+(`diff -u -L a/<path> -L b/<path> upstream/<path> edited/<path> > containers/dockerfile/patches/<name>.patch`).
 
 ## Adding a new override
 

@@ -131,6 +131,43 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(response_no_project.status_code, 302)
         self.assertEqual(response_no_project.headers["Location"], "/analysis")
 
+    def test_analysis_page_has_results_checkbox_off_by_default_and_submitted(self):
+        project = self.project_manager.create_project("Results checkbox demo")
+
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+
+        import re
+        box = re.search(r'<input[^>]*id="run_results"[^>]*>', text)
+        self.assertIsNotNone(box, "run_results checkbox missing")
+        self.assertNotIn("checked", box.group(0))
+        self.assertIn("run_results: document.getElementById('run_results').checked", text)
+
+    def test_suggested_workers_route_reports_machine_and_suggestion(self):
+        response = self.client.get("/api/suggested_workers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertGreaterEqual(data["suggested"], 1)
+        self.assertLessEqual(data["suggested"], 16)
+        self.assertIn("cpus", data)
+
+    def test_analysis_page_has_suggest_workers_button(self):
+        project = self.project_manager.create_project("Suggest workers demo")
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+        self.assertIn('id="suggest_workers"', text)
+        self.assertIn("/api/suggested_workers", text)
+
+    def test_analysis_page_has_estimation_engine_select_and_image_field(self):
+        import re
+        project = self.project_manager.create_project("Engine select demo")
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+        select = re.search(r'<select[^>]*id="estimation_engine"[^>]*>.*?</select>', text, re.S)
+        self.assertIsNotNone(select)
+        self.assertIn('value="octave"', select.group(0))
+        self.assertIn('value="standalone"', select.group(0))
+        self.assertIn('data-key="spm_standalone_image"', text)
+        self.assertIn("estimation_engine: document.getElementById('estimation_engine').value", text)
+
     def test_analysis_route_loads_transformer_handoff_assets(self):
         project = self.project_manager.create_project("Analysis handoff assets demo")
 
@@ -553,6 +590,8 @@ class TestWebRoutes(unittest.TestCase):
                     "skip_validation": True,
                     "force": True,
                     "stats_workers": 3,
+                    "run_results": True,
+                    "estimation_engine": "standalone",
                 },
             )
 
@@ -573,6 +612,9 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("--force", called_command)
         self.assertIn("--settings", called_command)
         self.assertIn("--stats-workers", called_command)
+        self.assertIn("--results", called_command)
+        self.assertIn("--estimation-engine", called_command)
+        self.assertIn("standalone", called_command)
         self.assertEqual(called_command[called_command.index("--stats-workers") + 1], "3")
 
         settings_path = Path(called_command[called_command.index("--settings") + 1])
@@ -871,49 +913,6 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), ["motor"])
 
-    def test_get_subjects_uses_loaded_config(self):
-        config_file = Path(self.temp_dir.name) / "config.json"
-        config_file.write_text("{}", encoding="utf-8")
-
-        with patch.object(web_discovery_model_api, "load_config", return_value=SimpleNamespace()), \
-             patch.object(web_discovery_model_api, "discover_subjects", return_value=["01", "02"]):
-            response = self.client.get("/get_subjects", query_string={"config": str(config_file)})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), ["01", "02"])
-
-    def test_estimate_time_uses_loaded_config(self):
-        config_file = Path(self.temp_dir.name) / "config.json"
-        config_file.write_text("{}", encoding="utf-8")
-        fake_config = SimpleNamespace(SUBJECTS=[], TASKS=["motor"])
-
-        with patch.object(web_discovery_model_api, "load_config", return_value=fake_config), \
-             patch.object(web_discovery_model_api, "discover_subjects", return_value=["01"]), \
-             patch.object(web_discovery_model_api, "estimate_processing_time", return_value={"minutes": 12}):
-            response = self.client.post(
-                "/estimate_time",
-                json={"config": str(config_file), "actions": ["smooth"]},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"minutes": 12})
-
-    def test_check_environment_reports_container_tools(self):
-        def fake_which(tool):
-            if tool == "docker":
-                return "/usr/bin/docker"
-            return None
-
-        with patch("shutil.which", side_effect=fake_which):
-            response = self.client.get("/check_environment")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {
-            "docker_available": True,
-            "apptainer_available": False,
-            "all_features_available": True,
-        })
-
     def test_validate_model_returns_validator_payload(self):
         with patch.object(web_discovery_model_api, "validate_bids_model", return_value={"valid": True, "messages": []}):
             response = self.client.post(
@@ -958,20 +957,6 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(by_datatype["func"]["count"], 1)
         self.assertEqual(by_datatype["func"]["entities"]["task"], "motor")
         self.assertEqual(by_datatype["anat"]["entities"]["space"], "T1w")
-
-    def test_api_preflight_tools_reports_tool_availability(self):
-        def fake_which(tool):
-            if tool in {"docker", "octave"}:
-                return f"/usr/bin/{tool}"
-            return None
-
-        with patch("shutil.which", side_effect=fake_which):
-            response = self.client.get("/api/preflight/tools")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["docker"], {"available": True, "path": "/usr/bin/docker"})
-        self.assertEqual(response.get_json()["apptainer"], {"available": False, "path": ""})
-        self.assertEqual(response.get_json()["octave"], {"available": True, "path": "/usr/bin/octave"})
 
     def test_api_stats_subject_coverage_rejects_missing_project(self):
         response = self.client.post(

@@ -1,0 +1,20 @@
+--- a/src/workflows/stats/bidsResults.m
++++ b/src/workflows/stats/bidsResults.m
+@@ -226,7 +226,7 @@
+ 
+           for iBatch = 1:numel(matlabbatch)
+             batch{1} = struct('spm', matlabbatch{iBatch}.spm);
+-            status = saveAndRunWorkflow(batch, batchName, opt, subLabel);
++            status = saveAndRunWorkflow(batch, [batchName, '_', num2str(iBatch)], opt, subLabel);
+ 
+             if status && isfield(matlabbatch{iBatch}, 'result')
+               renameOutputResults(opt, matlabbatch{iBatch}.result, subLabel);
+@@ -382,7 +382,7 @@
+       %  opt.result.name = 'listening_run-1'
+       %
+ 
+-      tmp.name = [contrastName '_run-[0-9]+'];
++      tmp.name = [contrastName '(_ses-[0-9]+)?_run-[0-9]+'];
+       if endsWithRunNumber(contrastName)
+         tmp.name = contrastName;
+       end

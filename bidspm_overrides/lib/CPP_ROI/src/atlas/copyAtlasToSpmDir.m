@@ -29,7 +29,7 @@ function copyAtlasToSpmDir(varargin)
 
   spmAtlasDir = fullfile(spm('dir'), 'atlas');
 
-  [sourceAtlasImage, sourceAtlasXml] = prepareFiles(atlas);
+  [sourceAtlasImage, sourceAtlasXml] = atlasPaths(atlas);
 
   targetAtlasImage = fullfile(spmAtlasDir, spm_file(sourceAtlasImage, 'filename'));
   targetAtlasXml = fullfile(spmAtlasDir, spm_file(sourceAtlasXml, 'filename'));
@@ -64,6 +64,8 @@ function copyAtlasToSpmDir(varargin)
               atlas, ...
               spmAtlasDir);
     end
+    materialiseAtlas(atlas, sourceAtlasImage);
+
     spm_mkdir(spmAtlasDir);
 
     copyfile(sourceAtlasImage, spmAtlasDir);
@@ -97,7 +99,7 @@ function copyAtlasToSpmDir(varargin)
 
 end
 
-function [sourceAtlasImage, sourceAtlasXml] = prepareFiles(atlas)
+function [sourceAtlasImage, sourceAtlasXml] = atlasPaths(atlas)
 
   SUPPORTED_ATLASES = {'aal', 'hcpex', 'glasser', 'visfatlas', 'wang'};
 
@@ -135,6 +137,15 @@ function [sourceAtlasImage, sourceAtlasXml] = prepareFiles(atlas)
              bids.internal.create_unordered_list(SUPPORTED_ATLASES)]);
 
   end
+
+end
+
+function materialiseAtlas(atlas, sourceAtlasImage)
+  % Create the source files (unzip; for Wang, merge the hemisphere maps). Only called when
+  % the atlas is not yet in SPM's atlas dir, so this never writes into a read-only image
+  % once the atlases have been baked in at build time.
+
+  atlas = lower(atlas);
 
   if ismember(atlas, {'hcpex', 'glasser', 'visfatlas', 'wang'})
     if exist(sourceAtlasImage, 'file') ~= 2

@@ -27,22 +27,23 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - `bidspm_overrides/` – locally-patched upstream bidspm files, baked into the Docker
   image at build time (see `bidspm_overrides/README.md` for what's patched and why)
 - `containers/dockerfile/` – the Dockerfile and build scripts for the bidspm image
-- `scripts/` – helper utilities (environment activation, setup, wrapper scripts)
+- `lib/spm_standalone.py` – optional estimation in SPM's compiled standalone (see below)
+- `scripts/` – helper utilities (environment activation, setup, wrapper scripts); `scripts/check_run_log.py` fails on any unexpected error or warning in a run log
 - `logs/` – auto-generated run logs (e.g., `run_bidspm.log`, `model_*_timestamp.log`)
 - `tests/` – automated tests for API and feature behavior
 - `docs/repository_notes.md` – engineering notes (OO direction and test policy)
 
 ## ⚠️ Known Issues
 
-Older versions of this tool patched the running container at runtime (bind-mounting
-fixes over its files) and worked around a `returnAtlasDir` atlas-initialization bug
-with a `BIDSPM_SKIP_ATLAS_INIT` environment variable. Both are now fixed properly:
-the patches are baked into the Docker image at build time (see
-`bidspm_overrides/README.md`), and the atlas-init bug is fixed at the source
-(`copyAtlasToSpmDir.m`) rather than worked around. If you still hit a
-`'returnAtlasDir' undefined` error, rebuild the image
-(`docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .`
-from the repo root) to pick up the latest overrides.
+- **The image runs SPM 26.10.01 on GNU Octave 9.4, with bidspm v4.0.0** (which was written for SPM12). SPM does not
+  officially support Octave; this setup is tested here (results match SPM12 to r ≥ 0.99996 on first-level stats, and
+  match SPM's own MATLAB-Runtime standalone to 1e-8). bidspm's lab patches live in `bidspm_overrides/`.
+- **Rebuild the image after every `git pull`** that touches `bidspm_overrides/` or `containers/dockerfile/`:
+  the patches are baked in at build time, so an old image silently lacks newer fixes
+  (`docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .`, about 10 minutes, ~4.6 GB).
+- The published `ghcr.io/mri-lab-graz/bidspm:latest` predates this SPM 26 image and is not compatible with this code; the defaults point at the image you build locally (`bidspm/bidspm:latest`).
+- "Slice timing information was missing" in a stats log is expected for fMRIPrep input: fMRIPrep drops `SliceTiming`
+  after correcting and records `StartTime`, which is used for SPM's `fmri_t0`.
 
 ## 🌍 Multi-Platform Support
 
@@ -81,7 +82,7 @@ The tool supports multiple container configurations:
 ```json
 {
   "container_type": "docker",
-  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
+  "docker_image": "bidspm/bidspm:latest",
   "apptainer_image": ""
 }
 ```
@@ -109,18 +110,14 @@ The tool supports multiple container configurations:
 This repo is a Python CLI/webapp that drives a Docker (or Apptainer)
 container where the actual SPM/Octave analysis runs -- you need both parts.
 
-Pull the pre-built image instead of building it yourself (published from
-`containers/dockerfile/dockerfile`, with `bidspm_overrides/` baked in):
+Build the image from this checkout (SPM 26.10.01 is compiled for Octave during the build; the SPM version is a
+build argument, `--build-arg SPM_TAG=26.10.01`):
 
 ```bash
-docker pull ghcr.io/mri-lab-graz/bidspm:latest
+docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .
 ```
 
-New image versions are published manually / on version tags via
-`.github/workflows/docker-publish.yml`, so `:latest` here reflects the last
-published release, not necessarily every commit on `main`. To always match
-your exact checkout instead, build locally -- see
-`containers/dockerfile/build_mri_lab_container.sh`.
+(`containers/dockerfile/build_mri_lab_container.sh` wraps the same command.)
 
 Then get the Python side running:
 
@@ -130,9 +127,12 @@ cd bidspm
 pip install -r requirements.txt
 ```
 
-`containers/container.json` already defaults `"docker_image"` to
-`"ghcr.io/mri-lab-graz/bidspm:latest"`, so no further edits are needed unless
-you want to point it at a locally-built image instead.
+Point `container.json` at the image you built (`"docker_image": "bidspm/bidspm:latest"`).
+
+**On a remote server without a display:** the web GUI starts without opening a browser when it detects an SSH session
+(or with `--no-browser`). It listens on `127.0.0.1` only, because it has no login (anyone who can reach the port can run
+jobs and read files). Forward the port from your own machine instead of exposing it:
+`ssh -L 5100:localhost:5100 you@server`, then open `http://localhost:5100`. Use `--host 0.0.0.0` only on a network you trust.
 
 ### Option 2: With setup script (cross-platform)
 
@@ -178,8 +178,12 @@ pip install -r requirements.txt
 Run the test suite from repository root:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+pip install pytest        # not in requirements.txt
+python -m pytest -q tests # `python -m unittest discover -s tests -p "test_*.py"` also works
 ```
+
+A few tests need extras and skip themselves when they are missing (pandas for `scripts/fix_events_format.py`, GNU Octave on the host
+for the `.m` override tests). The image smoke test runs only with `BIDSPM_TEST_IMAGE=<built image>`.
 
 Notes:
 
@@ -229,17 +233,7 @@ Create a `config.json` file with your specific settings:
 
 #### For Docker
 
-Use the published image (default -- no local build required, see Installation above):
-
-```json
-{
-  "container_type": "docker",
-  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
-  "apptainer_image": ""
-}
-```
-
-Or build locally instead, e.g. if you've edited `bidspm_overrides/`:
+Use the image you built (see Installation above):
 
 ```json
 {
@@ -259,8 +253,65 @@ Or build locally instead, e.g. if you've edited `bidspm_overrides/`:
 }
 ```
 
-Build a `.sif` from either Docker image above, e.g.
-`apptainer build bidspm.sif docker://ghcr.io/mri-lab-graz/bidspm:latest`.
+Build a `.sif` from the Docker image above, e.g.
+`apptainer build bidspm.sif docker-daemon://bidspm/bidspm:latest`.
+
+#### Optional: `spm_standalone_image`
+
+Only needed for `--estimation-engine standalone` (next section). A Docker image reference (pin it by digest or image id)
+or, for Apptainer, the path of a `.sif`:
+
+```json
+{ "container_type": "docker", "docker_image": "bidspm/bidspm:latest",
+  "spm_standalone_image": "sha256:<image id of your SPM standalone build>" }
+```
+
+## Faster estimation with SPM standalone (optional)
+
+On long scans nearly all of a subject's time is SPM's model estimation (`spm_spm`), and Octave is much slower than
+MATLAB at it. SPM publishes a compiled **standalone** that runs on the free MATLAB Runtime (no MATLAB licence). With
+`--estimation-engine standalone` bidspm runs per subject: **design** in the Octave image, **estimation** in the SPM
+standalone image, **contrasts** in the Octave image. Everything else (BMS, ROI features, smoothing, dataset level, reports)
+stays on Octave, because the standalone has only SPM's core toolboxes.
+
+Measured on one 1006-volume subject (study 141): 391 s end to end instead of about 33 minutes. The results match the
+all-Octave run (43 files, r = 1.00000000, max relative difference 3e-8). Four standalone estimations in parallel took
+346-378 s each. The default stays `octave`; nothing changes unless you ask.
+
+**You provide the image.** SPM has no pinned SPM 26 container yet (26.10.01 was released 2026-10-13), so build one from
+SPM's own recipe. The 26.10.01 standalone needs MATLAB Runtime **R2026a**:
+
+```bash
+git clone https://github.com/spm/spm-docker && cd spm-docker/matlab
+docker build -t spm-standalone:26.10.01 \
+  --build-arg MATLAB_VERSION=R2026a --build-arg SPM_RELEASE=26.10 --build-arg SPM_REVISION=01 .
+docker inspect --format '{{.Id}}' spm-standalone:26.10.01      # pin this in container.json
+```
+
+(The build downloads the MATLAB Runtime, ~4 GB, and accepts MathWorks' runtime licence.) SPM also publishes SPM 25
+images (`ghcr.io/spm/spm-docker:docker-matlab-25.01.02`); they work the same way and gave the same numbers, but then the
+design/contrast steps (SPM 26) and the estimation (SPM 25) differ in version. Estimation code is unchanged between them.
+
+Enable it with `--estimation-engine standalone` on the command line, or the "Model estimation engine" select in the GUI.
+If `spm_standalone_image` is empty or the image is missing the run stops before the first subject with instructions;
+it never falls back silently. The image id/digest is logged for reproducibility.
+
+## Speed notes
+
+Measured on a 32-core machine (study 132, 3 subjects in parallel, stats only): 8 min 9 s originally, 113 s now.
+
+- **Thread cap per container.** Octave starts one busy-waiting BLAS thread per core, so parallel workers thrashed each other
+  (394 s vs 115 s). Each container now gets `OPENBLAS_NUM_THREADS` = cores / workers (max 8).
+- **Parallel subjects.** Heavy first-level estimation is single-core per subject, so a whole study scales by running more
+  subjects at once. The GUI's **Suggest** button proposes a value from your CPU count and free memory (about 4 GB per worker).
+- **SPM Results export is opt-in** (`--results`, or the checkbox in the GUI): it costs about a third of the per-subject time
+  on short runs. The `report` action needs it and turns it on automatically.
+- The BIDS dataset is validated by the first container only, and the atlases are unpacked at build time (no warm-up subject).
+
+## Checking a run log
+
+`python scripts/check_run_log.py <logfile>` exits 1 if the log contains any error or warning that is not on a short
+allow-list of data-dependent notices (contrasts without significant voxels, missing slice timing, features Octave lacks).
 
 ## Usage
 

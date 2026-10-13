@@ -12,10 +12,7 @@ from flask import Flask, jsonify, request
 
 from lib import (
     discover_spaces,
-    discover_subjects,
     discover_tasks,
-    estimate_processing_time,
-    load_config,
     validate_bids_model,
 )
 
@@ -744,37 +741,10 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
             return jsonify([])
         return jsonify(discover_spaces(Path(path), tasks if tasks else None))
 
-    @app.route('/get_subjects')
-    def get_subjects():
-        config_path = request.args.get('config', 'config/config.json')
-        if not os.path.isfile(config_path):
-            return jsonify([])
-        try:
-            config = load_config(config_path)
-            return jsonify(discover_subjects(config))
-        except Exception as exc:
-            return jsonify({'error': str(exc)}), 500
-
-    @app.route('/estimate_time', methods=['POST'])
-    def api_estimate_time():
-        data = request.json or {}
-        config_path = data.get('config', 'config/config.json')
-        actions = data.get('actions', ['smooth', 'stats'])
-        try:
-            config = load_config(config_path)
-            subjects = config.SUBJECTS or discover_subjects(config)
-            tasks = config.TASKS
-            return jsonify(estimate_processing_time(subjects, actions, tasks))
-        except Exception as exc:
-            return jsonify({'error': str(exc)}), 500
-
-    @app.route('/check_environment')
-    def api_check_environment():
-        import shutil
-
-        docker = shutil.which('docker') is not None
-        apptainer = shutil.which('apptainer') is not None
-        return jsonify({'docker_available': docker, 'apptainer_available': apptainer, 'all_features_available': docker or apptainer})
+    @app.route('/api/suggested_workers')
+    def api_suggested_workers():
+        from lib.utils import suggest_stats_workers, system_resources
+        return jsonify(suggest_stats_workers(**system_resources()))
 
     @app.route('/api/model/create', methods=['POST'])
     def api_model_create():

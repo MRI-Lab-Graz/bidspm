@@ -19,26 +19,6 @@ def _load_page_context(
 
 
 def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) -> None:
-    @app.route('/test')
-    def test_page():
-        """Simple test page to verify server is working."""
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head><title>BIDSPM Test</title></head>
-        <body style="font-family: sans-serif; padding: 20px;">
-            <h1>BIDSPM Web Interface - Test Page</h1>
-            <p>If you see this, the server is working correctly.</p>
-            <p><a href="/">Go to main interface</a></p>
-            <h2>System Info:</h2>
-            <ul>
-                <li>Server: Flask + Waitress</li>
-                <li>Templates: Jinja2</li>
-            </ul>
-        </body>
-        </html>
-        """
-
     @app.route('/')
     @app.route('/projects')
     def projects_page():

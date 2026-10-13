@@ -1,0 +1,11 @@
+--- a/lib/bids-matlab/+bids/+transformers_list/get_input.m
++++ b/lib/bids-matlab/+bids/+transformers_list/get_input.m
+@@ -5,7 +5,7 @@
+   % (C) Copyright 2022 BIDS-MATLAB developers
+ 
+   assert(isstruct(transformer));
+-  assert(numel(transformer) == 1);
++  assert(isscalar(transformer));
+ 
+   verbose = true;
+   if isfield(transformer, 'verbose')

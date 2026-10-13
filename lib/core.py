@@ -12,13 +12,22 @@ import random
 import shlex
 import shutil
 import subprocess
+import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Callable, Tuple
+from typing import Sequence, List, Optional, Dict, Any, Callable, Tuple
 
+from .spm_standalone import (
+    build_spm_standalone_command,
+    check_image as check_spm_image,
+    find_new_spm_mats,
+    is_estimated,
+    write_estimation_job,
+)
 from .config import Config, ContainerConfig, load_config, load_container_config
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
@@ -32,63 +41,6 @@ from .utils import (
 # =============================================================================
 # Container Command Building (Split by Type)
 # =============================================================================
-
-_CPP_ROI_ATLAS_CONTAINER_PATH = "/home/neuro/bidspm/lib/CPP_ROI/atlas"
-
-
-def _seed_cpp_roi_atlas_cache(atlas_cache_dir: Path, container_type: str, image: str) -> None:
-    """Seed the persistent atlas cache dir from the image's own CPP_ROI atlas
-    directory the first time it's used.
-
-    Upstream CPP_ROI ships library code (returnAtlasDir.m) and lookup tables
-    alongside the atlas data inside the same directory. Bind-mounting an
-    *empty* host dir over that path -- which is what makes the cache
-    persistent across runs -- would shadow those code files and break
-    ROI/atlas features entirely (``'returnAtlasDir' undefined``). Copy the
-    image's pristine atlas/ dir (code + small lookup tables, ~50MB) onto the
-    host cache once, via a throwaway bind mount at a non-shadowed path, so
-    the real bind mount lands on a directory that still has the code in it.
-    """
-    if (atlas_cache_dir / "returnAtlasDir.m").exists():
-        return
-
-    seed_target = "/mnt/atlas_seed"
-    # Copy first, then chmod everything *under* the mount point (not the
-    # mount point itself -- chmod requires owning the path, and the host
-    # process, not this container, owns that directory). Copied files/dirs
-    # otherwise keep the image's original (often non-world-writable) modes,
-    # which blocks later atlas downloads/extracts under this cache dir
-    # whenever the container runs as a different uid than whatever seeded it
-    # (see build_docker_command's --user).
-    seed_cmd = ["sh", "-c",
-                f"cp -rT {_CPP_ROI_ATLAS_CONTAINER_PATH} {seed_target} && "
-                f"find {seed_target} -mindepth 1 -exec chmod 0777 {{}} +"]
-    if container_type == "docker":
-        cmd = ["docker", "run", "--rm", "--entrypoint", "",
-               "-v", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
-    else:
-        cmd = ["apptainer", "exec", "--bind", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
-    subprocess.run(cmd, check=True, capture_output=True)
-
-
-def _get_cpp_roi_atlas_cache_dir(config: Config, container_type: str, image: str) -> Path:
-    """Return the persistent, seeded CPP_ROI atlas cache dir.
-
-    The image's own (patched) copyAtlasToSpmDir.m populates atlas data into
-    this dir lazily on first use per atlas, so neither the repo nor the image
-    needs to ship the full downloaded atlas data (300+MB) -- only the initial
-    code/lookup-table seed (see _seed_cpp_roi_atlas_cache).
-    """
-    atlas_cache_dir = config.WD / "cpp_roi_atlas"
-    atlas_cache_dir.mkdir(parents=True, exist_ok=True)
-    # Docker images run as their own baked-in user (not the host user, unlike
-    # Apptainer), so the host uid that created this dir and the container's
-    # uid rarely match. Open it up so the container can write into it
-    # regardless of whose host account this directory belongs to.
-    atlas_cache_dir.chmod(0o777)
-    _seed_cpp_roi_atlas_cache(atlas_cache_dir, container_type, image)
-    return atlas_cache_dir
-
 
 def _model_container_path(
     model_file_path: Optional[Path],
@@ -116,7 +68,8 @@ def build_docker_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build Docker container command.
 
@@ -170,18 +123,11 @@ def build_docker_command(
                 cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
                 model_container_path = "/models/smdl.json"
 
-    # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
-    # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "docker", container_config.docker_image)
-    cmd.extend(["-v", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
-
-    # Persist other writable dirs the image needs (error logs, SPM/atlas
+    # Persist other writable dirs the image needs (error logs, SPM
     # caches) outside the ephemeral --rm container, matching what Apptainer
     # already does. chmod 0o777 since --user above runs as the host uid,
     # which won't otherwise have write access to a dir it didn't create.
     for dir_name, container_path in [
-        ("atlas", "/opt/spm12/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -199,7 +145,8 @@ def build_docker_command(
         "-e", "SPM_HTML_BROWSER=0",
         "-e", "BIDSPM_IGNORE_FIELDMAPS=1",
         "-e", "BIDSPM_IGNORE_FIGURES=1",
-        "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
+        "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1",
+        *[x for k, v in (extra_env or {}).items() for x in ("-e", f"{k}={v}")],
     ])
 
     if override_entrypoint is not None:
@@ -222,7 +169,8 @@ def build_apptainer_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build Apptainer/Singularity container command.
 
@@ -302,14 +250,7 @@ def build_apptainer_command(
             "--bind", f"{_wrapper}:/usr/bin/bids-validator",
         ])
 
-    # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
-    # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "apptainer", container_config.apptainer_image)
-    cmd.extend(["--bind", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
-
     for dir_name, container_path in [
-        ("atlas", "/opt/spm12/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -326,10 +267,11 @@ def build_apptainer_command(
         "--env", "SPM_HTML_BROWSER=0",
         "--env", "BIDSPM_SKIP_ATLAS_INIT=1",
         "--env", f"OCTAVE_EXECUTABLE={runtime_bind_path}/octave",
-        "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm12",
+        "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm",
         "--env", "BIDSPM_IGNORE_FIELDMAPS=1",
         "--env", "BIDSPM_IGNORE_FIGURES=1",
-        "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
+        "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1",
+        *[x for k, v in (extra_env or {}).items() for x in ("--env", f"{k}={v}")],
     ])
 
     cmd.append(container_config.apptainer_image)
@@ -350,7 +292,7 @@ def _create_octave_wrapper(run_tmp_dir: Path):
     """Create Octave wrapper script with proper paths."""
     octave_wrapper = run_tmp_dir / "octave"
     content = '''#!/bin/bash
-export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm12:$MATLABPATH"
+export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm:$MATLABPATH"
 if [ -f /usr/bin/octave ]; then REAL_OCTAVE=/usr/bin/octave
 elif [ -f /usr/local/bin/octave ]; then REAL_OCTAVE=/usr/local/bin/octave
 elif [ -f /usr/bin/octave-cli ]; then REAL_OCTAVE=/usr/bin/octave-cli
@@ -368,13 +310,14 @@ def build_container_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build container command based on type (dispatches to specific builder)."""
     if container_config.container_type == "docker":
-        return build_docker_command(container_config, config, args, model_file_path, override_entrypoint)
+        return build_docker_command(container_config, config, args, model_file_path, override_entrypoint, extra_env)
     elif container_config.container_type == "apptainer":
-        return build_apptainer_command(container_config, config, args, model_file_path, override_entrypoint)
+        return build_apptainer_command(container_config, config, args, model_file_path, override_entrypoint, extra_env)
     else:
         raise ValueError(f"Unsupported container type: {container_config.container_type}")
 
@@ -673,32 +616,6 @@ def _normalize_node_label(name: Optional[str]) -> str:
 _FFX_UNNAMED_NODE_LABELS = {'run', 'runlevel'}
 
 
-# Files bidspm's CPP_ROI/copyAtlasToSpmDir.m populates into the shared
-# host atlas cache dir (config.WD / "atlas", bind-mounted read/write into
-# every concurrent container as /opt/spm12/atlas). When this cache is empty,
-# multiple concurrent stats-workers can each see it as empty at the same
-# time and race on the Wang-atlas merge-then-delete step in a *separate*
-# shared source dir (CPP_ROI's own atlas/ tree) -- confirmed live: this
-# caused sporadic "delete: no such file" / copyfile crashes for ~4% of
-# subjects in a 12-way-parallel batch. Once the target cache dir already has
-# these files, copyAtlasToSpmDir.m's own atlasPresent check short-circuits
-# before touching the shared source dir at all, so pre-warming it with one
-# sequential run eliminates the race entirely (see _atlas_cache_is_warm()).
-_ATLAS_CACHE_FILES = [
-    "AAL3v1_1mm.nii", "AAL3v1_1mm.xml",
-    "HCPex.nii", "HCPex.xml",
-    "space-MNI152ICBM2009anlin_seg-glasser_dseg.nii",
-    "space-MNI152ICBM2009anlin_seg-glasser_dseg.xml",
-    "space-MNI_seg-visfAtlas_dseg.nii", "space-MNI_seg-visfAtlas_dseg.xml",
-    "space-MNI_seg-wang_dseg.nii", "space-MNI_seg-wang_dseg.xml",
-]
-
-
-def _atlas_cache_is_warm(config: Config) -> bool:
-    atlas_dir = config.WD / "atlas"
-    return all((atlas_dir / f).exists() for f in _ATLAS_CACHE_FILES)
-
-
 def check_subject_processed(
     config: Config, subject_label: str, task: str, action: str,
     node_name: Optional[str] = None
@@ -827,6 +744,7 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
         return {"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"}
 
     warnings.extend(_check_dataset_edge_filters(model_content))
+    warnings.extend(_check_dataset_node_name(model_content))
 
     # Schema validation
     try:
@@ -888,6 +806,22 @@ def _check_empty_contrasts(model: Dict) -> List[str]:
             issues.append(f"Node '{node_name}': DummyContrasts.Contrasts is an empty list — omit the key to use all model variables")
 
     return issues
+
+
+def _check_dataset_node_name(model: Dict) -> List[str]:
+    """Warn when a Dataset-level node is not named 'dataset'.
+
+    bidspm's report code (boilerplate.m) looks the node up by Name == 'dataset';
+    any other name makes it log "Could not find a corresponding Node".
+    """
+    nodes = model.get('Nodes', model.get('Steps', []))
+    return [
+        f"Node '{node.get('Name')}': Dataset-level nodes must be named 'dataset' "
+        "(bidspm looks the node up by name)"
+        for node in nodes
+        if isinstance(node, dict) and str(node.get('Level', '')).strip() == 'Dataset'
+        and str(node.get('Name', '')).strip() != 'dataset'
+    ]
 
 
 def _check_dataset_edge_filters(model: Dict) -> List[str]:
@@ -1051,6 +985,22 @@ def _prepare_model_content_for_execution(model_content: Dict[str, Any]) -> List[
 # Pipeline Execution
 # =============================================================================
 
+_MAX_BLAS_THREADS = 8
+
+
+_BIDSPM_FAILURE_MARKERS = ("ERROR LOG SAVED:",)  # printed when bidspm caught an error (exit code stays 0)
+
+
+def _blas_thread_env(workers: int, cpus: Optional[int]) -> Dict[str, str]:
+    """Per-container BLAS/OpenMP thread limits so parallel workers don't oversubscribe the CPUs.
+
+    Octave starts one busy-waiting thread per core by default; with several workers they thrash
+    each other (3 parallel subjects on 32 cores: 394 s unrestricted vs 115 s at 1 thread each).
+    """
+    n = str(max(1, min(_MAX_BLAS_THREADS, (cpus or 1) // max(1, workers))))
+    return {"OPENBLAS_NUM_THREADS": n, "OMP_NUM_THREADS": n, "MKL_NUM_THREADS": n}
+
+
 @dataclass
 class PipelineOptions:
     """Options controlling pipeline execution."""
@@ -1067,6 +1017,8 @@ class PipelineOptions:
     dry_run: bool = False
     debug: bool = False
     name_by_confounds: bool = False
+    estimation_engine: str = "octave"  # 'standalone': estimate in SPM's compiled standalone (opt-in)
+    run_results: bool = False  # SPM Results export is opt-in (slow); always on for 'report'
 
     # Callbacks for progress reporting
     on_progress: Optional[Callable[[str], None]] = None
@@ -1097,6 +1049,9 @@ class Pipeline:
     def __init__(self, options: PipelineOptions):
         self.options = options
         self.config: Optional[Config] = None
+        self._workers = 1  # active stats workers, set in run(); sizes the BLAS threads
+        self._validation_lock = threading.Lock()
+        self._validated = False
         self.container_config: Optional[ContainerConfig] = None
         self.model_file_path: Optional[Path] = None
         self.stats_node_name: Optional[str] = None
@@ -1283,6 +1238,17 @@ class Pipeline:
                     warnings=self.warnings
                 )
 
+            if not self._check_standalone_image():
+                return PipelineResult(
+                    success=False,
+                    subjects_processed=[],
+                    subjects_failed=[],
+                    actions_completed=[],
+                    log_file=self.log_file,
+                    errors=self.errors,
+                    warnings=self.warnings
+                )
+
             subjects = self.get_subjects_to_process()
             if not subjects:
                 self._log_error("No subjects found to process")
@@ -1363,29 +1329,7 @@ class Pipeline:
 
                 max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
                     if eligible_subjects else 1
-
-                # Avoid a known race in bidspm's CPP_ROI atlas init: process one
-                # subject sequentially first so the shared atlas cache is fully
-                # populated before any concurrent workers can race on it (see
-                # _atlas_cache_is_warm() docstring for the full mechanism).
-                if (
-                    max_workers > 1
-                    and 'stats' in self.options.actions
-                    and not _atlas_cache_is_warm(self.config)
-                ):
-                    self._log(
-                        ">>> Warming shared atlas cache with one sequential subject "
-                        "before parallelizing (avoids a race in bidspm's atlas init "
-                        "when multiple workers hit an empty cache at once)"
-                    )
-                    warm_subject = eligible_subjects.pop(0)
-                    if self._process_subject(warm_subject, task):
-                        subjects_processed.append(warm_subject)
-                        actions_completed.update(self.options.actions)
-                    else:
-                        subjects_failed.append(warm_subject)
-                    max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
-                        if eligible_subjects else 1
+                self._workers = max_workers
 
                 if max_workers <= 1:
                     for subject in eligible_subjects:
@@ -1475,10 +1419,63 @@ class Pipeline:
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
             self._copy_brain_mask(subject, task)
-            if not self._run_container_action("stats", subject, task):
+            started = time.time() - 1
+            if self.options.estimation_engine == "standalone":
+                ok = self._run_stats_standalone(subject, task)
+            else:
+                ok = self._run_container_action("stats", subject, task)
+            # bidspm's launcher is try/catch + exit, so a failed run still exits 0: check for output.
+            if ok and not self.options.dry_run \
+                    and not find_new_spm_mats(self.config, subject, task, since=started):
+                self._log_error(f"Stats for subject {subject}, task {task}: the container exited 0 but "
+                                f"wrote no SPM.mat; see the container log above")
+                ok = False
+            if not ok:
                 success = False
 
         return success
+
+    def _check_standalone_image(self) -> bool:
+        """Preflight for estimation_engine='standalone': the user-supplied image must exist (no pull, no fallback)."""
+        if self.options.estimation_engine != "standalone":
+            return True
+        ok, msg = check_spm_image(self.container_config)
+        if not ok:
+            self._log_error(msg)
+        else:
+            self._log(f"SPM standalone image: {msg}")
+        return ok
+
+    def _run_stats_standalone(self, subject: str, task: str) -> bool:
+        """design (Octave bidspm) -> fmri_est (SPM standalone) -> contrasts (Octave bidspm).
+
+        All three see the same /derivatives layout, so the absolute paths inside SPM.mat stay valid.
+        """
+        started = time.time() - 1
+        if not self._run_container_action("stats", subject, task, extra_args=["--design_only"]):
+            return False
+
+        job_dir = self.config.WD / "tmp" / f"spm_est_{subject}_{random.randint(1000, 9999)}"
+        if self.options.dry_run:
+            job_dir_cmd = build_spm_standalone_command(self.container_config, self.config, job_dir)
+            self.dry_run_commands.append(' '.join(job_dir_cmd))
+            self._log(f"[DRY RUN] Would estimate in SPM standalone: {' '.join(job_dir_cmd[:5])}...")
+        else:
+            mats = find_new_spm_mats(self.config, subject, task, since=started)
+            if not mats:
+                self._log_error(f"Design step wrote no SPM.mat for subject {subject}, task {task}")
+                return False
+            container_paths = [f"/derivatives/{m.relative_to(self.config.DERIVATIVES_DIR)}" for m in mats]
+            write_estimation_job(container_paths, job_dir)
+            self._log(f">>> Estimating in SPM standalone: subject {subject}, task {task}")
+            if not run_command(build_spm_standalone_command(self.container_config, self.config, job_dir)):
+                return False
+            if not all(is_estimated(m) for m in mats):
+                self._log_error(f"SPM standalone exited 0 but wrote no beta images for subject {subject}, "
+                                f"task {task}; not running contrasts")
+                return False
+
+        return self._run_container_action("stats", subject, task, cli_action="contrasts")
 
     def _copy_brain_mask(self, subject: str, task: str) -> None:
         """Copy fmriprep's brain mask for this subject/task/space into bidspm-preproc.
@@ -1516,8 +1513,25 @@ class Pipeline:
                 if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
                     shutil.copy2(json_src, json_dst)
 
-    def _run_container_action(self, action: str, subject: str, task: str) -> bool:
-        """Run action via container."""
+    def _validation_args(self) -> List[str]:
+        """Only the first container of a run validates the BIDS dataset (it walks the whole
+        dataset, once per container otherwise); later ones skip it."""
+        with self._validation_lock:
+            first, self._validated = not self._validated, True
+        return [] if first else ["--skip_validation"]
+
+    def _container_env(self) -> Dict[str, str]:
+        """Extra env for every container: BLAS thread limits, and skipping the (slow) SPM Results
+        export unless requested. The report action reads results/*.csv|png, so it keeps them."""
+        env = _blas_thread_env(self._workers, os.cpu_count())
+        if not (self.options.run_results or 'report' in self.options.actions):
+            env["BIDSPM_SKIP_RESULTS"] = "1"
+        return env
+
+    def _run_container_action(self, action: str, subject: str, task: str, *,
+                              cli_action: Optional[str] = None,
+                              extra_args: Sequence[str] = ()) -> bool:
+        """Run action via container. ``cli_action`` swaps the bidspm CLI action word (stats -> contrasts)."""
         if action == "smooth":
             args = [
                 "/fmriprep", "/derivatives", "subject", "smooth",
@@ -1529,7 +1543,7 @@ class Pipeline:
             ]
         elif action == "stats":
             args = [
-                "/raw", "/derivatives", "subject", "stats",
+                "/raw", "/derivatives", "subject", cli_action or "stats",
                 "--preproc_dir", "/derivatives/bidspm-preproc",
                 "--participant_label", subject,
                 "--task", task,
@@ -1537,6 +1551,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(self.config.VERBOSITY)
             ]
+            args += list(extra_args)
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
             if self.options.name_by_confounds:
@@ -1548,7 +1563,8 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path
+            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
+            extra_env=self._container_env(),
         )
 
         if self.options.dry_run:
@@ -1556,7 +1572,7 @@ class Pipeline:
             self._log(f"[DRY RUN] Would execute: {' '.join(cmd[:5])}...")
             return True
 
-        return run_command(cmd)
+        return run_command(cmd, failure_markers=_BIDSPM_FAILURE_MARKERS)
     
     def _run_container_dataset_action(self, task: str) -> bool:
         """Run dataset-level stats via container."""
@@ -1579,7 +1595,8 @@ class Pipeline:
             args += ["--model_file", model_path]
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path
+            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
+            extra_env=self._container_env(),
         )
 
         if self.options.dry_run:
@@ -1587,5 +1604,5 @@ class Pipeline:
             self._log(f"[DRY RUN] Would execute dataset stats")
             return True
 
-        return run_command(cmd)
+        return run_command(cmd, failure_markers=_BIDSPM_FAILURE_MARKERS)
 

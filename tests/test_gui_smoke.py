@@ -87,7 +87,7 @@ class TestGuiSmoke(unittest.TestCase):
                 self.assertEqual(response.status, 200)
 
     def test_api_routes_return_json(self):
-        for path in ("/check_environment", "/api/preflight/tools", "/api/projects"):
+        for path in ("/api/suggested_workers", "/api/projects"):
             with self.subTest(path=path):
                 response = self._get(path)
                 self.assertEqual(response.status, 200)

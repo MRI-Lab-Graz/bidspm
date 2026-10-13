@@ -122,6 +122,15 @@ def parse_arguments():
     parser.add_argument('--node-name', '--node_name',
                        dest='node_name',
                        help='Name of the BIDS model node to run')
+    parser.add_argument('--estimation-engine', choices=['octave', 'standalone'], default='octave',
+                       dest='estimation_engine',
+                       help="Where subject-level model estimation runs: 'octave' (default, all in the bidspm image) "
+                            "or 'standalone' (SPM's compiled standalone from an image you supply via "
+                            "spm_standalone_image in the container config; much faster on long scans)")
+    parser.add_argument('--results', action='store_true', dest='run_results',
+                       help='Also run the SPM Results export (thresholded tables/montages) after stats. '
+                            'Off by default (about a third of the per-subject time on short runs); '
+                            'always on when the report action is requested')
     parser.add_argument('--name-by-confounds', action='store_true', dest='name_by_confounds',
                        help='Append confound strategy suffix to model node names before running stats '
                             '(prevents output-folder collisions when comparing confound strategies)')
@@ -417,6 +426,8 @@ def main():
         dry_run=args.dry_run,
         debug=args.debug,
         name_by_confounds=args.name_by_confounds,
+        run_results=args.run_results,
+        estimation_engine=args.estimation_engine,
     )
     
     # Create and run pipeline

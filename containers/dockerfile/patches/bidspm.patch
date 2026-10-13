@@ -1,0 +1,19 @@
+--- a/bidspm.m
++++ b/bidspm.m
+@@ -85,7 +85,7 @@
+     case {'stats', 'contrasts', 'results', 'specify_only'}
+       cliStats(varargin{2:end});
+ 
+-    case {'bms', 'bms-posterior', 'bms-bms'}
++    case {'bms', 'bms-cvlme', 'bms-posterior', 'bms-bms'}
+       cliBayesModel(varargin{2:end});
+ 
+     case 'meaning_of_life'
+@@ -397,6 +397,7 @@
+            'results'; ...
+            'specify_only'; ...
+            'bms'; ...
++           'bms-cvlme'; ...
+            'bms-posterior'; ...
+            'bms-bms'};
+ 

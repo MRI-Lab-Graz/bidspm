@@ -173,23 +173,6 @@ class TestProjectRoutesExtra(unittest.TestCase):
         config_response = self.client.get(f"/api/projects/{project['id']}/config")
         self.assertEqual(config_response.get_json()["bids_folder"], "/imported/bids")
 
-    def test_logs_endpoint_empty_when_no_logs_dir(self):
-        project = self._create_project()
-        response = self.client.get(f"/api/projects/{project['id']}/logs")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["logs"], [])
-
-    def test_logs_endpoint_lists_log_files(self):
-        project = self._create_project()
-        logs_dir = self.project_manager.get_project_logs_dir(project["id"])
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        (logs_dir / "run_1.log").write_text("log contents", encoding="utf-8")
-
-        response = self.client.get(f"/api/projects/{project['id']}/logs")
-        payload = response.get_json()
-        self.assertEqual(len(payload["logs"]), 1)
-        self.assertEqual(payload["logs"][0]["name"], "run_1.log")
-
     def test_get_update_delete_duplicate_preflight_404_for_missing_project(self):
         missing_id = "does-not-exist"
         self.assertEqual(self.client.get(f"/api/projects/{missing_id}").status_code, 404)
@@ -241,11 +224,6 @@ class TestProjectRoutesExtra(unittest.TestCase):
         with patch.object(self.project_manager, "export_config", side_effect=RuntimeError("db down")):
             self.assertEqual(
                 self.client.get(f"/api/projects/{project['id']}/export").status_code, 500
-            )
-
-        with patch.object(self.project_manager, "get_project_logs_dir", side_effect=RuntimeError("db down")):
-            self.assertEqual(
-                self.client.get(f"/api/projects/{project['id']}/logs").status_code, 500
             )
 
     def test_import_config_returns_500_when_manager_raises(self):

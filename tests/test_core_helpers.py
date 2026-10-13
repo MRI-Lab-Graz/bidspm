@@ -35,8 +35,7 @@ def _make_config(root: Path, models_file: str = "") -> Config:
 
 class TestCoreHelpers(unittest.TestCase):
     def test_build_docker_command_maps_model_inside_and_outside_derivatives(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, \
-             patch("lib.core._seed_cpp_roi_atlas_cache"):
+        with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = _make_config(root)
             model_inside = config.DERIVATIVES_DIR / "models" / "demo.json"
@@ -68,8 +67,7 @@ class TestCoreHelpers(unittest.TestCase):
             self.assertFalse(any("bidspm_overrides" in part for part in external_command))
 
     def test_build_apptainer_command_creates_runtime_wrapper_and_external_model_bind(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, \
-             patch("lib.core._seed_cpp_roi_atlas_cache"):
+        with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = _make_config(root)
             image_path = root / "bidspm.sif"
@@ -351,8 +349,7 @@ class TestCoreHelpers(unittest.TestCase):
                 with patch("lib.core.validate_space_availability", return_value=True), \
                      patch("lib.core.validate_events_availability", return_value=True), \
                      patch("lib.core.ensure_derivatives_dataset_description"), \
-                     patch("lib.core.cleanup_tmp_directories"), \
-                     patch("lib.core._seed_cpp_roi_atlas_cache"):
+                     patch("lib.core.cleanup_tmp_directories"):
                     result = pipeline.run()
                 return result, pipeline.dry_run_commands
 
@@ -365,8 +362,18 @@ class TestCoreHelpers(unittest.TestCase):
             # Each run's per-subject tmp bind mount embeds a fresh timestamp, so
             # normalize it away before comparing that both runs built the same
             # underlying commands.
-            normalize = lambda commands: sorted(re.sub(r"run_\d+_\d+_\d+", "run_TS", cmd) for cmd in commands)
+            # Also ignore the two intentional per-run differences: which container validates
+            # the dataset first (order-dependent) and the BLAS thread caps (depend on workers).
+            def normalize(commands):
+                out = []
+                for cmd in commands:
+                    cmd = re.sub(r"run_\d+_\d+_\d+", "run_TS", cmd)
+                    cmd = cmd.replace(" --skip_validation", "")
+                    out.append(re.sub(r" -e \w+_NUM_THREADS=\d+", "", cmd))
+                return sorted(out)
             self.assertEqual(normalize(sequential_commands), normalize(parallel_commands))
+            for commands in (sequential_commands, parallel_commands):
+                self.assertEqual(sum("--skip_validation" not in c for c in commands), 1)
 
 
 class TestProcessSubjectDelegation(unittest.TestCase):
@@ -432,7 +439,6 @@ class TestModelContainerPath(unittest.TestCase):
         from lib.core import Pipeline, PipelineOptions
 
         with tempfile.TemporaryDirectory() as tmp_dir, \
-             patch("lib.core._seed_cpp_roi_atlas_cache"), \
              patch("lib.core.run_command", return_value=True):
             root = Path(tmp_dir)
             opts = PipelineOptions(actions=["stats"], config_file="config/config.json")

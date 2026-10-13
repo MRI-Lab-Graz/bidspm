@@ -154,31 +154,6 @@ class TestNormalizeNodeLabel(unittest.TestCase):
         self.assertEqual(core._normalize_node_label(None), "")
 
 
-class TestAtlasCacheIsWarm(unittest.TestCase):
-    def test_false_when_cache_dir_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            self.assertFalse(core._atlas_cache_is_warm(config))
-
-    def test_true_when_all_atlas_files_present(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            atlas_dir = config.WD / "atlas"
-            atlas_dir.mkdir(parents=True, exist_ok=True)
-            for filename in core._ATLAS_CACHE_FILES:
-                (atlas_dir / filename).write_text("", encoding="utf-8")
-            self.assertTrue(core._atlas_cache_is_warm(config))
-
-    def test_false_when_one_file_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            atlas_dir = config.WD / "atlas"
-            atlas_dir.mkdir(parents=True, exist_ok=True)
-            for filename in core._ATLAS_CACHE_FILES[:-1]:
-                (atlas_dir / filename).write_text("", encoding="utf-8")
-            self.assertFalse(core._atlas_cache_is_warm(config))
-
-
 class TestSchemaCacheLruCache(unittest.TestCase):
     def test_fetch_bids_stats_schema_is_lru_cached(self):
         """_fetch_bids_stats_schema must be decorated with lru_cache."""
@@ -187,6 +162,27 @@ class TestSchemaCacheLruCache(unittest.TestCase):
             hasattr(core._fetch_bids_stats_schema, "cache_clear"),
             "_fetch_bids_stats_schema must be an lru_cache-wrapped function",
         )
+
+
+
+class TestCheckDatasetNodeName(unittest.TestCase):
+    """bidspm's report code looks the dataset node up by Name == 'dataset'
+    (boilerplate.m -> getDummyContrastsList(bm, 'dataset')), so any other name makes it
+    log 'Could not find a corresponding Node'."""
+
+    def test_dataset_node_named_dataset_is_fine(self):
+        model = {"Nodes": [{"Name": "dataset", "Level": "Dataset"}]}
+        self.assertEqual(core._check_dataset_node_name(model), [])
+
+    def test_other_dataset_node_name_warns(self):
+        model = {"Nodes": [{"Name": "dataset_level", "Level": "Dataset"}]}
+        warnings = core._check_dataset_node_name(model)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("dataset_level", warnings[0])
+        self.assertIn("'dataset'", warnings[0])
+
+    def test_no_dataset_node_no_warning(self):
+        self.assertEqual(core._check_dataset_node_name({"Nodes": [{"Name": "run", "Level": "Run"}]}), [])
 
 
 if __name__ == "__main__":

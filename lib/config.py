@@ -35,6 +35,7 @@ class ContainerConfig:
     container_type: str  # "docker" or "apptainer"
     docker_image: str = ""
     apptainer_image: str = ""
+    spm_standalone_image: str = ""  # optional SPM standalone image (Docker) or SIF path (Apptainer)
 
 
 def load_config(config_file: str) -> Config:
@@ -117,7 +118,8 @@ def load_container_config(config_file: str) -> ContainerConfig:
     return ContainerConfig(
         container_type=container_type,
         docker_image=data.get("docker_image", ""),
-        apptainer_image=data.get("apptainer_image", "")
+        apptainer_image=data.get("apptainer_image", ""),
+        spm_standalone_image=data.get("spm_standalone_image", ""),
     )
 
 

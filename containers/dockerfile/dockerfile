@@ -1,12 +1,12 @@
 # BIDSPM Container for MRI Lab Graz
 # Author: Karl Koschutnig
 # Organization: MRI Lab Graz
-# Features: Python slim base, Octave 9.x, BIDSPM 4.0, SPM12, UV package manager
+# Features: Python slim base, Octave, BIDSPM 4.0, SPM 26, UV package manager
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-trixie
 
 LABEL maintainer="Karl Koschutnig <karl.koschutnig@uni-graz.at>"
-LABEL description="BIDSPM container with Python slim base, Octave 9.x, BIDSPM 4.0, and SPM12"
+LABEL description="BIDSPM container with Python slim base, Octave 9.x, BIDSPM 4.0, and SPM 26"
 LABEL version="2025.1"
 LABEL author="Karl Koschutnig"
 LABEL organization="MRI Lab Graz"
@@ -14,11 +14,12 @@ LABEL organization="MRI Lab Graz"
 # published package back to the repo it was built from (Packages sidebar,
 # provenance, etc).
 LABEL org.opencontainers.image.source="https://github.com/MRI-Lab-Graz/bidspm"
-LABEL org.opencontainers.image.description="BIDSPM container: Octave 9.x, BIDSPM 4.0, SPM12, with lab bug-fix overrides baked in"
+LABEL org.opencontainers.image.description="BIDSPM container: Octave 9.x, BIDSPM 4.0, SPM 26, with lab bug-fix overrides baked in"
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
+ENV NODE_NO_WARNINGS=1
 
 # Install system dependencies with performance optimizations
 RUN apt-get update -qq && \
@@ -42,6 +43,8 @@ RUN apt-get update -qq && \
         octave-parallel \
         octave-control \
         octave-symbolic \
+        nodejs \
+        npm \
         build-essential \
         patch \
         vim \
@@ -71,20 +74,24 @@ RUN apt-get update -qq && \
         setuptools \
         wheel
     
-    # Install SPM12 (stable and well-tested) with proper Octave compilation
-RUN mkdir -p /opt/spm12 && \
-    curl -fsSL https://github.com/spm/spm12/archive/r7771.tar.gz | tar -xzC /opt/spm12 --strip-components=1 && \
-    curl -fsSL https://raw.githubusercontent.com/spm/spm-octave/main/spm12_r7771.patch | patch -p0 && \
-    make -C /opt/spm12/src PLATFORM=octave distclean && \
-    make -C /opt/spm12/src PLATFORM=octave && \
-    make -C /opt/spm12/src PLATFORM=octave install && \
-    echo "✅ SPM12 r7771 installed and compiled for Octave successfully"
+# Install SPM (released tag, built for Octave -- bin/spm-octave and the
+# PLATFORM=octave build are supported in-tree since SPM25, no patch needed).
+ARG SPM_TAG=26.10.01
+RUN mkdir -p /opt/spm && \
+    curl -fsSL https://github.com/spm/spm/archive/refs/tags/${SPM_TAG}.tar.gz | tar -xzC /opt/spm --strip-components=1 && \
+    make -C /opt/spm/src PLATFORM=octave distclean && \
+    make -C /opt/spm/src PLATFORM=octave && \
+    make -C /opt/spm/src PLATFORM=octave install && \
+    echo "✅ SPM ${SPM_TAG} installed and compiled for Octave successfully"
+
+# Real BIDS validator (bidspm's bids.validate shells out to `bids-validator`).
+RUN npm install -g bids-validator@1.14.10 && npm cache clean --force
 
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash neuro && \
     mkdir -p /home/neuro && \
     chown -R neuro:neuro /home/neuro && \
-    chown -R neuro:neuro /opt/spm12
+    chown -R neuro:neuro /opt/spm
 
     # Install BIDSPM 4.0 (stable release with submodules and Python CLI) as root
     RUN git clone --depth 1 --branch v4.0.0 https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm || \
@@ -92,6 +99,29 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         cd /home/neuro/bidspm && \
         git submodule update --init --recursive || true && \
         echo "✅ BIDSPM 4.0 installed successfully"
+
+    # MarsBaR (bundled via CPP_ROI) maps only spm99/2/5/8/12 to a compat dir; SPM25+
+    # has no dir of its own and spm5's covers it (verified: bidspm initialises on SPM26).
+    RUN sed -i "s/case {'spm8', 'spm12b', 'spm12'}/case {'spm8', 'spm12b', 'spm12', 'spm25', 'spm26'}/" \
+        /home/neuro/bidspm/lib/CPP_ROI/lib/marsbar/marsbar/marsbar.m && \
+        grep -q "'spm26'" /home/neuro/bidspm/lib/CPP_ROI/lib/marsbar/marsbar/marsbar.m
+
+    # The stats report template needs designType / OS.version, which bidspm never
+    # sets; octache's per-key 'warn' output is the only visible effect.
+    RUN sed -i "s/'warn', true/'warn', false/" /home/neuro/bidspm/src/reports/boilerplate.m && \
+        grep -q "'warn', false" /home/neuro/bidspm/src/reports/boilerplate.m && \
+        ! grep -q "'warn', true" /home/neuro/bidspm/src/reports/boilerplate.m
+
+    # fMRIPrep removes SliceTiming after correcting and records StartTime; use it for SPM's fmri_t0
+    # (helper: bidspm_overrides/src/stats/subject_level/getReferenceBinFromStartTime.m, copied below).
+    RUN sed -i "s|^    refBin = nbTimeBins / 2;|    refBin = nbTimeBins / 2;\n    startTimeBin = getReferenceBinFromStartTime(BIDS, filter, TR, nbTimeBins);\n    if ~isempty(startTimeBin)\n      refBin = startTimeBin;\n    end|" \
+        /home/neuro/bidspm/src/batches/stats/setBatchSubjectLevelGLMSpec.m && \
+        grep -q "getReferenceBinFromStartTime" /home/neuro/bidspm/src/batches/stats/setBatchSubjectLevelGLMSpec.m
+
+    # marsbar('splash') needs a figure (the image has no graphics toolkit) and prints
+    # "Cannot open display" on every run; the splash screen is cosmetic only.
+    RUN sed -i "/marsbar('splash');/d" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m && \
+        ! grep -q "marsbar('splash')" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m
 
     # Containers are run with --user <host uid>:<host gid> so writes into
     # host-owned bind mounts (e.g. derivatives/) work regardless of the
@@ -108,31 +138,56 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
     # Pre-install the MACS toolbox (needed for BMS/bidsModelSelection).
     # bidspm.m's updateMacstoolbox() lazily does exactly this same
     # `git clone lib/MACS -> spm('dir')/toolbox/MACS` at runtime on first
-    # use, from the submodule already fetched above -- but /opt/spm12 isn't
+    # use, from the submodule already fetched above -- but /opt/spm isn't
     # writable by the arbitrary host uid containers run as (see
     # build_docker_command's --user), so that lazy install fails silently
     # and BMS never works. Do it now, while still root.
-    RUN git clone /home/neuro/bidspm/lib/MACS /opt/spm12/toolbox/MACS && \
-        chown -R neuro:neuro /opt/spm12/toolbox/MACS && \
+    RUN git clone /home/neuro/bidspm/lib/MACS /opt/spm/toolbox/MACS && \
+        chown -R neuro:neuro /opt/spm/toolbox/MACS && \
         echo "✅ MACS toolbox pre-installed"
 
     # updateMacstoolbox() also runs `git -C <target> pull` on every startup
     # to check for updates, even though the toolbox is already present --
     # same dubious-ownership issue as the main bidspm clone above.
-    RUN git config --system --add safe.directory /opt/spm12/toolbox/MACS
+    RUN git config --system --add safe.directory /opt/spm/toolbox/MACS && \
+        git config --system --add safe.directory '*' && \
+        chmod -R a+rwX /opt/spm/toolbox/MACS
+
+# Small fixes to upstream v4.0.0 files are patches (containers/dockerfile/patches, see
+# bidspm_overrides/README.md); larger rewrites are whole-file copies in bidspm_overrides/.
+COPY containers/dockerfile/patches/ /tmp/bidspm_patches/
+RUN cd /home/neuro/bidspm && for p in /tmp/bidspm_patches/*.patch; do \
+        patch -p1 --no-backup-if-mismatch < "$p" || exit 1; done && rm -rf /tmp/bidspm_patches
 
 # Bake in locally-patched bidspm files (fixes for upstream container v4.0.0
 # bugs; see bidspm_overrides/README.md for the rationale behind each file).
 # bidspm_overrides/ mirrors the /home/neuro/bidspm tree 1:1.
 COPY bidspm_overrides/ /home/neuro/bidspm/
 
-# Set up Octave paths with SPM12 and BIDSPM (simplified to avoid atlas issues)
-RUN octave --no-gui --eval "addpath('/opt/spm12/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
+# Octave 9 does not implement `which -all` and warns on every call; SPM and bidspm
+# call it constantly (spelled '-all' and '-ALL'). Octave only returns the first hit
+# either way, so dropping the flag changes nothing. Must run after the overrides copy.
+RUN grep -rliE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/I" && \
+    ! grep -rqiE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m
+
+# Unpack the CPP_ROI atlases into SPM's atlas dir once, at build time, instead of in every
+# container run (which needed a shared host cache, a seeding step and a serialized
+# "warm-up" subject to avoid races between parallel workers). Fails the build if any is missing.
+RUN octave-cli --eval "addpath('/opt/spm'); cd('/home/neuro/bidspm'); bidspm('init');" && \
+    for f in AAL3v1_1mm.nii AAL3v1_1mm.xml HCPex.nii HCPex.xml \
+             space-MNI152ICBM2009anlin_seg-glasser_dseg.nii space-MNI_seg-visfAtlas_dseg.nii \
+             space-MNI_seg-wang_dseg.nii; do test -s /opt/spm/atlas/$f || exit 1; done && \
+    chmod -R a+rX /opt/spm/atlas && \
+    chmod -R a+rwX /opt/spm/toolbox/MACS
+
+# Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
+RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
     octave --no-gui --eval "cd('/home/neuro/bidspm'); addpath(pwd); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
+    echo "warning('off', 'Octave:shadowed-function'); warning('off', 'Octave:deprecated-function'); warning('off', 'Octave:legacy-function');" >> /usr/share/octave/site/m/startup/octaverc && \
     echo "✅ Octave paths configured successfully"
 
 # Fix ownership and add to PATH
-RUN chown -R neuro:neuro /home/neuro
+RUN chown -R neuro:neuro /home/neuro && chmod -R a+rX /home/neuro
 
 # Switch to neuro user
 USER neuro
@@ -142,8 +197,8 @@ ENV PATH="/home/neuro/.local/bin:$PATH"
 # Test Octave and core functionality
 RUN octave --no-gui --eval "version; pkg list; disp('✅ Modern Octave ready!');"
 
-# Test SPM12 installation
-RUN octave --no-gui --eval "addpath('/opt/spm12'); try; spm('defaults', 'fmri'); disp('✅ SPM12 working!'); catch e; disp(['⚠️ SPM12 issue: ' e.message]); end"
+# Test SPM installation
+RUN octave --no-gui --eval "addpath('/opt/spm'); try; spm('defaults', 'fmri'); disp('✅ SPM working!'); catch e; disp(['⚠️ SPM issue: ' e.message]); end"
 
 # Use original BIDSPM entrypoint design
 ENTRYPOINT ["bidspm"]
