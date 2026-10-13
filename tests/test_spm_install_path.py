@@ -54,3 +54,24 @@ class TestDockerfileSpm(unittest.TestCase):
         # MarsBaR only maps spm99/2/5/8/12 to a compat dir; SPM25+ must reuse spm5's.
         self.assertIn("spm25", self.text)
         self.assertIn("marsbar.m", self.text)
+
+
+class TestDockerfileCleanLogs(unittest.TestCase):
+    """Each line below removes a message that used to pollute every run's terminal output."""
+
+    def setUp(self):
+        self.text = DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_macs_toolbox_is_writable_for_any_host_uid(self):
+        self.assertRegex(self.text, r"chmod -R a\+rwX /opt/spm/toolbox/MACS")
+
+    def test_marsbar_splash_removed(self):
+        self.assertIn("marsbar('splash')", self.text)  # the sed pattern
+        self.assertRegex(self.text, r"initCppRoi\.m")
+
+    def test_octave_noise_warnings_silenced(self):
+        self.assertIn("Octave:shadowed-function", self.text)
+        self.assertIn("Octave:deprecated-function", self.text)
+
+    def test_real_bids_validator_installed(self):
+        self.assertRegex(self.text, r"npm install -g bids-validator@1\.14\.")

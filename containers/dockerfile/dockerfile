@@ -42,6 +42,8 @@ RUN apt-get update -qq && \
         octave-parallel \
         octave-control \
         octave-symbolic \
+        nodejs \
+        npm \
         build-essential \
         patch \
         vim \
@@ -81,6 +83,9 @@ RUN mkdir -p /opt/spm && \
     make -C /opt/spm/src PLATFORM=octave install && \
     echo "✅ SPM ${SPM_TAG} installed and compiled for Octave successfully"
 
+# Real BIDS validator (bidspm's bids.validate shells out to `bids-validator`).
+RUN npm install -g bids-validator@1.14.10 && npm cache clean --force
+
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash neuro && \
     mkdir -p /home/neuro && \
@@ -99,6 +104,11 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
     RUN sed -i "s/case {'spm8', 'spm12b', 'spm12'}/case {'spm8', 'spm12b', 'spm12', 'spm25', 'spm26'}/" \
         /home/neuro/bidspm/lib/CPP_ROI/lib/marsbar/marsbar/marsbar.m && \
         grep -q "'spm26'" /home/neuro/bidspm/lib/CPP_ROI/lib/marsbar/marsbar/marsbar.m
+
+    # marsbar('splash') needs a figure (the image has no graphics toolkit) and prints
+    # "Cannot open display" on every run; the splash screen is cosmetic only.
+    RUN sed -i "/marsbar('splash');/d" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m && \
+        ! grep -q "marsbar('splash')" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m
 
     # Containers are run with --user <host uid>:<host gid> so writes into
     # host-owned bind mounts (e.g. derivatives/) work regardless of the
@@ -126,7 +136,8 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
     # updateMacstoolbox() also runs `git -C <target> pull` on every startup
     # to check for updates, even though the toolbox is already present --
     # same dubious-ownership issue as the main bidspm clone above.
-    RUN git config --system --add safe.directory /opt/spm/toolbox/MACS
+    RUN git config --system --add safe.directory /opt/spm/toolbox/MACS && \
+        chmod -R a+rwX /opt/spm/toolbox/MACS
 
 # Bake in locally-patched bidspm files (fixes for upstream container v4.0.0
 # bugs; see bidspm_overrides/README.md for the rationale behind each file).
@@ -136,6 +147,7 @@ COPY bidspm_overrides/ /home/neuro/bidspm/
 # Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
 RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
     octave --no-gui --eval "cd('/home/neuro/bidspm'); addpath(pwd); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
+    echo "warning('off', 'Octave:shadowed-function'); warning('off', 'Octave:deprecated-function');" >> /usr/share/octave/site/m/startup/octaverc && \
     echo "✅ Octave paths configured successfully"
 
 # Fix ownership and add to PATH

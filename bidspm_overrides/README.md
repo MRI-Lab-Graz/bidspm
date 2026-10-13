@@ -62,6 +62,10 @@ correct behavior.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.
+- **validate.m**: upstream shells out to `validate_model` on every stats/contrasts/results
+  run; it crashes on pydantic 2 and rejects `Transformer: bidspm` models. Only the BIDS
+  dataset validator is kept; model validation is done by the GUI
+  (`lib.core.validate_bids_model`).
 - **allowed_actions.json**: keeps the CLI's list of allowed actions in sync
   with the workflows added/patched above (e.g. BMS actions).
 
