@@ -66,10 +66,10 @@ class TestPipelinePassesSkipResults(unittest.TestCase):
         return build.call_args.kwargs.get("extra_env")
 
     def test_results_skipped_by_default(self):
-        self.assertEqual(self._extra_env(actions=["stats"]), ENV)
+        self.assertEqual(self._extra_env(actions=["stats"])["BIDSPM_SKIP_RESULTS"], "1")
 
     def test_results_kept_when_requested(self):
-        self.assertFalse(self._extra_env(actions=["stats"], run_results=True))
+        self.assertNotIn("BIDSPM_SKIP_RESULTS", self._extra_env(actions=["stats"], run_results=True))
 
     def test_report_action_needs_results_so_they_are_kept(self):
-        self.assertFalse(self._extra_env(actions=["stats", "report"]))
+        self.assertNotIn("BIDSPM_SKIP_RESULTS", self._extra_env(actions=["stats", "report"]))

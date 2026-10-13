@@ -976,6 +976,19 @@ def _prepare_model_content_for_execution(model_content: Dict[str, Any]) -> List[
 # Pipeline Execution
 # =============================================================================
 
+_MAX_BLAS_THREADS = 8
+
+
+def _blas_thread_env(workers: int, cpus: Optional[int]) -> Dict[str, str]:
+    """Per-container BLAS/OpenMP thread limits so parallel workers don't oversubscribe the CPUs.
+
+    Octave starts one busy-waiting thread per core by default; with several workers they thrash
+    each other (3 parallel subjects on 32 cores: 394 s unrestricted vs 115 s at 1 thread each).
+    """
+    n = str(max(1, min(_MAX_BLAS_THREADS, (cpus or 1) // max(1, workers))))
+    return {"OPENBLAS_NUM_THREADS": n, "OMP_NUM_THREADS": n, "MKL_NUM_THREADS": n}
+
+
 @dataclass
 class PipelineOptions:
     """Options controlling pipeline execution."""
@@ -1023,6 +1036,7 @@ class Pipeline:
     def __init__(self, options: PipelineOptions):
         self.options = options
         self.config: Optional[Config] = None
+        self._workers = 1  # active stats workers, set in run(); sizes the BLAS threads
         self.container_config: Optional[ContainerConfig] = None
         self.model_file_path: Optional[Path] = None
         self.stats_node_name: Optional[str] = None
@@ -1289,6 +1303,7 @@ class Pipeline:
 
                 max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
                     if eligible_subjects else 1
+                self._workers = max_workers
 
                 if max_workers <= 1:
                     for subject in eligible_subjects:
@@ -1419,13 +1434,13 @@ class Pipeline:
                 if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
                     shutil.copy2(json_src, json_dst)
 
-    def _skip_results_env(self) -> Optional[Dict[str, str]]:
-        """Env read by the cliStats override to skip the SPM Results export (slow).
-
-        The report action reads results/*.csv|png, so it keeps them.
-        """
-        keep = self.options.run_results or 'report' in self.options.actions
-        return None if keep else {"BIDSPM_SKIP_RESULTS": "1"}
+    def _container_env(self) -> Dict[str, str]:
+        """Extra env for every container: BLAS thread limits, and skipping the (slow) SPM Results
+        export unless requested. The report action reads results/*.csv|png, so it keeps them."""
+        env = _blas_thread_env(self._workers, os.cpu_count())
+        if not (self.options.run_results or 'report' in self.options.actions):
+            env["BIDSPM_SKIP_RESULTS"] = "1"
+        return env
 
     def _run_container_action(self, action: str, subject: str, task: str) -> bool:
         """Run action via container."""
@@ -1460,7 +1475,7 @@ class Pipeline:
 
         cmd, _ = build_container_command(
             self.container_config, self.config, args, self.model_file_path,
-            extra_env=self._skip_results_env(),
+            extra_env=self._container_env(),
         )
 
         if self.options.dry_run:
@@ -1492,7 +1507,7 @@ class Pipeline:
 
         cmd, _ = build_container_command(
             self.container_config, self.config, args, self.model_file_path,
-            extra_env=self._skip_results_env(),
+            extra_env=self._container_env(),
         )
 
         if self.options.dry_run:
