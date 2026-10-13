@@ -1,6 +1,6 @@
 # Opt-in SPM-standalone estimation for subject-level stats
 
-Date: 2026-10-13 · Branch: `spm26-octave-upgrade` · Status: **draft, awaiting review**
+Date: 2026-10-13 · Branch: `spm26-octave-upgrade` · Status: **approved with decisions below (2026-10-13)**
 
 ## Problem
 
@@ -49,19 +49,19 @@ run of `--design_only` went on to "Model estimation".)
 
 ### Components
 * `PipelineOptions.estimation_engine`; CLI `--estimation-engine {octave,standalone}`; GUI select
-  "Estimation engine" next to Parallel subjects, with a one-line hint (≈5× faster on long scans; needs the
-  SPM container, ~4 GB).
-* `ContainerConfig`: `spm_standalone_image` (Docker; default `ghcr.io/spm/spm-docker:docker-matlab-latest`)
-  and `spm_standalone_sif` (Apptainer; default `oras://ghcr.io/spm/spm-docker:singularity-matlab-latest`).
+  "Estimation engine" next to Parallel subjects, **always shown**, with a hint (≈5× faster on long scans; needs an
+  SPM standalone image that you provide, see README) and a field for the image name.
+* `ContainerConfig`: `spm_standalone_image` (Docker) and `spm_standalone_sif` (Apptainer). **No default:
+  the user supplies the image** and pins it by digest (`name@sha256:…`) or local tag. We ship no image.
 * `lib/core.py`: `build_spm_standalone_command(...)` (Docker + Apptainer; env `MCR_INHIBIT_CTF_LOCK=1`,
   `SPM_HTML_BROWSER=0`, `HOME=/tmp`, `--user <host uid>`), `_write_estimation_job(spm_mats, dir)`,
   `_find_new_spm_mats(...)` (SPM.mat files under the subject's stats dir for this task/space/FWHM modified by
   the design step), and the 3-step branch in `_process_subject`.
-* Preflight: when the engine is `standalone`, check the image is available (Docker: `docker image inspect`,
-  pull if missing; Apptainer: SIF/oras present) **before** processing any subject; clear error, **no silent
-  fallback** to Octave. Log the image digest/version string once per run for reproducibility
-  (`latest` moves: it held SPM 25 on the day SPM 26.10.01 was released).
-* Worker suggestion keeps the 4 GB/worker assumption (not measured for standalone; see open questions).
+* Preflight: when the engine is `standalone`, check the configured image exists locally (Docker:
+  `docker image inspect`; Apptainer: SIF file) **before** processing any subject. If the setting is empty or
+  the image is missing: stop with an error that says how to get/build one (see "Providing the image"); no
+  auto-pull and **no silent fallback** to Octave. Log the image id/digest once per run.
+* Worker suggestion keeps the 4 GB/worker assumption until standalone memory is measured (next spike).
 
 ### Non-goals (YAGNI)
 Auto-choosing the engine, standalone for BMS/dataset level, installing the MATLAB Runtime ourselves,
@@ -82,11 +82,20 @@ against the Octave engine (r ≥ 0.9999) and run `scripts/check_run_log.py`.
 * 4 subjects in parallel with `standalone` finish in < 1.3 × single-subject time.
 * `octave` engine unchanged: existing tests pass; 132 end-to-end still ~113 s.
 
-## Open questions (for review)
-1. **Image pinning:** accept `latest` + logged digest, or require a pinned tag/digest in `container.json`?
-2. **SPM version mix:** the official image is SPM 25 (estimation) while the Octave image is SPM 26
-   (design/contrasts). Results matched, but should the README state this plainly, or do we wait for the
-   26.x image?
-3. **Memory per standalone worker** is unmeasured; measure before changing the 4 GB/worker suggestion?
-4. **Apptainer:** pull the `oras://` SIF on first use (≈ 4 GB) into a configurable cache dir?
-5. Should the GUI show the engine choice only when the SPM image is already present?
+## Decisions (from review)
+1. **Pin by digest**: `spm_standalone_image` is expected as `name@sha256:…` (a local tag is accepted); the digest is logged.
+2. **SPM 26 everywhere**: the standalone image must be SPM 26.x. The official `latest` (SPM 25) is not used. No SPM 26
+   image is published yet (26.10.01 released 2026-10-13), so users build one from SPM's recipe.
+3. **Measure standalone memory per worker** before changing the 4 GB/worker suggestion (next spike).
+4. **Apptainer SIF cache**: later.
+5. **No gating, user-provided image**: the engine option is always visible; the image comes from the user.
+
+## Providing the image (goes into the README)
+```
+git clone https://github.com/spm/spm-docker && cd spm-docker/matlab
+docker build -t spm-standalone:26.10.01 \
+  --build-arg MATLAB_VERSION=R2026a --build-arg SPM_RELEASE=26.10 --build-arg SPM_REVISION=01 .
+docker inspect --format '{{index .RepoDigests 0}}{{.Id}}' spm-standalone:26.10.01   # pin this in container.json
+```
+(`R2026a` is what the SPM 26.10.01 standalone's runtime installer expects; builds the MATLAB Runtime, ~4 GB.
+Building accepts the MathWorks MATLAB Runtime license via `AGREE_TO_MATLAB_RUNTIME_LICENSE`.)
