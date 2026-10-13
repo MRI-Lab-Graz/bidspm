@@ -84,10 +84,11 @@ RUN mkdir -p /opt/spm && \
     make -C /opt/spm/src PLATFORM=octave install && \
     echo "✅ SPM ${SPM_TAG} installed and compiled for Octave successfully"
 
-# Octave 9 does not implement `which -all` and warns on every call; SPM's bundled
-# FieldTrip shims call it on each use. Octave only returns the first hit either way.
-RUN grep -rlE "which *\(mfilename, *'-all'\)" /opt/spm/external | xargs sed -i -E "s/which\(mfilename, *'-all'\)/which(mfilename)/" && \
-    ! grep -rqE "which *\(mfilename, *'-all'\)" /opt/spm/external
+# Octave 9 does not implement `which -all` and warns on every call; SPM (cfg_util,
+# spm_jobman, ft_defaults and the bundled FieldTrip shims) calls it constantly.
+# Octave only returns the first hit either way, so dropping the flag changes nothing.
+RUN grep -rlE "which *\([^)]*'-all'" /opt/spm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/" && \
+    ! grep -rqE "which *\([^)]*'-all'" /opt/spm --include=*.m
 
 # Real BIDS validator (bidspm's bids.validate shells out to `bids-validator`).
 RUN npm install -g bids-validator@1.14.10 && npm cache clean --force
