@@ -1415,9 +1415,11 @@ class Pipeline:
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
             self._copy_brain_mask(subject, task)
-            stats = self._run_stats_standalone if self.options.estimation_engine == "standalone" \
-                else lambda s, t: self._run_container_action("stats", s, t)
-            if not stats(subject, task):
+            if self.options.estimation_engine == "standalone":
+                ok = self._run_stats_standalone(subject, task)
+            else:
+                ok = self._run_container_action("stats", subject, task)
+            if not ok:
                 success = False
 
         return success

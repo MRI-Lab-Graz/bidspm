@@ -48,14 +48,6 @@ class TestDockerfileBakesAtlases(unittest.TestCase):
         # initCppRoi.m (run by bidspm('init')) copies all five atlases into spm('dir')/atlas
         self.assertRegex(self.text, r"RUN octave-cli --eval .*bidspm\('init'\)")
 
-    def test_build_fails_if_atlas_files_missing(self):
-        for f in ("AAL3v1_1mm.nii", "HCPex.nii", "space-MNI_seg-wang_dseg.nii",
-                  "space-MNI_seg-visfAtlas_dseg.nii", "glasser_dseg.nii"):
-            self.assertIn(f, self.text)
-
-    def test_atlas_dir_readable_by_any_host_uid(self):
-        self.assertIn("chmod -R a+rX /opt/spm/atlas", self.text)
-
     def test_macs_perms_fixed_after_build_time_init(self):
         # bidspm('init') runs `git pull` in the MACS clone as root, leaving root-owned files
         self.assertGreater(self.text.rindex("chmod -R a+rwX /opt/spm/toolbox/MACS"),

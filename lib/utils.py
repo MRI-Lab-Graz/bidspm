@@ -393,6 +393,4 @@ def suggest_stats_workers(cpus: Optional[int], mem_available_gb: Optional[float]
         "suggested": max(1, min(by_cpu, by_mem, _MAX_SUGGESTED_WORKERS)),
         "cpus": cpus,
         "mem_available_gb": mem_available_gb,
-        "max_by_cpu": by_cpu,
-        "max_by_memory": by_mem,
     }

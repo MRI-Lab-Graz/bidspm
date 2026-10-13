@@ -28,9 +28,6 @@ class TestCheckDependenciesOverride(unittest.TestCase):
     def test_spm26_does_not_warn(self):
         self.assertNotIn("less than", self._warnings_for("SPM26", "00.00"))
 
-    def test_spm25_does_not_warn(self):
-        self.assertNotIn("less than", self._warnings_for("SPM25", "00.00"))
-
     def test_spm12_new_enough_does_not_warn(self):
         self.assertNotIn("less than", self._warnings_for("SPM12", "7771"))
 

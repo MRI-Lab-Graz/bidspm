@@ -15,9 +15,7 @@ class TestSuggestStatsWorkers(unittest.TestCase):
 
     def test_memory_can_be_the_limit(self):
         # ~4 GB per heavy worker
-        r = suggest_stats_workers(8, 8)
-        self.assertEqual(r["suggested"], 2)
-        self.assertEqual(r["max_by_memory"], 2)
+        self.assertEqual(suggest_stats_workers(8, 8)["suggested"], 2)
 
     def test_unknown_memory_is_ignored(self):
         self.assertEqual(suggest_stats_workers(8, None)["suggested"], 6)
