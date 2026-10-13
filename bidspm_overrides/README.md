@@ -64,7 +64,9 @@ correct behavior.
   SPM's atlas dir. The image bakes all atlases in at build time, so a container run as an
   arbitrary host uid never needs to write there.
 - **cliStats.m**: also honours env `BIDSPM_SKIP_RESULTS` (set by `bidspm.py` unless `--results` or the report action is requested) to skip the
-  SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above).
+  SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above). Also fixes
+  `--design_only`: v4.0.0's model loop starts with `rmfield(opt, 'model')`, which drops
+  `opt.model.designOnly`, so the flag never stopped before estimation. Now it specifies the model and stops.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.

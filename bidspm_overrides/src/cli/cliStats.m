@@ -58,7 +58,12 @@ function cliStats(varargin)
 
   opt.pipeline.type = 'stats';
 
-  if opt.model.designOnly
+  % Read the flag now: the model loop below starts with rmfield(opt, 'model'), which drops
+  % opt.model.designOnly, so upstream's --design_only never stopped before estimation.
+  designOnly = opt.model.designOnly;
+
+  if designOnly
+    estimate = false;
     contrasts = false;
     results = false;
   end
@@ -86,15 +91,13 @@ function cliStats(varargin)
 
     if opt.glm.roibased.do
       bidsFFX('specify', opt);
-      if ~opt.model.designOnly
+      if ~designOnly
         bidsRoiBasedGLM(opt);
       end
 
     else
 
-      if isSubjectLevel && ...
-              (specify_only || ...
-               estimate && opt.model.designOnly)
+      if isSubjectLevel && (specify_only || designOnly)
         bidsFFX('specify', opt);
         compileScrubbingStats(opt.dir.stats);
       end
