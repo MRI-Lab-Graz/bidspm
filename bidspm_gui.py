@@ -31,24 +31,20 @@ import sys
 import threading
 import time
 import re
-import shlex
-import shutil
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context, redirect, url_for
+from flask import Flask, request
 from waitress import serve
 
 # Import all business logic from core
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
-    discover_tasks, discover_spaces,
     check_subject_processed,
     validate_bids_model,
 )
-from lib.config import auto_select_container_config
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
 from webapp.web_config_fs_api import register_config_fs_routes
 from webapp.web_discovery_model_api import (
