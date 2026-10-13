@@ -130,8 +130,9 @@ pip install -r requirements.txt
 Point `container.json` at the image you built (`"docker_image": "bidspm/bidspm:latest"`).
 
 **On a remote server without a display:** the web GUI starts without opening a browser when it detects an SSH session
-(or with `--no-browser`). It listens on all interfaces without a login, so on shared machines forward the port instead of
-exposing it: `ssh -L 5000:localhost:5000 you@server`, then open `http://localhost:5000`.
+(or with `--no-browser`). It listens on `127.0.0.1` only, because it has no login (anyone who can reach the port can run
+jobs and read files). Forward the port from your own machine instead of exposing it:
+`ssh -L 5100:localhost:5100 you@server`, then open `http://localhost:5100`. Use `--host 0.0.0.0` only on a network you trust.
 
 ### Option 2: With setup script (cross-platform)
 

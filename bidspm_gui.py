@@ -146,13 +146,13 @@ def disable_browser_cache(response):
 # Utility Functions
 # =============================================================================
 
-def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100) -> Optional[int]:
+def find_free_port(start_port: int = DEFAULT_PORT, max_tries: int = 100, host: str = '127.0.0.1') -> Optional[int]:
     """Find an available port."""
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('0.0.0.0', port))
+                s.bind((host, port))
                 return port
             except socket.error:
                 continue
@@ -448,14 +448,22 @@ def shutdown():
 # Main Entry Point
 # =============================================================================
 
-if __name__ == '__main__':
+def parse_gui_args(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
     parser.add_argument('-p', '--port', type=int, default=None,
                        help='Port to use (default: 5100; any existing instance on that port is stopped first)')
+    parser.add_argument('--host', default='127.0.0.1',
+                       help='Address to listen on (default: 127.0.0.1, this machine only). The interface has no login: '
+                            'on a remote server keep the default and use "ssh -L <port>:localhost:<port>"; '
+                            'use 0.0.0.0 only on a network you trust')
     parser.add_argument('--no-browser', action='store_true',
                        help='Do not attempt to open a browser automatically (useful on headless servers)')
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == '__main__':
+    args = parse_gui_args()
 
     target_port = args.port or DEFAULT_PORT
 
@@ -463,7 +471,7 @@ if __name__ == '__main__':
     # a fresh server at the same URL (fixes the recurring blank-page issue).
     kill_existing_on_port(target_port)
 
-    port = find_free_port(target_port, max_tries=1)
+    port = find_free_port(target_port, max_tries=1, host=args.host)
     if not port:
         print(f"Error: Port {target_port} is still in use after attempting to free it.")
         import sys
@@ -483,7 +491,9 @@ if __name__ == '__main__':
         print('Status: startup checks completed with warnings. Launching the interface now.')
     print('Press Ctrl+C to stop the server')
     print()
-    print(f"Running with Waitress server on 0.0.0.0:{port}")
+    print(f"Running with Waitress server on {args.host}:{port}")
+    if args.host not in ('127.0.0.1', 'localhost', '::1'):
+        print("⚠️  Listening beyond this machine: the interface has no login. Anyone who can reach this port can run jobs and read files.")
     print(f"\n  👉  Open in browser: {url}\n")
 
     # Auto-open the browser unless suppressed.
@@ -506,4 +516,4 @@ if __name__ == '__main__':
                 pass
         _threading.Thread(target=_open_browser, daemon=True).start()
 
-    serve(app, host='0.0.0.0', port=port, threads=10)
+    serve(app, host=args.host, port=port, threads=10)
