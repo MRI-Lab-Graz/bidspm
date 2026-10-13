@@ -98,3 +98,10 @@ class TestDockerfileRemainingNoise(unittest.TestCase):
         # report template data lacks designType / OS.version; the text is cosmetic
         self.assertIn("boilerplate.m", self.text)
         self.assertIn("'warn', false", self.text)
+
+
+class TestDockerfileHomeAccess(unittest.TestCase):
+    def test_home_traversable_by_arbitrary_host_uid(self):
+        # containers run with --user <host uid>; trixie's useradd makes $HOME 0700
+        text = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertRegex(text, r"chmod -R a\+rX /home/neuro|chmod 755 /home/neuro")

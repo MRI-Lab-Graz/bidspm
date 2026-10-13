@@ -158,7 +158,7 @@ RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/si
     echo "✅ Octave paths configured successfully"
 
 # Fix ownership and add to PATH
-RUN chown -R neuro:neuro /home/neuro
+RUN chown -R neuro:neuro /home/neuro && chmod -R a+rX /home/neuro
 
 # Switch to neuro user
 USER neuro
