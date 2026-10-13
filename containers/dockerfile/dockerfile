@@ -112,6 +112,12 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         grep -q "'warn', false" /home/neuro/bidspm/src/reports/boilerplate.m && \
         ! grep -q "'warn', true" /home/neuro/bidspm/src/reports/boilerplate.m
 
+    # fMRIPrep removes SliceTiming after correcting and records StartTime; use it for SPM's fmri_t0
+    # (helper: bidspm_overrides/src/stats/subject_level/getReferenceBinFromStartTime.m, copied below).
+    RUN sed -i "s|^    refBin = nbTimeBins / 2;|    refBin = nbTimeBins / 2;\n    startTimeBin = getReferenceBinFromStartTime(BIDS, filter, TR, nbTimeBins);\n    if ~isempty(startTimeBin)\n      refBin = startTimeBin;\n    end|" \
+        /home/neuro/bidspm/src/batches/stats/setBatchSubjectLevelGLMSpec.m && \
+        grep -q "getReferenceBinFromStartTime" /home/neuro/bidspm/src/batches/stats/setBatchSubjectLevelGLMSpec.m
+
     # marsbar('splash') needs a figure (the image has no graphics toolkit) and prints
     # "Cannot open display" on every run; the splash screen is cosmetic only.
     RUN sed -i "/marsbar('splash');/d" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m && \

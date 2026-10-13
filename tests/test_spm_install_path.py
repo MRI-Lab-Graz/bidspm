@@ -119,3 +119,13 @@ class TestDockerfileWhichAll(unittest.TestCase):
     def test_patch_runs_after_overrides_are_copied(self):
         # the override files (bidspm.m, ...) would otherwise overwrite the patched copies
         self.assertGreater(self.text.index("grep -rliE"), self.text.index("COPY bidspm_overrides/"))
+
+
+class TestDockerfileStartTimeReference(unittest.TestCase):
+    def setUp(self):
+        self.text = DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_glm_spec_uses_start_time_reference_when_available(self):
+        self.assertRegex(self.text, r"sed -i .*refBin = nbTimeBins / 2;.*getReferenceBinFromStartTime")
+        self.assertIn("setBatchSubjectLevelGLMSpec.m", self.text)
+        self.assertRegex(self.text, r"grep -q .getReferenceBinFromStartTime.*setBatchSubjectLevelGLMSpec\.m")

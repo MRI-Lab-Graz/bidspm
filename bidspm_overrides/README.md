@@ -67,6 +67,11 @@ correct behavior.
   SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above). Also fixes
   `--design_only`: v4.0.0's model loop starts with `rmfield(opt, 'model')`, which drops
   `opt.model.designOnly`, so the flag never stopped before estimation. Now it specifies the model and stops.
+- **getReferenceBinFromStartTime.m** (new) + a build-time `sed` in `setBatchSubjectLevelGLMSpec.m`: fMRIPrep drops
+  `SliceTiming` after slice-time correction and records `SliceTimingCorrected` + `StartTime` instead; v4.0.0 then
+  assumes the middle of the TR for SPM's `fmri_t0` (24 ms off for TR 1.2 / 80 slices / StartTime 0.561 s, and wrong
+  for a non-default `--slice-time-ref`). Now `fmri_t0 = round(StartTime / TR * fmri_t) + 1` when every run is
+  corrected and shares one StartTime; otherwise the old default. An explicit `opt.stc.referenceSlice` still wins.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.
