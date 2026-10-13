@@ -827,6 +827,7 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
         return {"valid": False, "error": f"Empty contrast issues: {'; '.join(contrast_issues)}"}
 
     warnings.extend(_check_dataset_edge_filters(model_content))
+    warnings.extend(_check_dataset_node_name(model_content))
 
     # Schema validation
     try:
@@ -888,6 +889,22 @@ def _check_empty_contrasts(model: Dict) -> List[str]:
             issues.append(f"Node '{node_name}': DummyContrasts.Contrasts is an empty list — omit the key to use all model variables")
 
     return issues
+
+
+def _check_dataset_node_name(model: Dict) -> List[str]:
+    """Warn when a Dataset-level node is not named 'dataset'.
+
+    bidspm's report code (boilerplate.m) looks the node up by Name == 'dataset';
+    any other name makes it log "Could not find a corresponding Node".
+    """
+    nodes = model.get('Nodes', model.get('Steps', []))
+    return [
+        f"Node '{node.get('Name')}': Dataset-level nodes must be named 'dataset' "
+        "(bidspm looks the node up by name)"
+        for node in nodes
+        if isinstance(node, dict) and str(node.get('Level', '')).strip() == 'Dataset'
+        and str(node.get('Name', '')).strip() != 'dataset'
+    ]
 
 
 def _check_dataset_edge_filters(model: Dict) -> List[str]:

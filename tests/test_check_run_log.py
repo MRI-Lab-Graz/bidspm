@@ -30,7 +30,8 @@ class TestCheckRunLog(unittest.TestCase):
 
     def test_errors_and_tracebacks_are_reported(self):
         for line in ["error: 'x' undefined", "Traceback (most recent call last):",
-                     "sh: 1: bids-validator: not found", "Permission denied", "Subjects failed: 2"]:
+                     "sh: 1: bids-validator: not found",
+                     "Could not find a corresponding Node with", "Permission denied", "Subjects failed: 2"]:
             self.assertEqual(check_run_log.find_problems(line), [line], line)
 
     def test_cli_exit_code(self):

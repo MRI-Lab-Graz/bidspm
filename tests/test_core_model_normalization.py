@@ -191,3 +191,23 @@ class TestSchemaCacheLruCache(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckDatasetNodeName(unittest.TestCase):
+    """bidspm's report code looks the dataset node up by Name == 'dataset'
+    (boilerplate.m -> getDummyContrastsList(bm, 'dataset')), so any other name makes it
+    log 'Could not find a corresponding Node'."""
+
+    def test_dataset_node_named_dataset_is_fine(self):
+        model = {"Nodes": [{"Name": "dataset", "Level": "Dataset"}]}
+        self.assertEqual(core._check_dataset_node_name(model), [])
+
+    def test_other_dataset_node_name_warns(self):
+        model = {"Nodes": [{"Name": "dataset_level", "Level": "Dataset"}]}
+        warnings = core._check_dataset_node_name(model)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("dataset_level", warnings[0])
+        self.assertIn("'dataset'", warnings[0])
+
+    def test_no_dataset_node_no_warning(self):
+        self.assertEqual(core._check_dataset_node_name({"Nodes": [{"Name": "run", "Level": "Run"}]}), [])

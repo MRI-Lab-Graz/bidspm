@@ -7,7 +7,7 @@ suprathreshold voxels, missing slice timing, Octave lacking goodness-of-fit/IC.
 import re
 import sys
 
-SUSPECT = re.compile(r"error|warning|traceback|exception|fail|not found|denied|cannot|unable", re.I)
+SUSPECT = re.compile(r"error|warning|traceback|exception|fail|not found|denied|cannot|unable|could not", re.I)
 ALLOWED = [re.compile(p) for p in (
     r"^warning: ?$",  # bare header printed before a bidspm WARNING block
     r"bidspm - WARNING\s+(labelActivations|setBatchSubjectLevelGLMSpec|setBatchGoodnessOfFit"
