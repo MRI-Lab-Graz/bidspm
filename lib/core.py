@@ -988,6 +988,9 @@ def _prepare_model_content_for_execution(model_content: Dict[str, Any]) -> List[
 _MAX_BLAS_THREADS = 8
 
 
+_BIDSPM_FAILURE_MARKERS = ("ERROR LOG SAVED:",)  # printed when bidspm caught an error (exit code stays 0)
+
+
 def _blas_thread_env(workers: int, cpus: Optional[int]) -> Dict[str, str]:
     """Per-container BLAS/OpenMP thread limits so parallel workers don't oversubscribe the CPUs.
 
@@ -1569,7 +1572,7 @@ class Pipeline:
             self._log(f"[DRY RUN] Would execute: {' '.join(cmd[:5])}...")
             return True
 
-        return run_command(cmd)
+        return run_command(cmd, failure_markers=_BIDSPM_FAILURE_MARKERS)
     
     def _run_container_dataset_action(self, task: str) -> bool:
         """Run dataset-level stats via container."""
@@ -1601,5 +1604,5 @@ class Pipeline:
             self._log(f"[DRY RUN] Would execute dataset stats")
             return True
 
-        return run_command(cmd)
+        return run_command(cmd, failure_markers=_BIDSPM_FAILURE_MARKERS)
 

@@ -188,8 +188,21 @@ def check_docker_availability():
         log_error(f"Failed to check Docker status: {e}")
 
 
-def run_command(cmd_list, capture_output=False):
-    result = run_streaming_command(cmd_list, capture_output=capture_output)
+def run_command(cmd_list, capture_output=False, failure_markers=()):
+    """Run a command; ``failure_markers`` are output strings that make an exit-0 run a failure
+    (bidspm's launcher is try/catch + exit, so a caught error still exits 0)."""
+    seen = []
+
+    def watch(line: str) -> None:
+        if not seen:
+            seen.extend(m for m in failure_markers if m in line)
+
+    result = run_streaming_command(cmd_list, capture_output=capture_output,
+                                   on_output=watch if failure_markers else None)
+
+    if result.success and seen:
+        log_error_non_fatal(f"Command exited 0 but printed '{seen[0]}': {' '.join(cmd_list)}")
+        return False
 
     if result.success:
         if capture_output and result.output:

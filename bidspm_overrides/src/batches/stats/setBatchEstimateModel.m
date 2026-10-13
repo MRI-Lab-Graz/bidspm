@@ -93,10 +93,8 @@ function matlabbatch = setBatchEstimateModel(matlabbatch, opt, tmp, contrastsLis
         opt.orderBatches.estimate = numel(matlabbatch);
         matlabbatch = setBatchInformationCriteria(matlabbatch, opt, rfxDir);
 
-        matlabbatch{end + 1}.spm.stats.review.spmmat = spmMatFile; %#ok<*AGROW>
-        matlabbatch{end}.spm.stats.review.display.matrix = 1;
-        matlabbatch{end}.spm.stats.review.print = false;
-
+        % (upstream also adds an SPM "Model review" module here; it draws the design matrix, which
+        % fails without a graphics toolkit and aborts the whole batch, so it is omitted)
         matlabbatch = setBatchPrintFigure(matlabbatch, opt, ...
                                           fullfile(spm_fileparts(spmMatFile{1}), ...
                                                    designMatrixFigureName(opt, ...

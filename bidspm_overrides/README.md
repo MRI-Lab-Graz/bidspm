@@ -75,6 +75,9 @@ correct behavior.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.
+- **setBatchEstimateModel.m** (see above) also no longer adds SPM's "Model review" module at the group level: it
+  draws the design matrix, which fails without a graphics toolkit and aborted the batch after the estimation, so
+  the group contrasts were never written (bidspm still exited 0).
 - **setBatchPrintFigure.m**: no-op. SPM's "Print figure" job needs a graphics toolkit the
   container doesn't have, so it only ever logged "Print error: Figure not found."
 - **validate.m**: upstream shells out to `validate_model` on every stats/contrasts/results
