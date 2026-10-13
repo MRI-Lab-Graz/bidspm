@@ -62,6 +62,8 @@ correct behavior.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.
+- **setBatchPrintFigure.m**: no-op. SPM's "Print figure" job needs a graphics toolkit the
+  container doesn't have, so it only ever logged "Print error: Figure not found."
 - **validate.m**: upstream shells out to `validate_model` on every stats/contrasts/results
   run; it crashes on pydantic 2 and rejects `Transformer: bidspm` models. Only the BIDS
   dataset validator is kept; model validation is done by the GUI

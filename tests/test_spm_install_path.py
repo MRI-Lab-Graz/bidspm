@@ -75,3 +75,26 @@ class TestDockerfileCleanLogs(unittest.TestCase):
 
     def test_real_bids_validator_installed(self):
         self.assertRegex(self.text, r"npm install -g bids-validator@1\.14\.")
+
+
+class TestDockerfileRemainingNoise(unittest.TestCase):
+    def setUp(self):
+        self.text = DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_base_image_has_octave_9(self):
+        # Octave 6/7 print "ignoring const execution_exception" on every headless exit
+        self.assertRegex(self.text, r"(?m)^FROM python:3\.12-slim-trixie")
+
+    def test_git_trusts_all_dirs_for_arbitrary_host_uid(self):
+        self.assertIn("safe.directory '*'", self.text)
+
+    def test_node_deprecation_warnings_off(self):
+        self.assertIn("NODE_NO_WARNINGS=1", self.text)
+
+    def test_legacy_function_warnings_silenced(self):
+        self.assertIn("Octave:legacy-function", self.text)
+
+    def test_boilerplate_missing_key_warnings_off(self):
+        # report template data lacks designType / OS.version; the text is cosmetic
+        self.assertIn("boilerplate.m", self.text)
+        self.assertIn("'warn', false", self.text)
