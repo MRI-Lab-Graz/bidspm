@@ -164,9 +164,6 @@ class TestSchemaCacheLruCache(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestCheckDatasetNodeName(unittest.TestCase):
     """bidspm's report code looks the dataset node up by Name == 'dataset'
@@ -186,3 +183,7 @@ class TestCheckDatasetNodeName(unittest.TestCase):
 
     def test_no_dataset_node_no_warning(self):
         self.assertEqual(core._check_dataset_node_name({"Nodes": [{"Name": "run", "Level": "Run"}]}), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

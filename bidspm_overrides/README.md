@@ -59,6 +59,10 @@ correct behavior.
   stats-workers to race on the shared atlas cache/source dirs ("copyfile: no
   files to move", "delete: no such file"). Only strip '.gz' when the target
   path actually has it.
+  Also: path resolution is now separate from unzipping/merging (the Wang atlas merge
+  `spm_write_vol`s into the CPP_ROI tree), which only runs when the atlas is not already in
+  SPM's atlas dir. The image bakes all atlases in at build time, so a container run as an
+  arbitrary host uid never needs to write there.
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
   SPM12". Now parses the major version and only compares revisions within SPM12.

@@ -16,7 +16,7 @@ IMAGE_TAG="bidspm/bidspm:latest"
 echo "🚀 Building BIDSPM Container for MRI Lab Graz"
 echo "   Author: Karl Koschutnig"
 echo "   Container: $IMAGE_TAG"
-echo "   Features: Python 3.12 slim, Octave 8.x, BIDSPM 4.0, SPM 26, UV"
+echo "   Features: Python 3.12 slim, Octave 9.x, BIDSPM 4.0, SPM 26, UV"
 echo ""
 
 # Build the container

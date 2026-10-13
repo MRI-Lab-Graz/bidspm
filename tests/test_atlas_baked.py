@@ -44,9 +44,9 @@ class TestDockerfileBakesAtlases(unittest.TestCase):
     def setUp(self):
         self.text = DOCKERFILE.read_text(encoding="utf-8")
 
-    def test_all_five_atlases_unpacked_at_build(self):
-        for atlas in ("HCPex", "AAL", "Glasser", "Wang", "visfAtlas"):
-            self.assertIn(f"copyAtlasToSpmDir('{atlas}'", self.text)
+    def test_atlases_unpacked_at_build_by_bidspm_init(self):
+        # initCppRoi.m (run by bidspm('init')) copies all five atlases into spm('dir')/atlas
+        self.assertRegex(self.text, r"RUN octave-cli --eval .*bidspm\('init'\)")
 
     def test_build_fails_if_atlas_files_missing(self):
         for f in ("AAL3v1_1mm.nii", "HCPex.nii", "space-MNI_seg-wang_dseg.nii",
