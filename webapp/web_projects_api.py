@@ -242,25 +242,3 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
             return jsonify(config)
         except Exception as exc:
             return jsonify({'error': str(exc)}), 500
-
-    @app.route('/api/projects/<project_id>/logs', methods=['GET'])
-    def api_get_project_logs(project_id: str):
-        """Get project execution logs."""
-        try:
-            logs_dir = get_project_manager().get_project_logs_dir(project_id)
-            if not logs_dir.exists():
-                return jsonify({'logs': []})
-
-            logs = []
-            for log_file in sorted(logs_dir.glob('*.log'), reverse=True):
-                stat = log_file.stat()
-                logs.append({
-                    'name': log_file.name,
-                    'path': str(log_file),
-                    'size': stat.st_size,
-                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                })
-
-            return jsonify({'logs': logs})
-        except Exception as exc:
-            return jsonify({'error': str(exc)}), 500

@@ -16,8 +16,7 @@ correct behavior.
 - **validateContrasts.m**: adds missing cell-array guard (container v4.0.0 bug).
 - **setBatchSubjectLevelContrasts.m**: coerces cell→struct before validate call.
 - **return_file_index.m**: suppresses benign warnings for fMRIPrep 'figures' QC files.
-- **Filter.m / get_input.m / check_field.m / identify_rows.m**: ensure the full
-  transformer chain uses our local versions so Filter + Factor work end-to-end.
+- **get_input.m**: part of the transformer chain; two lines changed so Filter + Factor work end-to-end.
 - **BidsModel.m**: fixes cellfun crash in validateConstrasts — Octave cannot use
   `x == 1` to test for the intercept when x is a multi-char string.
 - **setBatchEstimateModel.m**: fixes `for j = 1:size(contrastsList)` (container
