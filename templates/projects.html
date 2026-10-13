@@ -581,13 +581,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Container type toggle for new project
     document.getElementById('project-container-type')?.addEventListener('change', function() {
         const imageInput = document.getElementById('project-container-image');
-        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'ghcr.io/mri-lab-graz/bidspm:latest';
+        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
     });
 
     // Container type toggle for edit project
     document.getElementById('edit-container-type')?.addEventListener('change', function() {
         const imageInput = document.getElementById('edit-container-image');
-        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'ghcr.io/mri-lab-graz/bidspm:latest';
+        imageInput.placeholder = this.value === 'apptainer' ? '/path/to/container.sif' : 'bidspm/bidspm:latest';
     });
     
     // =============================================================================
@@ -741,7 +741,7 @@ document.addEventListener('DOMContentLoaded', function() {
             space: space,
             container_type: containerType,
             apptainer_image: containerType === 'apptainer' ? containerImage : '',
-            docker_image: containerType === 'docker' ? containerImage : 'ghcr.io/mri-lab-graz/bidspm:latest'
+            docker_image: containerType === 'docker' ? containerImage : 'bidspm/bidspm:latest'
         };
         
         try {
@@ -820,7 +820,7 @@ document.addEventListener('DOMContentLoaded', function() {
             space: space,
             container_type: containerType,
             apptainer_image: containerType === 'apptainer' ? containerImage : '',
-            docker_image: containerType === 'docker' ? containerImage : 'ghcr.io/mri-lab-graz/bidspm:latest'
+            docker_image: containerType === 'docker' ? containerImage : 'bidspm/bidspm:latest'
         };
         
         try {

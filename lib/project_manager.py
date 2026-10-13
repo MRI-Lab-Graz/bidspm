@@ -52,7 +52,7 @@ class ProjectConfig:
     
     # Container settings
     container_type: str = "docker"  # docker, apptainer
-    docker_image: str = "ghcr.io/mri-lab-graz/bidspm:latest"
+    docker_image: str = "bidspm/bidspm:latest"
     apptainer_image: str = ""
     spm_standalone_image: str = ""
     

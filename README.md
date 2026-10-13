@@ -41,7 +41,7 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - **Rebuild the image after every `git pull`** that touches `bidspm_overrides/` or `containers/dockerfile/`:
   the patches are baked in at build time, so an old image silently lacks newer fixes
   (`docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .`, about 10 minutes, ~4.6 GB).
-- The published `ghcr.io/mri-lab-graz/bidspm:latest` predates this SPM 26 image. Build locally until a new one is published.
+- The published `ghcr.io/mri-lab-graz/bidspm:latest` predates this SPM 26 image and is not compatible with this code; the defaults point at the image you build locally (`bidspm/bidspm:latest`).
 - "Slice timing information was missing" in a stats log is expected for fMRIPrep input: fMRIPrep drops `SliceTiming`
   after correcting and records `StartTime`, which is used for SPM's `fmri_t0`.
 
@@ -82,7 +82,7 @@ The tool supports multiple container configurations:
 ```json
 {
   "container_type": "docker",
-  "docker_image": "ghcr.io/mri-lab-graz/bidspm:latest",
+  "docker_image": "bidspm/bidspm:latest",
   "apptainer_image": ""
 }
 ```
