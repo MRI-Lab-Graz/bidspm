@@ -11,6 +11,7 @@ CLEAN = """\
 warning: 
 [12:35:20] bidspm - WARNING				labelActivations
 no significant voxels in file:
+Could not find specified file for mask/montage.
 warning: No voxels survive height threshold at u=3.1
    Subjects failed: 0
 """
