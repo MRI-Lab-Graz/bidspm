@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
@@ -377,14 +376,6 @@ def register_utility_stats_routes(
             masks[datatype]['count'] += 1
 
         return jsonify(list(masks.values()))
-
-    @app.route('/api/preflight/tools', methods=['GET'])
-    def api_preflight_tools():
-        results = {}
-        for tool in ('docker', 'apptainer', 'singularity', 'octave'):
-            path = shutil.which(tool)
-            results[tool] = {'available': path is not None, 'path': path or ''}
-        return jsonify(results)
 
     @app.route('/api/stats_subject_coverage', methods=['POST'])
     def api_stats_subject_coverage():

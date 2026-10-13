@@ -44,10 +44,9 @@ from waitress import serve
 # Import all business logic from core
 from lib import (
     Pipeline, PipelineOptions, PipelineResult,
-    discover_subjects, discover_tasks, discover_spaces,
+    discover_tasks, discover_spaces,
     check_subject_processed,
-    validate_bids_model, estimate_processing_time,
-    load_config
+    validate_bids_model,
 )
 from lib.config import auto_select_container_config
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
@@ -180,7 +179,7 @@ def wait_for_http_ready(url: str, timeout: float = 8.0, interval: float = 0.2) -
 def collect_startup_preflight_checks(app_root: Path = APP_ROOT) -> List[Dict[str, Any]]:
     """Collect basic readiness checks for the local web interface startup."""
     registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
-    required_api_routes = {'/check_environment', '/api/model/create', '/api/preflight/tools'}
+    required_api_routes = {'/api/model/create', '/api/projects', '/run'}
     required_page_routes = {'/', '/projects', '/analysis', '/model_editor'}
 
     return [

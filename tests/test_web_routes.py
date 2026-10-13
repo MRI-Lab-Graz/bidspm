@@ -913,49 +913,6 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), ["motor"])
 
-    def test_get_subjects_uses_loaded_config(self):
-        config_file = Path(self.temp_dir.name) / "config.json"
-        config_file.write_text("{}", encoding="utf-8")
-
-        with patch.object(web_discovery_model_api, "load_config", return_value=SimpleNamespace()), \
-             patch.object(web_discovery_model_api, "discover_subjects", return_value=["01", "02"]):
-            response = self.client.get("/get_subjects", query_string={"config": str(config_file)})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), ["01", "02"])
-
-    def test_estimate_time_uses_loaded_config(self):
-        config_file = Path(self.temp_dir.name) / "config.json"
-        config_file.write_text("{}", encoding="utf-8")
-        fake_config = SimpleNamespace(SUBJECTS=[], TASKS=["motor"])
-
-        with patch.object(web_discovery_model_api, "load_config", return_value=fake_config), \
-             patch.object(web_discovery_model_api, "discover_subjects", return_value=["01"]), \
-             patch.object(web_discovery_model_api, "estimate_processing_time", return_value={"minutes": 12}):
-            response = self.client.post(
-                "/estimate_time",
-                json={"config": str(config_file), "actions": ["smooth"]},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {"minutes": 12})
-
-    def test_check_environment_reports_container_tools(self):
-        def fake_which(tool):
-            if tool == "docker":
-                return "/usr/bin/docker"
-            return None
-
-        with patch("shutil.which", side_effect=fake_which):
-            response = self.client.get("/check_environment")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), {
-            "docker_available": True,
-            "apptainer_available": False,
-            "all_features_available": True,
-        })
-
     def test_validate_model_returns_validator_payload(self):
         with patch.object(web_discovery_model_api, "validate_bids_model", return_value={"valid": True, "messages": []}):
             response = self.client.post(
@@ -1000,20 +957,6 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(by_datatype["func"]["count"], 1)
         self.assertEqual(by_datatype["func"]["entities"]["task"], "motor")
         self.assertEqual(by_datatype["anat"]["entities"]["space"], "T1w")
-
-    def test_api_preflight_tools_reports_tool_availability(self):
-        def fake_which(tool):
-            if tool in {"docker", "octave"}:
-                return f"/usr/bin/{tool}"
-            return None
-
-        with patch("shutil.which", side_effect=fake_which):
-            response = self.client.get("/api/preflight/tools")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["docker"], {"available": True, "path": "/usr/bin/docker"})
-        self.assertEqual(response.get_json()["apptainer"], {"available": False, "path": ""})
-        self.assertEqual(response.get_json()["octave"], {"available": True, "path": "/usr/bin/octave"})
 
     def test_api_stats_subject_coverage_rejects_missing_project(self):
         response = self.client.post(
