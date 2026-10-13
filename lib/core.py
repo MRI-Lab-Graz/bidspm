@@ -181,7 +181,7 @@ def build_docker_command(
     # already does. chmod 0o777 since --user above runs as the host uid,
     # which won't otherwise have write access to a dir it didn't create.
     for dir_name, container_path in [
-        ("atlas", "/opt/spm12/atlas"),
+        ("atlas", "/opt/spm/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -309,7 +309,7 @@ def build_apptainer_command(
     cmd.extend(["--bind", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
 
     for dir_name, container_path in [
-        ("atlas", "/opt/spm12/atlas"),
+        ("atlas", "/opt/spm/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -326,7 +326,7 @@ def build_apptainer_command(
         "--env", "SPM_HTML_BROWSER=0",
         "--env", "BIDSPM_SKIP_ATLAS_INIT=1",
         "--env", f"OCTAVE_EXECUTABLE={runtime_bind_path}/octave",
-        "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm12",
+        "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm",
         "--env", "BIDSPM_IGNORE_FIELDMAPS=1",
         "--env", "BIDSPM_IGNORE_FIGURES=1",
         "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
@@ -350,7 +350,7 @@ def _create_octave_wrapper(run_tmp_dir: Path):
     """Create Octave wrapper script with proper paths."""
     octave_wrapper = run_tmp_dir / "octave"
     content = '''#!/bin/bash
-export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm12:$MATLABPATH"
+export MATLABPATH="/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm:$MATLABPATH"
 if [ -f /usr/bin/octave ]; then REAL_OCTAVE=/usr/bin/octave
 elif [ -f /usr/local/bin/octave ]; then REAL_OCTAVE=/usr/local/bin/octave
 elif [ -f /usr/bin/octave-cli ]; then REAL_OCTAVE=/usr/bin/octave-cli
@@ -675,7 +675,7 @@ _FFX_UNNAMED_NODE_LABELS = {'run', 'runlevel'}
 
 # Files bidspm's CPP_ROI/copyAtlasToSpmDir.m populates into the shared
 # host atlas cache dir (config.WD / "atlas", bind-mounted read/write into
-# every concurrent container as /opt/spm12/atlas). When this cache is empty,
+# every concurrent container as /opt/spm/atlas). When this cache is empty,
 # multiple concurrent stats-workers can each see it as empty at the same
 # time and race on the Wang-atlas merge-then-delete step in a *separate*
 # shared source dir (CPP_ROI's own atlas/ tree) -- confirmed live: this

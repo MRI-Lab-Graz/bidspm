@@ -1,7 +1,7 @@
 name: Publish Docker image
 
 # Manual or version-tag triggered on purpose (not on every push to main) --
-# the image is a slow, ~2.7GB Octave/SPM12 build, and :latest shouldn't
+# the image is a slow, ~2.7GB Octave/SPM build, and :latest shouldn't
 # silently drift with every unrelated commit.
 on:
   push:
