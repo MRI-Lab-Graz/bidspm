@@ -66,6 +66,11 @@ def find_new_spm_mats(config: Config, subject: str, task: str, since: float) -> 
     return found
 
 
+def is_estimated(spm_mat: Path) -> bool:
+    """Estimation wrote its first beta image next to this SPM.mat (the runtime can exit 0 without estimating)."""
+    return any((spm_mat.parent / f"beta_0001{ext}").exists() for ext in (".nii", ".img"))
+
+
 def check_image(container_config: ContainerConfig) -> Tuple[bool, str]:
     """Is the user-supplied image there? Run once before any subject; no pulling, no fallback."""
     image = container_config.spm_standalone_image

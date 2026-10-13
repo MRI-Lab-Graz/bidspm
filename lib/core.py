@@ -25,6 +25,7 @@ from .spm_standalone import (
     build_spm_standalone_command,
     check_image as check_spm_image,
     find_new_spm_mats,
+    is_estimated,
     write_estimation_job,
 )
 from .config import Config, ContainerConfig, load_config, load_container_config
@@ -1415,10 +1416,17 @@ class Pipeline:
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
             self._copy_brain_mask(subject, task)
+            started = time.time() - 1
             if self.options.estimation_engine == "standalone":
                 ok = self._run_stats_standalone(subject, task)
             else:
                 ok = self._run_container_action("stats", subject, task)
+            # bidspm's launcher is try/catch + exit, so a failed run still exits 0: check for output.
+            if ok and not self.options.dry_run \
+                    and not find_new_spm_mats(self.config, subject, task, since=started):
+                self._log_error(f"Stats for subject {subject}, task {task}: the container exited 0 but "
+                                f"wrote no SPM.mat; see the container log above")
+                ok = False
             if not ok:
                 success = False
 
@@ -1458,6 +1466,10 @@ class Pipeline:
             write_estimation_job(container_paths, job_dir)
             self._log(f">>> Estimating in SPM standalone: subject {subject}, task {task}")
             if not run_command(build_spm_standalone_command(self.container_config, self.config, job_dir)):
+                return False
+            if not all(is_estimated(m) for m in mats):
+                self._log_error(f"SPM standalone exited 0 but wrote no beta images for subject {subject}, "
+                                f"task {task}; not running contrasts")
                 return False
 
         return self._run_container_action("stats", subject, task, cli_action="contrasts")

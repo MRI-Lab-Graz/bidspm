@@ -23,10 +23,13 @@ class _Base(unittest.TestCase):
         p.model_file_path = None
         return p
 
-    def run_subject(self, p, run_results=(True, True, True), mats=True):
+    def run_subject(self, p, run_results=(True, True, True), mats=True, betas=True):
         """Returns (success, [label per executed command])."""
         calls, results = [], iter(run_results)
         spm_mat = p.config.DERIVATIVES_DIR / "bidspm-stats" / "sub-01" / "task-motor_x" / "SPM.mat"
+        spm_mat.parent.mkdir(parents=True, exist_ok=True)
+        if betas:
+            (spm_mat.parent / "beta_0001.nii").write_text("x")
 
         def fake_build(cc, cfg, args, model, **kw):
             return (["octave"] + list(args), None)
@@ -70,6 +73,12 @@ class TestStandaloneOrchestration(_Base):
         self.assertFalse(ok)
         self.assertEqual(calls, ["octave:design"])
 
+    def test_estimation_that_wrote_no_betas_fails_before_contrasts(self):
+        # the standalone can exit 0 without having estimated anything
+        ok, calls = self.run_subject(self.pipeline(), betas=False)
+        self.assertFalse(ok)
+        self.assertEqual(calls, ["octave:design", "standalone"])
+
     def test_dry_run_records_all_three_commands_and_runs_nothing(self):
         p = self.pipeline(dry_run=True)
         with patch("lib.core.run_command") as run, patch.object(Pipeline, "_copy_brain_mask"):
@@ -94,3 +103,15 @@ class TestStandalonePreflight(_Base):
         with patch("lib.core.check_spm_image") as chk:
             self.assertTrue(self.pipeline(engine="octave", image="")._check_standalone_image())
             chk.assert_not_called()
+
+
+class TestOctaveEngineChecksOutputs(_Base):
+    """bidspm's launcher is try/catch + exit, so a failing container still exits 0."""
+
+    def test_exit_zero_without_an_spm_mat_is_a_failed_subject(self):
+        ok, calls = self.run_subject(self.pipeline(engine="octave"), mats=False)
+        self.assertFalse(ok)
+        self.assertEqual(calls, ["octave:stats"])
+
+    def test_spm_mat_present_is_success(self):
+        self.assertTrue(self.run_subject(self.pipeline(engine="octave"))[0])
