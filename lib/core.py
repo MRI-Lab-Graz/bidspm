@@ -12,6 +12,7 @@ import random
 import shlex
 import shutil
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
@@ -1037,6 +1038,8 @@ class Pipeline:
         self.options = options
         self.config: Optional[Config] = None
         self._workers = 1  # active stats workers, set in run(); sizes the BLAS threads
+        self._validation_lock = threading.Lock()
+        self._validated = False
         self.container_config: Optional[ContainerConfig] = None
         self.model_file_path: Optional[Path] = None
         self.stats_node_name: Optional[str] = None
@@ -1434,6 +1437,13 @@ class Pipeline:
                 if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
                     shutil.copy2(json_src, json_dst)
 
+    def _validation_args(self) -> List[str]:
+        """Only the first container of a run validates the BIDS dataset (it walks the whole
+        dataset, once per container otherwise); later ones skip it."""
+        with self._validation_lock:
+            first, self._validated = not self._validated, True
+        return [] if first else ["--skip_validation"]
+
     def _container_env(self) -> Dict[str, str]:
         """Extra env for every container: BLAS thread limits, and skipping the (slow) SPM Results
         export unless requested. The report action reads results/*.csv|png, so it keeps them."""
@@ -1474,7 +1484,7 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path,
+            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
             extra_env=self._container_env(),
         )
 
@@ -1506,7 +1516,7 @@ class Pipeline:
             args += ["--model_file", model_path]
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path,
+            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
             extra_env=self._container_env(),
         )
 

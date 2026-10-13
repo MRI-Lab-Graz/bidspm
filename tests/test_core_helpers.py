@@ -362,8 +362,18 @@ class TestCoreHelpers(unittest.TestCase):
             # Each run's per-subject tmp bind mount embeds a fresh timestamp, so
             # normalize it away before comparing that both runs built the same
             # underlying commands.
-            normalize = lambda commands: sorted(re.sub(r"run_\d+_\d+_\d+", "run_TS", cmd) for cmd in commands)
+            # Also ignore the two intentional per-run differences: which container validates
+            # the dataset first (order-dependent) and the BLAS thread caps (depend on workers).
+            def normalize(commands):
+                out = []
+                for cmd in commands:
+                    cmd = re.sub(r"run_\d+_\d+_\d+", "run_TS", cmd)
+                    cmd = cmd.replace(" --skip_validation", "")
+                    out.append(re.sub(r" -e \w+_NUM_THREADS=\d+", "", cmd))
+                return sorted(out)
             self.assertEqual(normalize(sequential_commands), normalize(parallel_commands))
+            for commands in (sequential_commands, parallel_commands):
+                self.assertEqual(sum("--skip_validation" not in c for c in commands), 1)
 
 
 class TestProcessSubjectDelegation(unittest.TestCase):
