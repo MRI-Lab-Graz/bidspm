@@ -1,18 +1,13 @@
 name: Publish Docker image
 
-# Manual or version-tag triggered on purpose (not on every push to main) --
-# the image is a slow, ~2.7GB Octave/SPM build, and :latest shouldn't
-# silently drift with every unrelated commit.
+# Manual only, on purpose: the image is a slow, ~4.6GB Octave/SPM build, publishing it is a decision
+# (not a side effect of pushing a tag), and the tag you pick is the version users pin.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish the image as"
-        required: false
-        default: "latest"
+        description: "Tag to publish the image as (e.g. spm26-1.0)"
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -43,14 +38,8 @@ jobs:
         id: tags
         run: |
           IMAGE="${REGISTRY}/${IMAGE_NAME,,}"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            TAGS="${IMAGE}:${GITHUB_REF_NAME},${IMAGE}:${VERSION},${IMAGE}:latest"
-          else
-            TAGS="${IMAGE}:${{ inputs.tag }}"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-          echo "Publishing: ${TAGS}"
+          echo "tags=${IMAGE}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "Publishing: ${IMAGE}:${{ inputs.tag }}"
 
       - name: Build and push
         uses: docker/build-push-action@v6
