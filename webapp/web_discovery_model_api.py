@@ -776,6 +776,11 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
         apptainer = shutil.which('apptainer') is not None
         return jsonify({'docker_available': docker, 'apptainer_available': apptainer, 'all_features_available': docker or apptainer})
 
+    @app.route('/api/suggested_workers')
+    def api_suggested_workers():
+        from lib.utils import suggest_stats_workers, system_resources
+        return jsonify(suggest_stats_workers(**system_resources()))
+
     @app.route('/api/model/create', methods=['POST'])
     def api_model_create():
         data = request.json or {}

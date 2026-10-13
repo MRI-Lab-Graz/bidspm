@@ -142,6 +142,21 @@ class TestWebRoutes(unittest.TestCase):
         self.assertNotIn("checked", box.group(0))
         self.assertIn("run_results: document.getElementById('run_results').checked", text)
 
+    def test_suggested_workers_route_reports_machine_and_suggestion(self):
+        response = self.client.get("/api/suggested_workers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertGreaterEqual(data["suggested"], 1)
+        self.assertLessEqual(data["suggested"], 16)
+        self.assertIn("cpus", data)
+
+    def test_analysis_page_has_suggest_workers_button(self):
+        project = self.project_manager.create_project("Suggest workers demo")
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+        self.assertIn('id="suggest_workers"', text)
+        self.assertIn("/api/suggested_workers", text)
+
     def test_analysis_route_loads_transformer_handoff_assets(self):
         project = self.project_manager.create_project("Analysis handoff assets demo")
 

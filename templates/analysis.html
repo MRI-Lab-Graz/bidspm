@@ -319,7 +319,11 @@
                             </div>
                             <div class="mb-2">
                                 <label class="form-label small mb-1" for="stats_workers">Parallel subjects</label>
-                                <input type="number" min="1" max="32" step="1" class="form-control form-control-sm" style="max-width:100px;" id="stats_workers" name="stats_workers" value="4">
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="number" min="1" max="32" step="1" class="form-control form-control-sm" style="max-width:100px;" id="stats_workers" name="stats_workers" value="4">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="suggest_workers" title="Suggest a value for this machine (CPU cores and free memory)">Suggest</button>
+                                </div>
+                                <div class="text-muted small" id="suggest_workers_hint"></div>
                                 <div class="text-muted mt-1" style="font-size:.72rem; line-height:1.4;">
                                     Number of subjects to smooth/run stats for at once. Set to 1 for single-seat MATLAB licenses or limited container concurrency.
                                 </div>
@@ -1689,6 +1693,18 @@
             await syncInternalToForm();
         }
     }
+
+    document.getElementById('suggest_workers')?.addEventListener('click', async () => {
+        const hint = document.getElementById('suggest_workers_hint');
+        try {
+            const r = await (await fetch('/api/suggested_workers')).json();
+            document.getElementById('stats_workers').value = r.suggested;
+            const mem = r.mem_available_gb ? `, ${Math.round(r.mem_available_gb)} GB free` : '';
+            hint.textContent = `Suggested ${r.suggested} for this machine (${r.cpus} cores${mem}; about 4 GB per worker on long scans).`;
+        } catch (e) {
+            hint.textContent = 'Could not read this machine\'s resources.';
+        }
+    });
 
     // --- STATIC FORM INITIALIZATION ---
     async function initApp() {

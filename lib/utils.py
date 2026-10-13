@@ -1,5 +1,6 @@
 """Utility functions for logging, validation, and file operations."""
 
+import os
 import sys
 import json
 import shutil
@@ -12,7 +13,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime
-from typing import Callable, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 LOG_DIR = Path.home() / ".bidspm" / "logs"  # global fallback; project-scoped runs use project_manager instead
 LOG_FILE = str(LOG_DIR / "run_bidspm.log")
@@ -364,3 +365,34 @@ def get_container_model_path(model_file_path: Path, derivatives_dir: Path) -> st
         return f"/derivatives/{relative_path}"
     except ValueError:
         return "/models/smdl.json"
+
+
+_GB_PER_STATS_WORKER = 4   # a heavy first-level estimation peaks around 2-4 GB (SPM maxmem = 1 GB chunks)
+_MAX_SUGGESTED_WORKERS = 16  # untested beyond this on shared disks
+
+
+def system_resources() -> Dict[str, Optional[float]]:
+    """CPU count and available memory (GB); memory is None where /proc/meminfo is missing."""
+    mem = None
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                mem = int(line.split()[1]) / 1024 / 1024
+                break
+    except (OSError, ValueError):
+        pass
+    return {"cpus": os.cpu_count(), "mem_available_gb": mem}
+
+
+def suggest_stats_workers(cpus: Optional[int], mem_available_gb: Optional[float]) -> Dict[str, Any]:
+    """Suggest how many subjects to run at once: leave CPU headroom, ~4 GB per worker, cap 16."""
+    cpus = cpus or 1
+    by_cpu = max(1, cpus - 2) if cpus > 4 else max(1, cpus - 1)
+    by_mem = max(1, int(mem_available_gb // _GB_PER_STATS_WORKER)) if mem_available_gb else by_cpu
+    return {
+        "suggested": max(1, min(by_cpu, by_mem, _MAX_SUGGESTED_WORKERS)),
+        "cpus": cpus,
+        "mem_available_gb": mem_available_gb,
+        "max_by_cpu": by_cpu,
+        "max_by_memory": by_mem,
+    }
