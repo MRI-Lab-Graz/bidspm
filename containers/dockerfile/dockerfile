@@ -165,7 +165,8 @@ RUN octave-cli --eval "addpath('/opt/spm'); cd('/home/neuro/bidspm'); bidspm('in
     for f in AAL3v1_1mm.nii AAL3v1_1mm.xml HCPex.nii HCPex.xml \
              space-MNI152ICBM2009anlin_seg-glasser_dseg.nii space-MNI_seg-visfAtlas_dseg.nii \
              space-MNI_seg-wang_dseg.nii; do test -s /opt/spm/atlas/$f || exit 1; done && \
-    chmod -R a+rX /opt/spm/atlas
+    chmod -R a+rX /opt/spm/atlas && \
+    chmod -R a+rwX /opt/spm/toolbox/MACS
 
 # Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
 RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \

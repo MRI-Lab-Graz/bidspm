@@ -55,3 +55,8 @@ class TestDockerfileBakesAtlases(unittest.TestCase):
 
     def test_atlas_dir_readable_by_any_host_uid(self):
         self.assertIn("chmod -R a+rX /opt/spm/atlas", self.text)
+
+    def test_macs_perms_fixed_after_build_time_init(self):
+        # bidspm('init') runs `git pull` in the MACS clone as root, leaving root-owned files
+        self.assertGreater(self.text.rindex("chmod -R a+rwX /opt/spm/toolbox/MACS"),
+                           self.text.index("bidspm('init')"))
