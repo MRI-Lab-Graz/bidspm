@@ -86,6 +86,23 @@ correct behavior.
 - **allowed_actions.json**: keeps the CLI's list of allowed actions in sync
   with the workflows added/patched above (e.g. BMS actions).
 
+## Patches (`containers/dockerfile/patches/*.patch`)
+
+Fixes of a few lines are unified diffs against upstream v4.0.0, applied with `patch -p1` in the Dockerfile before the
+whole-file overrides above are copied in (the diff shows exactly what changed; a failing hunk fails the build):
+
+- **BidsModel.m**, **return_file_index.m**, **setBatchSubjectLevelContrasts.m**, **get_input.m**: the small fixes described
+  in the list above (get_input.m: `assert(isscalar(transformer))` instead of `numel(...) == 1`).
+- **bidsResults.m**: gives each result batch a unique name (`_<iBatch>`) and matches contrast names that carry a session
+  (`contrast(_ses-N)?_run-N`).
+- **bidspm.m**, **getOptionsFromCliArgument.m**, **allowed_actions.json**: register the `bms-cvlme` action next to
+  `bms`, `bms-posterior`, `bms-bms`. (`allowed_actions.json` used to be a whole-file override under a `data/` folder that
+  `.gitignore` excluded, so fresh clones silently built images without it; as a patch it is tracked.)
+- **inputParserForStats.m**: adds the `name_by_confounds` parameter (used by `cliStats.m`).
+
+To change a patched file: edit a copy of the upstream file and regenerate the diff
+(`diff -u -L a/<path> -L b/<path> upstream/<path> edited/<path> > containers/dockerfile/patches/<name>.patch`).
+
 ## Adding a new override
 
 Add the patched file at the same relative path under this directory (mirroring

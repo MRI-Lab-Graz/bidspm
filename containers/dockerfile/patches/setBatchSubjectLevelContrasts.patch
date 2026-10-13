@@ -1,0 +1,14 @@
+--- a/src/batches/stats/setBatchSubjectLevelContrasts.m
++++ b/src/batches/stats/setBatchSubjectLevelContrasts.m
+@@ -44,6 +44,11 @@
+     contrasts = specifyContrasts(bm, SPM, nodeName);
+   end
+ 
++  % Upstream can return a cell array; coerce to struct array for validation
++  if iscell(contrasts)
++    contrasts = [contrasts{:}];
++  end
++
+   validateContrasts(contrasts);
+ 
+   consess = {};

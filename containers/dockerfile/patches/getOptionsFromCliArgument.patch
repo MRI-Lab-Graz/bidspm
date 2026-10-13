@@ -1,0 +1,11 @@
+--- a/src/cli/getOptionsFromCliArgument.m
++++ b/src/cli/getOptionsFromCliArgument.m
+@@ -70,7 +70,7 @@
+ 
+   opt = optionsStats(opt, args, action);
+ 
+-  if ismember(lower(action), {'bms', 'bms-posterior', 'bms-bms'})
++  if ismember(lower(action), {'bms', 'bms-cvlme', 'bms-posterior', 'bms-bms'})
+     opt.toolbox.MACS.model.dir = args.Results.models_dir;
+   end
+ 

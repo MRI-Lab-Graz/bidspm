@@ -1,0 +1,13 @@
+--- a/src/bids_model/BidsModel.m
++++ b/src/bids_model/BidsModel.m
+@@ -704,8 +704,8 @@
+               if ~iscell(Contrasts)
+                 Contrasts = {Contrasts};
+               end
+-              % no need to validate intercept
+-              isIntercept = cellfun(@(x) x == 1, Contrasts);
++              % no need to validate intercept ('1' string or numeric 1)
++              isIntercept = cellfun(@(x) (ischar(x) && strcmp(x, '1')) || (isnumeric(x) && isscalar(x) && x == 1), Contrasts);
+               Contrasts(isIntercept) = [];
+             end
+           end

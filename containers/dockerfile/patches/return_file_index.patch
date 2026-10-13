@@ -1,0 +1,13 @@
+--- a/lib/bids-matlab/+bids/+internal/return_file_index.m
++++ b/lib/bids-matlab/+bids/+internal/return_file_index.m
+@@ -25,7 +25,9 @@
+                   modality, ...
+                   filename);
+     tolerant = true;
+-    verbose = true;
++    % fMRIPrep writes HTML/SVG QC files into a 'figures' modality directory;
++    % these are not BIDS neuroimaging files so indexing failures are always benign.
++    verbose = ~strcmp(modality, 'figures');
+     bids.internal.error_handling(mfilename(), 'noFileIndex', msg, tolerant, verbose);
+     file_idx = [];
+     return

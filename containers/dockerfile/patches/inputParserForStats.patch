@@ -1,0 +1,10 @@
+--- a/src/cli/inputParserForStats.m
++++ b/src/cli/inputParserForStats.m
+@@ -30,6 +30,7 @@
+   addParameter(args, 'concatenate', false, isLogical);
+   addParameter(args, 'keep_residuals', false, isLogical);
+   addParameter(args, 'use_dummy_regressor', false, isLogical);
++  addParameter(args, 'name_by_confounds', false, isLogical);
+ 
+   addParameter(args, 'roi_atlas', 'neuromorphometrics', isInAvailableAtlas);
+ 

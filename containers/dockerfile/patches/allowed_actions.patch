@@ -1,0 +1,9 @@
+--- a/src/bidspm/data/allowed_actions.json
++++ b/src/bidspm/data/allowed_actions.json
+@@ -1,5 +1,6 @@
+ [
+   "bms",
++  "bms-cvlme",
+   "bms-bms",
+   "bms-posterior",
+   "copy",

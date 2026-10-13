@@ -153,6 +153,12 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         git config --system --add safe.directory '*' && \
         chmod -R a+rwX /opt/spm/toolbox/MACS
 
+# Small fixes to upstream v4.0.0 files are patches (containers/dockerfile/patches, see
+# bidspm_overrides/README.md); larger rewrites are whole-file copies in bidspm_overrides/.
+COPY containers/dockerfile/patches/ /tmp/bidspm_patches/
+RUN cd /home/neuro/bidspm && for p in /tmp/bidspm_patches/*.patch; do \
+        patch -p1 --no-backup-if-mismatch < "$p" || exit 1; done && rm -rf /tmp/bidspm_patches
+
 # Bake in locally-patched bidspm files (fixes for upstream container v4.0.0
 # bugs; see bidspm_overrides/README.md for the rationale behind each file).
 # bidspm_overrides/ mirrors the /home/neuro/bidspm tree 1:1.
