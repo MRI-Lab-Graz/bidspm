@@ -84,12 +84,6 @@ RUN mkdir -p /opt/spm && \
     make -C /opt/spm/src PLATFORM=octave install && \
     echo "✅ SPM ${SPM_TAG} installed and compiled for Octave successfully"
 
-# Octave 9 does not implement `which -all` and warns on every call; SPM (cfg_util,
-# spm_jobman, ft_defaults and the bundled FieldTrip shims) calls it constantly.
-# Octave only returns the first hit either way, so dropping the flag changes nothing.
-RUN grep -rlE "which *\([^)]*'-all'" /opt/spm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/" && \
-    ! grep -rqE "which *\([^)]*'-all'" /opt/spm --include=*.m
-
 # Real BIDS validator (bidspm's bids.validate shells out to `bids-validator`).
 RUN npm install -g bids-validator@1.14.10 && npm cache clean --force
 
@@ -156,6 +150,12 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
 # bugs; see bidspm_overrides/README.md for the rationale behind each file).
 # bidspm_overrides/ mirrors the /home/neuro/bidspm tree 1:1.
 COPY bidspm_overrides/ /home/neuro/bidspm/
+
+# Octave 9 does not implement `which -all` and warns on every call; SPM and bidspm
+# call it constantly (spelled '-all' and '-ALL'). Octave only returns the first hit
+# either way, so dropping the flag changes nothing. Must run after the overrides copy.
+RUN grep -rliE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/I" && \
+    ! grep -rqiE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m
 
 # Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
 RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \

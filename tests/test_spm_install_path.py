@@ -108,8 +108,15 @@ class TestDockerfileHomeAccess(unittest.TestCase):
 
 
 class TestDockerfileWhichAll(unittest.TestCase):
-    def test_which_all_dropped_from_spm_shims(self):
-        # Octave 9 warns "which: '-all' not yet implemented" on every shim call (51x/run)
-        text = DOCKERFILE.read_text(encoding="utf-8")
-        self.assertRegex(text, r"sed -i -E .*which.*-all")
-        self.assertRegex(text, r"! grep -rqE .*-all.* /opt/spm")  # build fails if any remain
+    def setUp(self):
+        self.text = DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_which_all_dropped_case_insensitively_from_spm_and_bidspm(self):
+        # Octave 9 warns "which: '-all' not yet implemented" on each call; SPM and bidspm
+        # spell it '-all' and '-ALL' (spm_defaults.m, returnRootDir.m, ...)
+        m = re.search(r"RUN grep -rliE .*-all.*/opt/spm.*/home/neuro/bidspm.*\n.*! grep -rqiE .*-all.*", self.text)
+        self.assertIsNotNone(m, "no case-insensitive which -all patch with a build-time guard")
+
+    def test_patch_runs_after_overrides_are_copied(self):
+        # the override files (bidspm.m, ...) would otherwise overwrite the patched copies
+        self.assertGreater(self.text.index("grep -rliE"), self.text.index("COPY bidspm_overrides/"))
