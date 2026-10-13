@@ -59,6 +59,9 @@ correct behavior.
   stats-workers to race on the shared atlas cache/source dirs ("copyfile: no
   files to move", "delete: no such file"). Only strip '.gz' when the target
   path actually has it.
+- **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
+  number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
+  SPM12". Now parses the major version and only compares revisions within SPM12.
 - **allowed_actions.json**: keeps the CLI's list of allowed actions in sync
   with the workflows added/patched above (e.g. BMS actions).
 
