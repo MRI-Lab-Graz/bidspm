@@ -14,17 +14,16 @@ DOCKERFILE = Path(__file__).resolve().parent.parent / "containers" / "dockerfile
 
 class TestSpmInstallPath(unittest.TestCase):
     def test_docker_command_uses_generic_spm_path(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("lib.core._seed_cpp_roi_atlas_cache"):
+        with tempfile.TemporaryDirectory() as tmp:
             cmd = core.build_docker_command(
                 ContainerConfig(container_type="docker", docker_image="x:latest"),
                 _make_config(Path(tmp)), ["/raw", "/derivatives", "subject", "stats"], None,
             )[0]
         joined = " ".join(cmd)
-        self.assertIn(":/opt/spm/atlas", joined)
         self.assertNotIn("spm12", joined)
 
     def test_apptainer_wrapper_uses_generic_spm_path(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("lib.core._seed_cpp_roi_atlas_cache"):
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             image = root / "i.sif"
             image.write_text("x")
@@ -34,7 +33,7 @@ class TestSpmInstallPath(unittest.TestCase):
             )[0]
             wrapper = "\n".join(p.read_text() for p in (root / "wd" / "tmp").glob("run_*/*") if p.is_file())
         text = " ".join(cmd) + wrapper
-        self.assertIn("/opt/spm/atlas", text)
+        self.assertIn("/opt/spm", text)
         self.assertNotIn("spm12", text)
 
 

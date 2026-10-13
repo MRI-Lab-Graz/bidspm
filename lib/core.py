@@ -33,63 +33,6 @@ from .utils import (
 # Container Command Building (Split by Type)
 # =============================================================================
 
-_CPP_ROI_ATLAS_CONTAINER_PATH = "/home/neuro/bidspm/lib/CPP_ROI/atlas"
-
-
-def _seed_cpp_roi_atlas_cache(atlas_cache_dir: Path, container_type: str, image: str) -> None:
-    """Seed the persistent atlas cache dir from the image's own CPP_ROI atlas
-    directory the first time it's used.
-
-    Upstream CPP_ROI ships library code (returnAtlasDir.m) and lookup tables
-    alongside the atlas data inside the same directory. Bind-mounting an
-    *empty* host dir over that path -- which is what makes the cache
-    persistent across runs -- would shadow those code files and break
-    ROI/atlas features entirely (``'returnAtlasDir' undefined``). Copy the
-    image's pristine atlas/ dir (code + small lookup tables, ~50MB) onto the
-    host cache once, via a throwaway bind mount at a non-shadowed path, so
-    the real bind mount lands on a directory that still has the code in it.
-    """
-    if (atlas_cache_dir / "returnAtlasDir.m").exists():
-        return
-
-    seed_target = "/mnt/atlas_seed"
-    # Copy first, then chmod everything *under* the mount point (not the
-    # mount point itself -- chmod requires owning the path, and the host
-    # process, not this container, owns that directory). Copied files/dirs
-    # otherwise keep the image's original (often non-world-writable) modes,
-    # which blocks later atlas downloads/extracts under this cache dir
-    # whenever the container runs as a different uid than whatever seeded it
-    # (see build_docker_command's --user).
-    seed_cmd = ["sh", "-c",
-                f"cp -rT {_CPP_ROI_ATLAS_CONTAINER_PATH} {seed_target} && "
-                f"find {seed_target} -mindepth 1 -exec chmod 0777 {{}} +"]
-    if container_type == "docker":
-        cmd = ["docker", "run", "--rm", "--entrypoint", "",
-               "-v", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
-    else:
-        cmd = ["apptainer", "exec", "--bind", f"{atlas_cache_dir}:{seed_target}", image] + seed_cmd
-    subprocess.run(cmd, check=True, capture_output=True)
-
-
-def _get_cpp_roi_atlas_cache_dir(config: Config, container_type: str, image: str) -> Path:
-    """Return the persistent, seeded CPP_ROI atlas cache dir.
-
-    The image's own (patched) copyAtlasToSpmDir.m populates atlas data into
-    this dir lazily on first use per atlas, so neither the repo nor the image
-    needs to ship the full downloaded atlas data (300+MB) -- only the initial
-    code/lookup-table seed (see _seed_cpp_roi_atlas_cache).
-    """
-    atlas_cache_dir = config.WD / "cpp_roi_atlas"
-    atlas_cache_dir.mkdir(parents=True, exist_ok=True)
-    # Docker images run as their own baked-in user (not the host user, unlike
-    # Apptainer), so the host uid that created this dir and the container's
-    # uid rarely match. Open it up so the container can write into it
-    # regardless of whose host account this directory belongs to.
-    atlas_cache_dir.chmod(0o777)
-    _seed_cpp_roi_atlas_cache(atlas_cache_dir, container_type, image)
-    return atlas_cache_dir
-
-
 def _model_container_path(
     model_file_path: Optional[Path],
     derivatives_dir: Path,
@@ -170,18 +113,11 @@ def build_docker_command(
                 cmd.extend(["-v", f"{model_file_path}:/models/smdl.json"])
                 model_container_path = "/models/smdl.json"
 
-    # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
-    # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "docker", container_config.docker_image)
-    cmd.extend(["-v", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
-
-    # Persist other writable dirs the image needs (error logs, SPM/atlas
+    # Persist other writable dirs the image needs (error logs, SPM
     # caches) outside the ephemeral --rm container, matching what Apptainer
     # already does. chmod 0o777 since --user above runs as the host uid,
     # which won't otherwise have write access to a dir it didn't create.
     for dir_name, container_path in [
-        ("atlas", "/opt/spm/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -302,14 +238,7 @@ def build_apptainer_command(
             "--bind", f"{_wrapper}:/usr/bin/bids-validator",
         ])
 
-    # Lazily-populated atlas cache: the image's own copyAtlasToSpmDir.m fills
-    # this in on first use per atlas, so it persists across runs without
-    # needing to ship or bake in the (300+MB) downloaded atlas data itself.
-    atlas_cache_dir = _get_cpp_roi_atlas_cache_dir(config, "apptainer", container_config.apptainer_image)
-    cmd.extend(["--bind", f"{atlas_cache_dir}:{_CPP_ROI_ATLAS_CONTAINER_PATH}"])
-
     for dir_name, container_path in [
-        ("atlas", "/opt/spm/atlas"),
         ("error_logs", "/home/neuro/bidspm/error_logs"),
         ("spm", "/home/neuro/spm"),
         ("matlab_cache", "/home/neuro/.matlab"),
@@ -671,32 +600,6 @@ def _normalize_node_label(name: Optional[str]) -> str:
 # Node names that getFFXdir.m omits the _node- suffix for entirely (after the
 # same stripping it applies: regexprep(nodeName, '[ -_]', '')).
 _FFX_UNNAMED_NODE_LABELS = {'run', 'runlevel'}
-
-
-# Files bidspm's CPP_ROI/copyAtlasToSpmDir.m populates into the shared
-# host atlas cache dir (config.WD / "atlas", bind-mounted read/write into
-# every concurrent container as /opt/spm/atlas). When this cache is empty,
-# multiple concurrent stats-workers can each see it as empty at the same
-# time and race on the Wang-atlas merge-then-delete step in a *separate*
-# shared source dir (CPP_ROI's own atlas/ tree) -- confirmed live: this
-# caused sporadic "delete: no such file" / copyfile crashes for ~4% of
-# subjects in a 12-way-parallel batch. Once the target cache dir already has
-# these files, copyAtlasToSpmDir.m's own atlasPresent check short-circuits
-# before touching the shared source dir at all, so pre-warming it with one
-# sequential run eliminates the race entirely (see _atlas_cache_is_warm()).
-_ATLAS_CACHE_FILES = [
-    "AAL3v1_1mm.nii", "AAL3v1_1mm.xml",
-    "HCPex.nii", "HCPex.xml",
-    "space-MNI152ICBM2009anlin_seg-glasser_dseg.nii",
-    "space-MNI152ICBM2009anlin_seg-glasser_dseg.xml",
-    "space-MNI_seg-visfAtlas_dseg.nii", "space-MNI_seg-visfAtlas_dseg.xml",
-    "space-MNI_seg-wang_dseg.nii", "space-MNI_seg-wang_dseg.xml",
-]
-
-
-def _atlas_cache_is_warm(config: Config) -> bool:
-    atlas_dir = config.WD / "atlas"
-    return all((atlas_dir / f).exists() for f in _ATLAS_CACHE_FILES)
 
 
 def check_subject_processed(
@@ -1380,29 +1283,6 @@ class Pipeline:
 
                 max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
                     if eligible_subjects else 1
-
-                # Avoid a known race in bidspm's CPP_ROI atlas init: process one
-                # subject sequentially first so the shared atlas cache is fully
-                # populated before any concurrent workers can race on it (see
-                # _atlas_cache_is_warm() docstring for the full mechanism).
-                if (
-                    max_workers > 1
-                    and 'stats' in self.options.actions
-                    and not _atlas_cache_is_warm(self.config)
-                ):
-                    self._log(
-                        ">>> Warming shared atlas cache with one sequential subject "
-                        "before parallelizing (avoids a race in bidspm's atlas init "
-                        "when multiple workers hit an empty cache at once)"
-                    )
-                    warm_subject = eligible_subjects.pop(0)
-                    if self._process_subject(warm_subject, task):
-                        subjects_processed.append(warm_subject)
-                        actions_completed.update(self.options.actions)
-                    else:
-                        subjects_failed.append(warm_subject)
-                    max_workers = max(1, min(self.options.stats_workers, len(eligible_subjects))) \
-                        if eligible_subjects else 1
 
                 if max_workers <= 1:
                     for subject in eligible_subjects:

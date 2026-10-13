@@ -157,6 +157,18 @@ COPY bidspm_overrides/ /home/neuro/bidspm/
 RUN grep -rliE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/I" && \
     ! grep -rqiE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m
 
+# Unpack the CPP_ROI atlases into SPM's atlas dir once, at build time, instead of in every
+# container run (which needed a shared host cache, a seeding step and a serialized
+# "warm-up" subject to avoid races between parallel workers). Fails the build if any is missing.
+RUN octave-cli --eval "addpath('/opt/spm'); cd('/home/neuro/bidspm'); addpath(pwd); \
+        addpath(genpath('lib/CPP_ROI/src')); addpath('lib/CPP_ROI'); addpath('lib/CPP_ROI/atlas'); \
+        copyAtlasToSpmDir('HCPex'); copyAtlasToSpmDir('AAL'); copyAtlasToSpmDir('Glasser'); \
+        copyAtlasToSpmDir('Wang'); copyAtlasToSpmDir('visfAtlas');" && \
+    for f in AAL3v1_1mm.nii AAL3v1_1mm.xml HCPex.nii HCPex.xml \
+             space-MNI152ICBM2009anlin_seg-glasser_dseg.nii space-MNI_seg-visfAtlas_dseg.nii \
+             space-MNI_seg-wang_dseg.nii; do test -s /opt/spm/atlas/$f || exit 1; done && \
+    chmod -R a+rX /opt/spm/atlas
+
 # Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
 RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \
     octave --no-gui --eval "cd('/home/neuro/bidspm'); addpath(pwd); savepath('/usr/share/octave/site/m/startup/octaverc');" && \

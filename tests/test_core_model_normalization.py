@@ -154,31 +154,6 @@ class TestNormalizeNodeLabel(unittest.TestCase):
         self.assertEqual(core._normalize_node_label(None), "")
 
 
-class TestAtlasCacheIsWarm(unittest.TestCase):
-    def test_false_when_cache_dir_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            self.assertFalse(core._atlas_cache_is_warm(config))
-
-    def test_true_when_all_atlas_files_present(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            atlas_dir = config.WD / "atlas"
-            atlas_dir.mkdir(parents=True, exist_ok=True)
-            for filename in core._ATLAS_CACHE_FILES:
-                (atlas_dir / filename).write_text("", encoding="utf-8")
-            self.assertTrue(core._atlas_cache_is_warm(config))
-
-    def test_false_when_one_file_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _make_config(Path(tmp))
-            atlas_dir = config.WD / "atlas"
-            atlas_dir.mkdir(parents=True, exist_ok=True)
-            for filename in core._ATLAS_CACHE_FILES[:-1]:
-                (atlas_dir / filename).write_text("", encoding="utf-8")
-            self.assertFalse(core._atlas_cache_is_warm(config))
-
-
 class TestSchemaCacheLruCache(unittest.TestCase):
     def test_fetch_bids_stats_schema_is_lru_cached(self):
         """_fetch_bids_stats_schema must be decorated with lru_cache."""
