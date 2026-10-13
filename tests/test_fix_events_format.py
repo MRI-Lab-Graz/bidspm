@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:  # not in requirements.txt: only scripts/fix_events_format.py needs it
+    raise unittest.SkipTest("pandas is not installed")
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "fix_events_format.py"

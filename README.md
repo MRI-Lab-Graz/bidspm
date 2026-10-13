@@ -177,8 +177,12 @@ pip install -r requirements.txt
 Run the test suite from repository root:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+pip install pytest        # not in requirements.txt
+python -m pytest -q tests # `python -m unittest discover -s tests -p "test_*.py"` also works
 ```
+
+A few tests need extras and skip themselves when they are missing (pandas for `scripts/fix_events_format.py`, GNU Octave on the host
+for the `.m` override tests). The image smoke test runs only with `BIDSPM_TEST_IMAGE=<built image>`.
 
 Notes:
 
