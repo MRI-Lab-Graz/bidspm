@@ -59,7 +59,8 @@ def build_docker_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build Docker container command.
 
@@ -135,7 +136,8 @@ def build_docker_command(
         "-e", "SPM_HTML_BROWSER=0",
         "-e", "BIDSPM_IGNORE_FIELDMAPS=1",
         "-e", "BIDSPM_IGNORE_FIGURES=1",
-        "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
+        "-e", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1",
+        *[x for k, v in (extra_env or {}).items() for x in ("-e", f"{k}={v}")],
     ])
 
     if override_entrypoint is not None:
@@ -158,7 +160,8 @@ def build_apptainer_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build Apptainer/Singularity container command.
 
@@ -258,7 +261,8 @@ def build_apptainer_command(
         "--env", "MATLABPATH=/home/neuro/bidspm:/home/neuro/bidspm/lib/CPP_ROI:/home/neuro/bidspm/lib/CPP_ROI/atlas:/home/neuro/bidspm/lib/CPP_ROI/src:/home/neuro/bidspm/lib/CPP_ROI/src/atlas:/opt/spm",
         "--env", "BIDSPM_IGNORE_FIELDMAPS=1",
         "--env", "BIDSPM_IGNORE_FIGURES=1",
-        "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1"
+        "--env", "BIDSPM_SKIP_INTENDEDFOR_CHECK=1",
+        *[x for k, v in (extra_env or {}).items() for x in ("--env", f"{k}={v}")],
     ])
 
     cmd.append(container_config.apptainer_image)
@@ -297,13 +301,14 @@ def build_container_command(
     config: Config,
     args: List[str],
     model_file_path: Optional[Path],
-    override_entrypoint: Optional[List[str]] = None
+    override_entrypoint: Optional[List[str]] = None,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Build container command based on type (dispatches to specific builder)."""
     if container_config.container_type == "docker":
-        return build_docker_command(container_config, config, args, model_file_path, override_entrypoint)
+        return build_docker_command(container_config, config, args, model_file_path, override_entrypoint, extra_env)
     elif container_config.container_type == "apptainer":
-        return build_apptainer_command(container_config, config, args, model_file_path, override_entrypoint)
+        return build_apptainer_command(container_config, config, args, model_file_path, override_entrypoint, extra_env)
     else:
         raise ValueError(f"Unsupported container type: {container_config.container_type}")
 
@@ -987,6 +992,7 @@ class PipelineOptions:
     dry_run: bool = False
     debug: bool = False
     name_by_confounds: bool = False
+    skip_results: bool = False
 
     # Callbacks for progress reporting
     on_progress: Optional[Callable[[str], None]] = None
@@ -1413,6 +1419,10 @@ class Pipeline:
                 if not json_dst.exists() or json_dst.stat().st_mtime < json_src.stat().st_mtime:
                     shutil.copy2(json_src, json_dst)
 
+    def _skip_results_env(self) -> Optional[Dict[str, str]]:
+        """Env read by the cliStats override to skip the SPM Results export (slow, optional)."""
+        return {"BIDSPM_SKIP_RESULTS": "1"} if self.options.skip_results else None
+
     def _run_container_action(self, action: str, subject: str, task: str) -> bool:
         """Run action via container."""
         if action == "smooth":
@@ -1445,7 +1455,8 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path
+            self.container_config, self.config, args, self.model_file_path,
+            extra_env=self._skip_results_env(),
         )
 
         if self.options.dry_run:
@@ -1476,7 +1487,8 @@ class Pipeline:
             args += ["--model_file", model_path]
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args, self.model_file_path
+            self.container_config, self.config, args, self.model_file_path,
+            extra_env=self._skip_results_env(),
         )
 
         if self.options.dry_run:

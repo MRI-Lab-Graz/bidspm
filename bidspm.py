@@ -122,6 +122,9 @@ def parse_arguments():
     parser.add_argument('--node-name', '--node_name',
                        dest='node_name',
                        help='Name of the BIDS model node to run')
+    parser.add_argument('--skip-results', action='store_true', dest='skip_results',
+                       help='Skip the SPM Results export (thresholded tables/montages) after stats; '
+                            'saves about a third of the per-subject time on short runs')
     parser.add_argument('--name-by-confounds', action='store_true', dest='name_by_confounds',
                        help='Append confound strategy suffix to model node names before running stats '
                             '(prevents output-folder collisions when comparing confound strategies)')
@@ -417,6 +420,7 @@ def main():
         dry_run=args.dry_run,
         debug=args.debug,
         name_by_confounds=args.name_by_confounds,
+        skip_results=args.skip_results,
     )
     
     # Create and run pipeline
