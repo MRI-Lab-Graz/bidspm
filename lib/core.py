@@ -12,14 +12,21 @@ import random
 import shlex
 import shutil
 import subprocess
+import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Callable, Tuple
+from typing import Sequence, List, Optional, Dict, Any, Callable, Tuple
 
+from .spm_standalone import (
+    build_spm_standalone_command,
+    check_image as check_spm_image,
+    find_new_spm_mats,
+    write_estimation_job,
+)
 from .config import Config, ContainerConfig, load_config, load_container_config
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
@@ -1006,6 +1013,7 @@ class PipelineOptions:
     dry_run: bool = False
     debug: bool = False
     name_by_confounds: bool = False
+    estimation_engine: str = "octave"  # 'standalone': estimate in SPM's compiled standalone (opt-in)
     run_results: bool = False  # SPM Results export is opt-in (slow); always on for 'report'
 
     # Callbacks for progress reporting
@@ -1226,6 +1234,17 @@ class Pipeline:
                     warnings=self.warnings
                 )
 
+            if not self._check_standalone_image():
+                return PipelineResult(
+                    success=False,
+                    subjects_processed=[],
+                    subjects_failed=[],
+                    actions_completed=[],
+                    log_file=self.log_file,
+                    errors=self.errors,
+                    warnings=self.warnings
+                )
+
             subjects = self.get_subjects_to_process()
             if not subjects:
                 self._log_error("No subjects found to process")
@@ -1396,10 +1415,50 @@ class Pipeline:
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
             self._copy_brain_mask(subject, task)
-            if not self._run_container_action("stats", subject, task):
+            stats = self._run_stats_standalone if self.options.estimation_engine == "standalone" \
+                else lambda s, t: self._run_container_action("stats", s, t)
+            if not stats(subject, task):
                 success = False
 
         return success
+
+    def _check_standalone_image(self) -> bool:
+        """Preflight for estimation_engine='standalone': the user-supplied image must exist (no pull, no fallback)."""
+        if self.options.estimation_engine != "standalone":
+            return True
+        ok, msg = check_spm_image(self.container_config)
+        if not ok:
+            self._log_error(msg)
+        else:
+            self._log(f"SPM standalone image: {msg}")
+        return ok
+
+    def _run_stats_standalone(self, subject: str, task: str) -> bool:
+        """design (Octave bidspm) -> fmri_est (SPM standalone) -> contrasts (Octave bidspm).
+
+        All three see the same /derivatives layout, so the absolute paths inside SPM.mat stay valid.
+        """
+        started = time.time() - 1
+        if not self._run_container_action("stats", subject, task, extra_args=["--design_only"]):
+            return False
+
+        job_dir = self.config.WD / "tmp" / f"spm_est_{subject}_{random.randint(1000, 9999)}"
+        if self.options.dry_run:
+            job_dir_cmd = build_spm_standalone_command(self.container_config, self.config, job_dir)
+            self.dry_run_commands.append(' '.join(job_dir_cmd))
+            self._log(f"[DRY RUN] Would estimate in SPM standalone: {' '.join(job_dir_cmd[:5])}...")
+        else:
+            mats = find_new_spm_mats(self.config, subject, task, since=started)
+            if not mats:
+                self._log_error(f"Design step wrote no SPM.mat for subject {subject}, task {task}")
+                return False
+            container_paths = [f"/derivatives/{m.relative_to(self.config.DERIVATIVES_DIR)}" for m in mats]
+            write_estimation_job(container_paths, job_dir)
+            self._log(f">>> Estimating in SPM standalone: subject {subject}, task {task}")
+            if not run_command(build_spm_standalone_command(self.container_config, self.config, job_dir)):
+                return False
+
+        return self._run_container_action("stats", subject, task, cli_action="contrasts")
 
     def _copy_brain_mask(self, subject: str, task: str) -> None:
         """Copy fmriprep's brain mask for this subject/task/space into bidspm-preproc.
@@ -1452,8 +1511,10 @@ class Pipeline:
             env["BIDSPM_SKIP_RESULTS"] = "1"
         return env
 
-    def _run_container_action(self, action: str, subject: str, task: str) -> bool:
-        """Run action via container."""
+    def _run_container_action(self, action: str, subject: str, task: str, *,
+                              cli_action: Optional[str] = None,
+                              extra_args: Sequence[str] = ()) -> bool:
+        """Run action via container. ``cli_action`` swaps the bidspm CLI action word (stats -> contrasts)."""
         if action == "smooth":
             args = [
                 "/fmriprep", "/derivatives", "subject", "smooth",
@@ -1465,7 +1526,7 @@ class Pipeline:
             ]
         elif action == "stats":
             args = [
-                "/raw", "/derivatives", "subject", "stats",
+                "/raw", "/derivatives", "subject", cli_action or "stats",
                 "--preproc_dir", "/derivatives/bidspm-preproc",
                 "--participant_label", subject,
                 "--task", task,
@@ -1473,6 +1534,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(self.config.VERBOSITY)
             ]
+            args += list(extra_args)
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
             if self.options.name_by_confounds:

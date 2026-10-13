@@ -399,6 +399,16 @@
                                 <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
                             </div>
                         </div>
+                        <div class="mt-2" id="spm-standalone-options">
+                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0" for="estimation_engine">Model estimation engine</label>
+                            <select class="form-select form-select-sm mb-1" id="estimation_engine" name="estimation_engine">
+                                <option value="octave" selected>Octave (all in the bidspm image)</option>
+                                <option value="standalone">SPM standalone (MATLAB Runtime): faster on long scans</option>
+                            </select>
+                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0" for="input-spm_standalone_image">SPM standalone image (you provide it)</label>
+                            <input type="text" class="form-control form-control-sm container-input" data-key="spm_standalone_image" id="input-spm_standalone_image" placeholder="Docker: name@sha256:...  |  Apptainer: /path/to/spm.sif" value="{{ project.config.spm_standalone_image if project else '' }}">
+                            <div class="text-muted x-small">Only used when the engine is "SPM standalone". Build an image from SPM's recipe, see the README.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1652,6 +1662,7 @@
             pilot: document.getElementById('pilot').checked,
             force: document.getElementById('force').checked,
             run_results: document.getElementById('run_results').checked,
+            estimation_engine: document.getElementById('estimation_engine').value,
             skip_validation: document.getElementById('skip_validation').checked,
             stats_workers: Number(document.getElementById('stats_workers')?.value) || 4,
             project_id: currentProjectId || null,
@@ -1678,6 +1689,9 @@
             const el = document.getElementById(f);
             if (el && data[f]) el.value = data[f];
         });
+
+        const engineSelect = document.getElementById('estimation_engine');
+        if (engineSelect && data.estimation_engine) engineSelect.value = data.estimation_engine;
 
         const statsWorkersInput = document.getElementById('stats_workers');
         if (statsWorkersInput && data.stats_workers) statsWorkersInput.value = data.stats_workers;
@@ -1751,7 +1765,8 @@
                 VERBOSITY: config.VERBOSITY || 2,
                 container_type: config.container_type || 'docker',
                 docker_image: config.docker_image || 'ghcr.io/mri-lab-graz/bidspm:latest',
-                apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif'
+                apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif',
+                spm_standalone_image: config.spm_standalone_image || ''
             };
             
             await syncInternalToForm();
@@ -1780,6 +1795,7 @@
             container_type: unifiedStudyConfig.container_type || 'docker',
             docker_image: unifiedStudyConfig.docker_image || 'ghcr.io/mri-lab-graz/bidspm:latest',
             apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
+            spm_standalone_image: unifiedStudyConfig.spm_standalone_image || '',
             actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
             pilot: document.getElementById('pilot').checked,
             skip_validation: true

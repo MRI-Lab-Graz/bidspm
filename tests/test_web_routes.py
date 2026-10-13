@@ -157,6 +157,17 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn('id="suggest_workers"', text)
         self.assertIn("/api/suggested_workers", text)
 
+    def test_analysis_page_has_estimation_engine_select_and_image_field(self):
+        import re
+        project = self.project_manager.create_project("Engine select demo")
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+        select = re.search(r'<select[^>]*id="estimation_engine"[^>]*>.*?</select>', text, re.S)
+        self.assertIsNotNone(select)
+        self.assertIn('value="octave"', select.group(0))
+        self.assertIn('value="standalone"', select.group(0))
+        self.assertIn('data-key="spm_standalone_image"', text)
+        self.assertIn("estimation_engine: document.getElementById('estimation_engine').value", text)
+
     def test_analysis_route_loads_transformer_handoff_assets(self):
         project = self.project_manager.create_project("Analysis handoff assets demo")
 
@@ -580,6 +591,7 @@ class TestWebRoutes(unittest.TestCase):
                     "force": True,
                     "stats_workers": 3,
                     "run_results": True,
+                    "estimation_engine": "standalone",
                 },
             )
 
@@ -601,6 +613,8 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("--settings", called_command)
         self.assertIn("--stats-workers", called_command)
         self.assertIn("--results", called_command)
+        self.assertIn("--estimation-engine", called_command)
+        self.assertIn("standalone", called_command)
         self.assertEqual(called_command[called_command.index("--stats-workers") + 1], "3")
 
         settings_path = Path(called_command[called_command.index("--settings") + 1])

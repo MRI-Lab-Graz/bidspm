@@ -202,6 +202,8 @@ def register_execution_routes(
             command.append('--force')
         if data.get('run_results'):
             command.append('--results')
+        if data.get('estimation_engine') in ('octave', 'standalone'):
+            command.extend(['--estimation-engine', data['estimation_engine']])
         if data.get('stats_workers'):
             command.extend(['--stats-workers', str(data.get('stats_workers'))])
         bms_model_files = data.get('bms_model_files') or []

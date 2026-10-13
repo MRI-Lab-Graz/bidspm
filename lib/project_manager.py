@@ -54,6 +54,7 @@ class ProjectConfig:
     container_type: str = "docker"  # docker, apptainer
     docker_image: str = "ghcr.io/mri-lab-graz/bidspm:latest"
     apptainer_image: str = ""
+    spm_standalone_image: str = ""
     
     # Execution options
     actions: List[str] = field(default_factory=lambda: ["smooth", "stats"])
@@ -324,6 +325,7 @@ class ProjectManager:
                 "container_type": "container_type",
                 "docker_image": "docker_image",
                 "apptainer_image": "apptainer_image",
+                "spm_standalone_image": "spm_standalone_image",
             }
             
             new_config = {}
@@ -367,6 +369,7 @@ class ProjectManager:
                 "container_type": config.container_type,
                 "docker_image": config.docker_image,
                 "apptainer_image": config.apptainer_image,
+                "spm_standalone_image": config.spm_standalone_image,
             }
         else:
             return config.to_dict()
