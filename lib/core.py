@@ -992,7 +992,7 @@ class PipelineOptions:
     dry_run: bool = False
     debug: bool = False
     name_by_confounds: bool = False
-    skip_results: bool = False
+    run_results: bool = False  # SPM Results export is opt-in (slow); always on for 'report'
 
     # Callbacks for progress reporting
     on_progress: Optional[Callable[[str], None]] = None
@@ -1420,8 +1420,12 @@ class Pipeline:
                     shutil.copy2(json_src, json_dst)
 
     def _skip_results_env(self) -> Optional[Dict[str, str]]:
-        """Env read by the cliStats override to skip the SPM Results export (slow, optional)."""
-        return {"BIDSPM_SKIP_RESULTS": "1"} if self.options.skip_results else None
+        """Env read by the cliStats override to skip the SPM Results export (slow).
+
+        The report action reads results/*.csv|png, so it keeps them.
+        """
+        keep = self.options.run_results or 'report' in self.options.actions
+        return None if keep else {"BIDSPM_SKIP_RESULTS": "1"}
 
     def _run_container_action(self, action: str, subject: str, task: str) -> bool:
         """Run action via container."""

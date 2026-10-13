@@ -131,6 +131,17 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(response_no_project.status_code, 302)
         self.assertEqual(response_no_project.headers["Location"], "/analysis")
 
+    def test_analysis_page_has_results_checkbox_off_by_default_and_submitted(self):
+        project = self.project_manager.create_project("Results checkbox demo")
+
+        text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
+
+        import re
+        box = re.search(r'<input[^>]*id="run_results"[^>]*>', text)
+        self.assertIsNotNone(box, "run_results checkbox missing")
+        self.assertNotIn("checked", box.group(0))
+        self.assertIn("run_results: document.getElementById('run_results').checked", text)
+
     def test_analysis_route_loads_transformer_handoff_assets(self):
         project = self.project_manager.create_project("Analysis handoff assets demo")
 
@@ -553,7 +564,7 @@ class TestWebRoutes(unittest.TestCase):
                     "skip_validation": True,
                     "force": True,
                     "stats_workers": 3,
-                    "skip_results": True,
+                    "run_results": True,
                 },
             )
 
@@ -574,7 +585,7 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn("--force", called_command)
         self.assertIn("--settings", called_command)
         self.assertIn("--stats-workers", called_command)
-        self.assertIn("--skip-results", called_command)
+        self.assertIn("--results", called_command)
         self.assertEqual(called_command[called_command.index("--stats-workers") + 1], "3")
 
         settings_path = Path(called_command[called_command.index("--settings") + 1])

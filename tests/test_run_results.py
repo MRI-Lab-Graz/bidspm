@@ -1,4 +1,5 @@
-"""--skip-results: the SPM Results export is ~1/3 of per-subject time on short runs; make it optional."""
+"""--results: the SPM Results export is ~1/3 of per-subject time on short runs, so it is opt-in
+(except for the report action, which reads its tables/figures)."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,17 +15,17 @@ ARGS = ["/raw", "/derivatives", "subject", "stats"]
 ENV = {"BIDSPM_SKIP_RESULTS": "1"}
 
 
-class TestSkipResultsCli(unittest.TestCase):
+class TestRunResultsCli(unittest.TestCase):
     def test_flag_parsed(self):
-        with patch("sys.argv", ["bidspm.py", "--action", "stats", "--skip-results"]):
-            self.assertTrue(bidspm.parse_arguments().skip_results)
+        with patch("sys.argv", ["bidspm.py", "--action", "stats", "--results"]):
+            self.assertTrue(bidspm.parse_arguments().run_results)
 
-    def test_defaults_false(self):
+    def test_off_by_default(self):
         with patch("sys.argv", ["bidspm.py", "--action", "stats"]):
-            self.assertFalse(bidspm.parse_arguments().skip_results)
+            self.assertFalse(bidspm.parse_arguments().run_results)
 
-    def test_pipeline_option_defaults_false(self):
-        self.assertFalse(PipelineOptions(actions=["stats"]).skip_results)
+    def test_pipeline_option_off_by_default(self):
+        self.assertFalse(PipelineOptions(actions=["stats"]).run_results)
 
 
 class TestSkipResultsEnv(unittest.TestCase):
@@ -54,9 +55,9 @@ class TestSkipResultsEnv(unittest.TestCase):
 
 
 class TestPipelinePassesSkipResults(unittest.TestCase):
-    def _extra_env(self, skip: bool):
+    def _extra_env(self, **opts):
         with tempfile.TemporaryDirectory() as tmp:
-            pipeline = Pipeline(PipelineOptions(actions=["stats"], skip_results=skip, dry_run=True))
+            pipeline = Pipeline(PipelineOptions(dry_run=True, **opts))
             pipeline.config = _make_config(Path(tmp))
             pipeline.container_config = ContainerConfig(container_type="docker", docker_image="x:latest")
             pipeline.model_file_path = None
@@ -64,8 +65,11 @@ class TestPipelinePassesSkipResults(unittest.TestCase):
                 pipeline._run_container_action("stats", "01", "motor")
         return build.call_args.kwargs.get("extra_env")
 
-    def test_env_passed_when_enabled(self):
-        self.assertEqual(self._extra_env(True), ENV)
+    def test_results_skipped_by_default(self):
+        self.assertEqual(self._extra_env(actions=["stats"]), ENV)
 
-    def test_no_env_when_disabled(self):
-        self.assertFalse(self._extra_env(False))
+    def test_results_kept_when_requested(self):
+        self.assertFalse(self._extra_env(actions=["stats"], run_results=True))
+
+    def test_report_action_needs_results_so_they_are_kept(self):
+        self.assertFalse(self._extra_env(actions=["stats", "report"]))

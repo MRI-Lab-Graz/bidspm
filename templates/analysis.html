@@ -306,6 +306,10 @@
                                 <input class="form-check-input" type="checkbox" id="pilot" name="pilot" {% if project and project.config.pilot %}checked{% endif %}>
                                 <label class="form-check-label" for="pilot">Pilot Mode</label>
                             </div>
+                            <div class="form-check form-switch mb-1" title="Thresholded SPM tables/montages for every contrast. Adds roughly a third to the per-subject time on short runs. Always on when the Report action is selected.">
+                                <input class="form-check-input" type="checkbox" id="run_results" name="run_results">
+                                <label class="form-check-label" for="run_results">SPM Results export <span class="text-muted small">(slower; needed for Report)</span></label>
+                            </div>
                             <div class="form-check form-switch mb-1">
                                 <input class="form-check-input" type="checkbox" id="force" name="force">
                                 <label class="form-check-label" for="force">Force Rerun</label>
@@ -1643,6 +1647,7 @@
             actions: actions,
             pilot: document.getElementById('pilot').checked,
             force: document.getElementById('force').checked,
+            run_results: document.getElementById('run_results').checked,
             skip_validation: document.getElementById('skip_validation').checked,
             stats_workers: Number(document.getElementById('stats_workers')?.value) || 4,
             project_id: currentProjectId || null,
@@ -1673,7 +1678,7 @@
         const statsWorkersInput = document.getElementById('stats_workers');
         if (statsWorkersInput && data.stats_workers) statsWorkersInput.value = data.stats_workers;
 
-        const switches = ['pilot', 'force', 'skip_validation'];
+        const switches = ['pilot', 'force', 'run_results', 'skip_validation'];
         switches.forEach(s => {
             const el = document.getElementById(s);
             if (el && data[s] !== undefined) el.checked = data[s];

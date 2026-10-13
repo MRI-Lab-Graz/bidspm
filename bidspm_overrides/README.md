@@ -63,7 +63,7 @@ correct behavior.
   `spm_write_vol`s into the CPP_ROI tree), which only runs when the atlas is not already in
   SPM's atlas dir. The image bakes all atlases in at build time, so a container run as an
   arbitrary host uid never needs to write there.
-- **cliStats.m**: also honours env `BIDSPM_SKIP_RESULTS` (set by `bidspm.py --skip-results`) to skip the
+- **cliStats.m**: also honours env `BIDSPM_SKIP_RESULTS` (set by `bidspm.py` unless `--results` or the report action is requested) to skip the
   SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above).
 - **checkDependencies.m**: upstream hard-codes `strcmp(a, 'SPM12')` and a revision
   number, so SPM25+ (which reports 'SPM26' / '00.00') always warned "less than
