@@ -27,7 +27,8 @@ class TestOverridePatches(unittest.TestCase):
 
     def test_dockerfile_applies_patches_before_copying_overrides(self):
         self.assertIn("COPY containers/dockerfile/patches/", DOCKERFILE)
-        self.assertRegex(DOCKERFILE, r"patch -p1 .*\.patch")
+        self.assertRegex(DOCKERFILE, r"/tmp/bidspm_patches/\*\.patch")
+        self.assertRegex(DOCKERFILE, r"patch -p1 .*< \"\$p\" \|\| exit 1")  # a failing hunk fails the build
         self.assertLess(DOCKERFILE.index("patch -p1"), DOCKERFILE.index("COPY bidspm_overrides/"))
 
     def test_overrides_readme_names_each_patched_file(self):
