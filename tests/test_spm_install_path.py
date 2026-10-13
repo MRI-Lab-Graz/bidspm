@@ -105,3 +105,11 @@ class TestDockerfileHomeAccess(unittest.TestCase):
         # containers run with --user <host uid>; trixie's useradd makes $HOME 0700
         text = DOCKERFILE.read_text(encoding="utf-8")
         self.assertRegex(text, r"chmod -R a\+rX /home/neuro|chmod 755 /home/neuro")
+
+
+class TestDockerfileWhichAll(unittest.TestCase):
+    def test_which_all_dropped_from_spm_shims(self):
+        # Octave 9 warns "which: '-all' not yet implemented" on every shim call (51x/run)
+        text = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertRegex(text, r"sed -i -E .*which.*mfilename.*-all")
+        self.assertRegex(text, r"! grep -rqE .*-all.* /opt/spm")  # build fails if any remain
