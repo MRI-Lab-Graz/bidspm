@@ -196,6 +196,18 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(got["none"][0], "")
         self.assertEqual(self.errors, [])
 
+    def test_event_hints_reset_when_there_is_no_bids_folder(self):
+        page = self.open_page()
+        got = page.evaluate("""async () => {
+            modelEditorEventColumns = ['x']; modelEditorConfoundColumns = ['y']; modelEditorInterestRegressors = ['z'];
+            document.getElementById('input-BIDS_DIR').value = '';
+            const ret = await loadInterestRegressorsForModelEditor({});
+            return [ret, modelEditorEventColumns, modelEditorConfoundColumns, modelEditorInterestRegressors,
+                    modelEditorEventSamples, modelEditorParticipantsInfo.columns];
+        }""")
+        self.assertEqual(got, [[], [], [], [], {"trial_type": [], "condition": []}, []])
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()

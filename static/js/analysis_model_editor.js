@@ -818,17 +818,22 @@ async function loadBidsTasksForModelEditor() {
     return tasks;
 }
 
+// Forget everything learned from the BIDS dataset (event columns, confounds, participants).
+function resetModelEditorHints() {
+    modelEditorInterestRegressors = [];
+    modelEditorEventSamples = { trial_type: [], condition: [] };
+    modelEditorEventColumns = [];
+    modelEditorEventNumericColumns = [];
+    modelEditorEventNumericSamples = {};
+    modelEditorConfoundColumns = [];
+    modelEditorTransRotConfounds = [];
+    modelEditorParticipantsInfo = emptyParticipantsInfo();
+}
+
 async function loadInterestRegressorsForModelEditor(modelContent) {
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value?.trim();
     if (!bidsDir) {
-        modelEditorInterestRegressors = [];
-        modelEditorEventSamples = { trial_type: [], condition: [] };
-        modelEditorEventColumns = [];
-        modelEditorEventNumericColumns = [];
-        modelEditorEventNumericSamples = {};
-        modelEditorConfoundColumns = [];
-        modelEditorTransRotConfounds = [];
-        modelEditorParticipantsInfo = emptyParticipantsInfo();
+        resetModelEditorHints();
         return [];
     }
 
@@ -880,14 +885,7 @@ async function loadInterestRegressorsForModelEditor(modelContent) {
         return modelEditorInterestRegressors;
     } catch (e) {
         console.warn('Could not load interest regressors:', e);
-        modelEditorInterestRegressors = [];
-        modelEditorEventSamples = { trial_type: [], condition: [] };
-        modelEditorEventColumns = [];
-        modelEditorEventNumericColumns = [];
-        modelEditorEventNumericSamples = {};
-        modelEditorConfoundColumns = [];
-        modelEditorTransRotConfounds = [];
-        modelEditorParticipantsInfo = emptyParticipantsInfo();
+        resetModelEditorHints();
         return [];
     }
 }
