@@ -167,6 +167,16 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertTrue(messages and "Projects page" in messages[0], messages)
         self.assertEqual(self.errors, [])
 
+    def test_path_equivalence_helpers(self):
+        page = self.open_page()
+        cases = [("/a/b/model.json", "/a/b/model.json", True), ("/a/b/../b/model.json", "/a/b/model.json", True),
+                 ("model.json", "/a/b/model.json", True), ("/a/b/model.json?x=1#h", "/a/b/model.json", True),
+                 ("/a/b%20c/m.json", "/a/b c/m.json", True), ("/a/b/model.json", "/a/c/model.json", False),
+                 ("", "/a/b/model.json", False)]
+        got = page.evaluate("cs => cs.map(([a, b]) => areModelPathsEquivalent(a, b))", cases)
+        self.assertEqual(got, [c[2] for c in cases])
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
