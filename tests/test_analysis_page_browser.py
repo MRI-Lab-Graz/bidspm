@@ -161,10 +161,10 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
                                "&& !document.getElementById('validation-result').innerText.includes('Validating')",
                                timeout=10000)
         # with a project open, "Load config" points the user to the Projects page (an alert)
-        with page.expect_event("dialog", timeout=5000) as dialog:
-            page.click("#btn-load-config")
-        self.assertIn("Projects page", dialog.value.message)
-        dialog.value.dismiss()
+        messages = []
+        page.once("dialog", lambda d: (messages.append(d.message), d.dismiss()))
+        page.click("#btn-load-config")
+        self.assertTrue(messages and "Projects page" in messages[0], messages)
         self.assertEqual(self.errors, [])
 
 
