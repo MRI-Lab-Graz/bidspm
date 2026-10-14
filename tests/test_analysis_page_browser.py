@@ -148,6 +148,25 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(again, data)
         self.assertEqual(self.errors, [])
 
+    def test_toolbar_buttons_are_wired(self):
+        page = self.open_page()
+        # onclick handlers exist for every toolbar button (they are attached at load by analysis_buttons.js)
+        wired = page.evaluate(
+            "ids => ids.filter(id => typeof document.getElementById(id).onclick !== 'function')",
+            ["btn-validate", "btn-check-paths", "btn-save-only", "btn-save-start", "btn-run-cached", "btn-stop"])
+        self.assertEqual(wired, [])
+        # and they act: validating the config shows a result
+        page.click("#btn-validate")
+        page.wait_for_function("document.getElementById('validation-result').innerText.trim().length > 0 "
+                               "&& !document.getElementById('validation-result').innerText.includes('Validating')",
+                               timeout=10000)
+        # with a project open, "Load config" points the user to the Projects page (an alert)
+        with page.expect_event("dialog", timeout=5000) as dialog:
+            page.click("#btn-load-config")
+        self.assertIn("Projects page", dialog.value.message)
+        dialog.value.dismiss()
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
