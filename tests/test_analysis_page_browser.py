@@ -142,6 +142,34 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(got, [[], [], [], [], {"trial_type": [], "condition": []}, []])
         self.assertEqual(self.errors, [])
 
+    def test_path_browser_modal_navigates_and_selects(self):
+        page = self.open_page()
+        bids = str(Path(self.tmp.name) / "bids")
+        # folder mode (working directory)
+        page.fill("#input-WD", bids)
+        page.click('.btn-browse[data-key="WD"]')
+        page.wait_for_selector("#browseModal.show")
+        page.wait_for_function("document.querySelectorAll('#browse-list > *').length > 0")
+        crumbs = page.eval_on_selector_all("#browse-breadcrumb li", "els => els.map(e => e.textContent.trim())")
+        self.assertEqual(crumbs, ["Root"] + list(Path(bids).parts[1:]))
+        self.assertTrue(page.eval_on_selector("#browse-breadcrumb li", "e => e.classList.contains('x-small')"))
+        page.click("#browse-list >> text=sub-01")
+        page.wait_for_function("document.getElementById('selected-browse-path').innerText.endsWith('sub-01')")
+        self.assertEqual(page.eval_on_selector("#browse-breadcrumb li:last-child", "e => e.classList.contains('active')"), True)
+        page.click("#browse-breadcrumb >> text=bids")
+        page.wait_for_function("document.getElementById('selected-browse-path').innerText.endsWith('/bids')")
+        page.click("#btn-confirm-browse")
+        page.wait_for_selector("#browseModal", state="hidden")
+        self.assertEqual(page.input_value("#input-WD"), bids)
+        # file mode (models file): files are listed and clicking one selects it
+        page.click('.btn-browse[data-key="MODELS_FILE"]')
+        page.wait_for_selector("#browseModal.show")
+        page.wait_for_function("document.querySelectorAll('#browse-list > *').length > 0")
+        page.click("#browse-list >> text=model.json")
+        page.wait_for_selector("#browseModal", state="hidden")
+        self.assertTrue(page.input_value("#input-MODELS_FILE").endswith("model.json"))
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
