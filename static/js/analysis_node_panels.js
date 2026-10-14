@@ -1,4 +1,17 @@
 (function () {
+    function createRemoveTransformationsButton(node) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-outline-danger';
+        button.textContent = 'Remove Transformations';
+        button.addEventListener('click', () => {
+            delete node.Transformations;
+            renderModelAccordionEditor();
+            setModelEditorStatus('Transformations removed.', 'info');
+        });
+        return button;
+    }
+
     function createNodePanelBuilders(config = {}) {
         const fetchImpl = config.fetchImpl || window.fetch.bind(window);
         const alertImpl = config.alertImpl || window.alert.bind(window);
@@ -170,16 +183,7 @@
                 body.appendChild(note);
 
                 if (transformations) {
-                    const clearBtn = document.createElement('button');
-                    clearBtn.type = 'button';
-                    clearBtn.className = 'btn btn-sm btn-outline-danger';
-                    clearBtn.textContent = 'Remove Transformations';
-                    clearBtn.addEventListener('click', () => {
-                        delete node.Transformations;
-                        renderModelAccordionEditor();
-                        setModelEditorStatus('Transformations removed.', 'info');
-                    });
-                    body.appendChild(clearBtn);
+                    body.appendChild(createRemoveTransformationsButton(node));
                 }
 
                 return panel;
@@ -240,16 +244,7 @@
             actions.appendChild(builderBtn);
 
             if (transformations) {
-                const clearBtn = document.createElement('button');
-                clearBtn.type = 'button';
-                clearBtn.className = 'btn btn-sm btn-outline-danger';
-                clearBtn.textContent = 'Remove Transformations';
-                clearBtn.addEventListener('click', () => {
-                    delete node.Transformations;
-                    renderModelAccordionEditor();
-                    setModelEditorStatus('Transformations removed.', 'info');
-                });
-                actions.appendChild(clearBtn);
+                actions.appendChild(createRemoveTransformationsButton(node));
             }
 
             body.appendChild(actions);
