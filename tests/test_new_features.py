@@ -43,10 +43,13 @@ class TestNewFeatures(unittest.TestCase):
         self.assertIn('/static/js/analysis_contrast_builder.js', text)
         self.assertIn('/static/js/analysis_preview_validation.js', text)
         self.assertIn('/static/js/analysis_node_panels.js', text)
-        self.assertIn('createModelHelperApi', text)
-        self.assertIn('createNodePanelBuilders', text)
-        self.assertIn('createNodeSchemaHint', text)
-        self.assertIn('createTopLevelSchemaHint', text)
+        # where these live is an implementation detail: look in the page and in every script it loads
+        import re
+        scripts = "".join(
+            self.client.get(src.split("?")[0]).get_data(as_text=True)
+            for src in re.findall(r'<script src="(/static/js/[^"]+)"', text))
+        for name in ('createModelHelperApi', 'createNodePanelBuilders', 'createNodeSchemaHint', 'createTopLevelSchemaHint'):
+            self.assertIn(name, text + scripts)
 
     def test_api_bids_entities_missing_path_returns_defaults(self):
         response = self.client.get("/api/bids_entities", query_string={"path": "/path/that/does/not/exist"})
