@@ -696,7 +696,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% for name in ['analysis_stepper', 'analysis_model_schema', 'transformer_model_x_domains', 'analysis_model_mutations', 'analysis_model_presets', 'analysis_model_hints', 'analysis_browser', 'analysis_contrast_builder', 'analysis_preview_validation', 'analysis_node_panels', 'transformer_builder_path_utils', 'model_editor_launch', 'model_editor_transformer_payload', 'analysis_nuisance_picker', 'analysis_json_editor', 'analysis_participants_modal', 'analysis_coverage_modal'] %}
+{% for name in ['analysis_stepper', 'analysis_model_schema', 'transformer_model_x_domains', 'analysis_model_mutations', 'analysis_model_presets', 'analysis_model_hints', 'browse_breadcrumb', 'analysis_browser', 'analysis_contrast_builder', 'analysis_preview_validation', 'analysis_node_panels', 'transformer_builder_path_utils', 'model_editor_launch', 'model_editor_transformer_payload', 'analysis_nuisance_picker', 'analysis_json_editor', 'analysis_participants_modal', 'analysis_coverage_modal'] %}
 <script src="{{ url_for('static', filename='js/' ~ name ~ '.js', v=static_version('js/' ~ name ~ '.js')) }}"></script>
 {% endfor %}
 <script>

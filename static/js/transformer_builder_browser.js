@@ -83,63 +83,61 @@
       scanEvents(false);
     }
 
-    async function fetchEventsBrowse(path) {
+    function appendBrowseButton(list, iconClass, name, onClick) {
+      const button = document.createElement('button');
+      button.className = 'list-group-item list-group-item-action d-flex align-items-center small py-2';
+      button.innerHTML = `<i class="${iconClass} me-2"></i> ${escHtml(name)}`;
+      button.addEventListener('click', onClick);
+      list.appendChild(button);
+      return button;
+    }
+
+    // Fetch /browse for <prefix>-browse-list, draw the breadcrumb and let fill() add the entries.
+    async function browseInto(prefix, path, query, fill) {
+      const list = document.getElementById(`${prefix}-browse-list`);
+      const showError = (message) => {
+        list.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">${escHtml(message)}</div>`;
+      };
       try {
-        const response = await fetch(`/browse?path=${encodeURIComponent(path)}&extensions=.tsv`);
+        const response = await fetch(`/browse?path=${encodeURIComponent(path)}&${query}`);
         const data = await response.json();
-        const list = document.getElementById('ev-browse-list');
         if (data.error) {
-          list.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">${escHtml(data.error)}</div>`;
+          showError(data.error);
           return;
         }
 
-        const breadcrumb = document.getElementById('ev-breadcrumb');
-        breadcrumb.innerHTML = '';
-        const parts = data.current_path.split('/').filter(Boolean);
-        const rootLi = document.createElement('li');
-        rootLi.className = 'breadcrumb-item';
-        rootLi.innerHTML = '<a href="#" class="text-decoration-none">Root</a>';
-        rootLi.querySelector('a').addEventListener('click', event => {
-          event.preventDefault();
-          fetchEventsBrowse('/');
-        });
-        breadcrumb.appendChild(rootLi);
-
-        let built = '';
-        parts.forEach((part, index) => {
-          built += '/' + part;
-          const li = document.createElement('li');
-          li.className = 'breadcrumb-item' + (index === parts.length - 1 ? ' active' : '');
-          const captured = built;
-          if (index === parts.length - 1) {
-            li.textContent = part;
-          } else {
-            li.innerHTML = `<a href="#" class="text-decoration-none">${escHtml(part)}</a>`;
-            li.querySelector('a').addEventListener('click', event => {
-              event.preventDefault();
-              fetchEventsBrowse(captured);
-            });
-          }
-          breadcrumb.appendChild(li);
-        });
-
+        window.BIDSPMBrowseBreadcrumb(
+          document.getElementById(`${prefix}-breadcrumb`),
+          data.current_path,
+          next => browseInto(prefix, next, query, fill),
+          { linkClass: 'text-decoration-none' },
+        );
         list.innerHTML = '';
-        const dirs = data.items.filter(item => item.type === 'dir');
-        const files = data.items.filter(item => item.type === 'file' && item.name.toLowerCase().endsWith('_events.tsv'));
+        fill(data, list);
+      } catch (error) {
+        showError(`Browse error: ${error.message}`);
+      }
+    }
 
-        dirs.forEach(item => {
-          const button = document.createElement('button');
-          button.className = 'list-group-item list-group-item-action d-flex align-items-center small py-2';
-          button.innerHTML = `<i class="fas fa-folder text-warning me-2"></i> ${escHtml(item.name)}`;
-          button.addEventListener('click', () => fetchEventsBrowse(item.path));
-          list.appendChild(button);
+    function fetchBrowse(path) {
+      return browseInto('tb', path, 'only_dirs=true', (data, list) => {
+        data.items.filter(item => item.type === 'dir').forEach(item => {
+          appendBrowseButton(list, 'fas fa-folder text-warning', item.name, () => fetchBrowse(item.path));
+        });
+        tbBrowsingPath = data.current_path;
+        document.getElementById('tb-selected-path').textContent = data.current_path;
+      });
+    }
+
+    function fetchEventsBrowse(path) {
+      return browseInto('ev', path, 'extensions=.tsv', (data, list) => {
+        data.items.filter(item => item.type === 'dir').forEach(item => {
+          appendBrowseButton(list, 'fas fa-folder text-warning', item.name, () => fetchEventsBrowse(item.path));
         });
 
+        const files = data.items.filter(item => item.type === 'file' && item.name.toLowerCase().endsWith('_events.tsv'));
         files.forEach(item => {
-          const button = document.createElement('button');
-          button.className = 'list-group-item list-group-item-action d-flex align-items-center small py-2';
-          button.innerHTML = `<i class="fas fa-file-alt text-primary me-2"></i> ${escHtml(item.name)}`;
-          button.addEventListener('click', () => {
+          const button = appendBrowseButton(list, 'fas fa-file-alt text-primary', item.name, () => {
             setSelectedEventFile(item.path);
             list.querySelectorAll('.list-group-item').forEach(element => element.classList.remove('active'));
             button.classList.add('active');
@@ -152,7 +150,6 @@
             setStatus('Single events file selected. Click Scan Events to load it.', 'success');
             scanEvents(false);
           });
-          list.appendChild(button);
         });
 
         if (!files.length) {
@@ -166,68 +163,7 @@
         if (!evSelectedFile) {
           setSelectedEventFile('');
         }
-      } catch (error) {
-        document.getElementById('ev-browse-list').innerHTML =
-          `<div class="alert alert-danger py-2 px-3 small mb-0">Browse error: ${escHtml(error.message)}</div>`;
-      }
-    }
-
-    async function fetchBrowse(path) {
-      try {
-        const response = await fetch(`/browse?path=${encodeURIComponent(path)}&only_dirs=true`);
-        const data = await response.json();
-        if (data.error) {
-          document.getElementById('tb-browse-list').innerHTML =
-            `<div class="alert alert-danger py-2 px-3 small mb-0">${escHtml(data.error)}</div>`;
-          return;
-        }
-
-        const breadcrumb = document.getElementById('tb-breadcrumb');
-        breadcrumb.innerHTML = '';
-        const parts = data.current_path.split('/').filter(Boolean);
-        const rootLi = document.createElement('li');
-        rootLi.className = 'breadcrumb-item';
-        rootLi.innerHTML = '<a href="#" class="text-decoration-none">Root</a>';
-        rootLi.querySelector('a').addEventListener('click', event => {
-          event.preventDefault();
-          fetchBrowse('/');
-        });
-        breadcrumb.appendChild(rootLi);
-
-        let built = '';
-        parts.forEach((part, index) => {
-          built += '/' + part;
-          const li = document.createElement('li');
-          li.className = 'breadcrumb-item' + (index === parts.length - 1 ? ' active' : '');
-          const captured = built;
-          if (index === parts.length - 1) {
-            li.textContent = part;
-          } else {
-            li.innerHTML = `<a href="#" class="text-decoration-none">${escHtml(part)}</a>`;
-            li.querySelector('a').addEventListener('click', event => {
-              event.preventDefault();
-              fetchBrowse(captured);
-            });
-          }
-          breadcrumb.appendChild(li);
-        });
-
-        const list = document.getElementById('tb-browse-list');
-        list.innerHTML = '';
-        data.items.filter(item => item.type === 'dir').forEach(item => {
-          const button = document.createElement('button');
-          button.className = 'list-group-item list-group-item-action d-flex align-items-center small py-2';
-          button.innerHTML = `<i class="fas fa-folder text-warning me-2"></i> ${escHtml(item.name)}`;
-          button.addEventListener('click', () => fetchBrowse(item.path));
-          list.appendChild(button);
-        });
-
-        tbBrowsingPath = data.current_path;
-        document.getElementById('tb-selected-path').textContent = data.current_path;
-      } catch (error) {
-        document.getElementById('tb-browse-list').innerHTML =
-          `<div class="alert alert-danger py-2 px-3 small mb-0">Browse error: ${escHtml(error.message)}</div>`;
-      }
+      });
     }
 
     return Object.freeze({

@@ -183,8 +183,8 @@ python -m pytest -q tests # `python -m unittest discover -s tests -p "test_*.py"
 ```
 
 A few tests need extras and skip themselves when they are missing (pandas for `scripts/fix_events_format.py`, GNU Octave on the host
-for the `.m` override tests). The image smoke test runs only with `BIDSPM_TEST_IMAGE=<built image>`. `tests/test_analysis_page_browser.py` opens the
-analysis page in headless Chromium and needs `pip install playwright && playwright install chromium` (it skips itself otherwise).
+for the `.m` override tests). The image smoke test runs only with `BIDSPM_TEST_IMAGE=<built image>`. `tests/test_analysis_page_browser.py`, `tests/test_transformer_builder_browser.py` and
+`tests/test_transformer_handoff_browser.py` (the analysis page <-> transformer builder round trip) open the pages in headless Chromium and need `pip install playwright && playwright install chromium` (it skips itself otherwise).
 
 Notes:
 

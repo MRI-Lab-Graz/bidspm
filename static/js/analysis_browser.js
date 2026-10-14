@@ -23,42 +23,8 @@
         function renderBrowseBreadcrumb(currentPath, onlyDirs) {
             const breadcrumb = getElement('browse-breadcrumb');
             if (!breadcrumb) return;
-
-            breadcrumb.innerHTML = '';
-            const parts = String(currentPath || '').split('/').filter(part => part !== '');
-
-            const rootLi = document.createElement('li');
-            rootLi.className = 'breadcrumb-item x-small';
-            const rootLink = document.createElement('a');
-            rootLink.href = '#';
-            rootLink.textContent = 'Root';
-            rootLink.addEventListener('click', (event) => {
-                event.preventDefault();
-                fetchBrowse('/', onlyDirs);
-            });
-            rootLi.appendChild(rootLink);
-            breadcrumb.appendChild(rootLi);
-
-            let currentBuild = '';
-            parts.forEach((part, index) => {
-                currentBuild += `/${part}`;
-                const li = document.createElement('li');
-                li.className = `breadcrumb-item x-small${index === parts.length - 1 ? ' active' : ''}`;
-                if (index === parts.length - 1) {
-                    li.innerText = part;
-                } else {
-                    const link = document.createElement('a');
-                    link.href = '#';
-                    link.textContent = part;
-                    const targetPath = currentBuild;
-                    link.addEventListener('click', (event) => {
-                        event.preventDefault();
-                        fetchBrowse(targetPath, onlyDirs);
-                    });
-                    li.appendChild(link);
-                }
-                breadcrumb.appendChild(li);
-            });
+            window.BIDSPMBrowseBreadcrumb(breadcrumb, currentPath, (path) => fetchBrowse(path, onlyDirs),
+                { itemClass: 'breadcrumb-item x-small' });
         }
 
         async function fetchBrowse(path, onlyDirs) {
