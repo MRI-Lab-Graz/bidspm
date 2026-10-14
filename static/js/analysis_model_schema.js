@@ -338,6 +338,22 @@
         return issues;
     }
 
+    // The "what is wrong / what to consider" lines shared by every schema hint.
+    function appendIssuesAndAdvisories(hint, issues, advisories = []) {
+        if (issues.length) {
+            const detail = document.createElement('div');
+            detail.textContent = issues.join(' ');
+            hint.appendChild(detail);
+        }
+
+        if (advisories.length) {
+            const advisory = document.createElement('div');
+            advisory.className = 'mt-1';
+            advisory.textContent = advisories.join(' ');
+            hint.appendChild(advisory);
+        }
+    }
+
     function createModelSchemaHint(modelValue) {
         const hint = document.createElement('div');
         const issues = getModelSchemaIssues(modelValue);
@@ -354,11 +370,7 @@
             : 'Model schema: required Type and X are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -417,11 +429,7 @@
             : 'Node schema: required Level, Name, GroupBy and Model(Type,X) are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         return hint;
     }
@@ -471,11 +479,7 @@
             : 'HRF schema: required Variables and Model are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -545,11 +549,7 @@
             : 'Options schema: all official fields are optional.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const fields = document.createElement('div');
         fields.className = 'mt-1';
@@ -642,11 +642,7 @@
             : 'Contrast schema: required Name, ConditionList, Weights and Test are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -731,11 +727,7 @@
             : 'DummyContrasts schema: required Test is present; optional Contrasts is valid.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -877,18 +869,7 @@
             : 'Edge schema: required Source and Destination are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
-
-        if (advisories.length) {
-            const advisory = document.createElement('div');
-            advisory.className = 'mt-1';
-            advisory.textContent = advisories.join(' ');
-            hint.appendChild(advisory);
-        }
+        appendIssuesAndAdvisories(hint, issues, advisories);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -964,11 +945,7 @@
             : 'Transformations schema: required Transformer and Instructions are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
+        appendIssuesAndAdvisories(hint, issues);
 
         const optional = document.createElement('div');
         optional.className = 'mt-1';
@@ -1070,18 +1047,7 @@
             : 'Top-level schema: required Name, BIDSModelVersion and Nodes are present.';
         hint.appendChild(summary);
 
-        if (issues.length) {
-            const detail = document.createElement('div');
-            detail.textContent = issues.join(' ');
-            hint.appendChild(detail);
-        }
-
-        if (advisories.length) {
-            const advisory = document.createElement('div');
-            advisory.className = 'mt-1';
-            advisory.textContent = advisories.join(' ');
-            hint.appendChild(advisory);
-        }
+        appendIssuesAndAdvisories(hint, issues, advisories);
 
         return hint;
     }
