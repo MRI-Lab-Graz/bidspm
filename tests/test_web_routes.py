@@ -140,7 +140,8 @@ class TestWebRoutes(unittest.TestCase):
         box = re.search(r'<input[^>]*id="run_results"[^>]*>', text)
         self.assertIsNotNone(box, "run_results checkbox missing")
         self.assertNotIn("checked", box.group(0))
-        self.assertIn("run_results: document.getElementById('run_results').checked", text)
+        js = self.client.get("/static/js/analysis_project_form.js").get_data(as_text=True)
+        self.assertIn("run_results: document.getElementById('run_results').checked", js)
 
     def test_suggested_workers_route_reports_machine_and_suggestion(self):
         response = self.client.get("/api/suggested_workers")
@@ -155,7 +156,8 @@ class TestWebRoutes(unittest.TestCase):
         project = self.project_manager.create_project("Suggest workers demo")
         text = self.client.get(f"/analysis/{project.id}").get_data(as_text=True)
         self.assertIn('id="suggest_workers"', text)
-        self.assertIn("/api/suggested_workers", text)
+        js = self.client.get("/static/js/analysis_project_form.js").get_data(as_text=True)
+        self.assertIn("/api/suggested_workers", js)
 
     def test_analysis_page_has_estimation_engine_select_and_image_field(self):
         import re
@@ -166,7 +168,8 @@ class TestWebRoutes(unittest.TestCase):
         self.assertIn('value="octave"', select.group(0))
         self.assertIn('value="standalone"', select.group(0))
         self.assertIn('data-key="spm_standalone_image"', text)
-        self.assertIn("estimation_engine: document.getElementById('estimation_engine').value", text)
+        js = self.client.get("/static/js/analysis_project_form.js").get_data(as_text=True)
+        self.assertIn("estimation_engine: document.getElementById('estimation_engine').value", js)
 
     def test_analysis_route_loads_transformer_handoff_assets(self):
         project = self.project_manager.create_project("Analysis handoff assets demo")
