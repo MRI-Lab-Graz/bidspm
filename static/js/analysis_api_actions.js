@@ -225,28 +225,25 @@ async function openModelEditor(options = {}) {
     }
 }
 
+// Indices of the model nodes whose accordion panels are open, most recently opened first.
+function openNodeIndices() {
+    const collectNodePaths = (paths) => Array.from(paths || [])
+        .map(path => String(path || '').trim())
+        .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
+    const domOpenPaths = Array.from(document.querySelectorAll('#model-editor-accordion .accordion-collapse.show'))
+        .map(el => el.dataset.jsonPath);
+    return [
+        ...collectNodePaths(modelEditorPendingOpenPaths),
+        ...collectNodePaths(modelEditorOpenPaths),
+        ...collectNodePaths(domOpenPaths),
+    ].reverse().map(path => Number(path.match(/^Nodes\[(\d+)\]/)[1]));
+}
+
 function inferTransformerLaunchNodeLevel() {
     const normalizeLevel = (value) => ['Run', 'Session', 'Subject', 'Dataset']
         .find(level => level.toLowerCase() === String(value || '').trim().toLowerCase()) || '';
 
-    const collectNodePaths = (paths) => {
-        const list = Array.isArray(paths) ? paths : Array.from(paths || []);
-        return list
-            .map(path => String(path || '').trim())
-            .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
-    };
-
-    const openPaths = collectNodePaths(modelEditorOpenPaths);
-    const pendingPaths = collectNodePaths(modelEditorPendingOpenPaths);
-    const domOpenPaths = Array.from(document.querySelectorAll('#model-editor-accordion .accordion-collapse.show'))
-        .map(el => String(el.dataset.jsonPath || '').trim())
-        .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
-
-    const orderedCandidates = [...pendingPaths, ...openPaths, ...domOpenPaths].reverse();
-    for (const path of orderedCandidates) {
-        const match = path.match(/^Nodes\[(\d+)\]/);
-        if (!match) continue;
-        const nodeIdx = Number(match[1]);
+    for (const nodeIdx of openNodeIndices()) {
         const node = Array.isArray(modelEditorDraft?.Nodes) ? modelEditorDraft.Nodes[nodeIdx] : null;
         const level = normalizeLevel(node?.Level);
         if (level) return level;
@@ -263,26 +260,8 @@ function inferTransformerLaunchNodeLevel() {
 }
 
 function inferTransformerLaunchNodeIndex() {
-    const collectNodePaths = (paths) => {
-        const list = Array.isArray(paths) ? paths : Array.from(paths || []);
-        return list
-            .map(path => String(path || '').trim())
-            .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
-    };
-
-    const openPaths = collectNodePaths(modelEditorOpenPaths);
-    const pendingPaths = collectNodePaths(modelEditorPendingOpenPaths);
-    const domOpenPaths = Array.from(document.querySelectorAll('#model-editor-accordion .accordion-collapse.show'))
-        .map(el => String(el.dataset.jsonPath || '').trim())
-        .filter(path => /^Nodes\[\d+\](?:\.|$)/.test(path));
-
-    const orderedCandidates = [...pendingPaths, ...openPaths, ...domOpenPaths].reverse();
-    for (const path of orderedCandidates) {
-        const match = path.match(/^Nodes\[(\d+)\]/);
-        if (!match) continue;
-        const nodeIdx = Number(match[1]);
-        if (Number.isInteger(nodeIdx) && nodeIdx >= 0) return nodeIdx;
-    }
+    const [openIdx] = openNodeIndices();
+    if (openIdx !== undefined) return openIdx;
 
     const configuredNodeName = String(document.getElementById('input-NODE_NAME')?.value || '').trim();
     if (configuredNodeName && Array.isArray(modelEditorDraft?.Nodes)) {

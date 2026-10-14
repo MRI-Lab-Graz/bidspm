@@ -177,6 +177,25 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(got, [c[2] for c in cases])
         self.assertEqual(self.errors, [])
 
+    def test_transformer_launch_node_inference(self):
+        page = self.open_page()
+        page.evaluate("openModelEditor({scrollIntoView: false, showStatus: false})")
+        page.wait_for_function("modelEditorDraft && modelEditorDraft.Nodes && modelEditorDraft.Nodes.length > 0")
+        got = page.evaluate("""() => {
+            const out = {};
+            modelEditorOpenPaths = new Set(); modelEditorPendingOpenPaths = new Set();
+            out.none = [inferTransformerLaunchNodeLevel(), inferTransformerLaunchNodeIndex()];
+            modelEditorOpenPaths = new Set(['Nodes[0].Model']);
+            out.open = [inferTransformerLaunchNodeLevel(), inferTransformerLaunchNodeIndex()];
+            modelEditorPendingOpenPaths = new Set(['Nodes[0]']);
+            out.pending = [inferTransformerLaunchNodeLevel(), inferTransformerLaunchNodeIndex()];
+            return out;
+        }""")
+        self.assertEqual(got["open"], ["Run", 0])
+        self.assertEqual(got["pending"], ["Run", 0])
+        self.assertEqual(got["none"][0], "")
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
