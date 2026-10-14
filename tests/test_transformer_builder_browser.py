@@ -155,6 +155,25 @@ class TestTransformerBuilderBrowsers(unittest.TestCase):
         page.wait_for_selector("#ev-browse-list >> text=No *_events.tsv files in this folder.")
         self.assertEqual(self.errors, [])
 
+    def test_auto_scan_fills_columns_and_preview_and_operations_can_be_added(self):
+        page = self.open_page()  # the project's BIDS folder is pre-filled, so the page scans on load
+        page.wait_for_function("document.getElementById('scan-status').textContent.includes('Found 3 columns')",
+                               timeout=15000)
+        pool = page.inner_text("#columns-pool").split()
+        for column in ("duration", "onset", "trial_type", "a", "b"):
+            self.assertIn(column, pool)
+        self.assertEqual(page.eval_on_selector_all("#events-preview-table tbody tr", "e => e.length"), 2)
+        self.assertEqual(page.input_value("#select-task"), "motor")
+
+        page.click('.btn-add-op[data-op="Filter"]')
+        page.click('.btn-add-op[data-op="Assign"]')
+        page.wait_for_function("document.querySelectorAll('.op-card').length === 2")
+        import json
+        generated = json.loads(page.inner_text("#json-output"))
+        self.assertEqual(generated["Transformer"], "bidspm")
+        self.assertIn("Instructions", generated)
+        self.assertEqual(self.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()
