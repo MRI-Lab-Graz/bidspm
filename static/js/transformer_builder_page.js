@@ -10,8 +10,6 @@
   const PROJECT_MODELS_FILE = window.BIDSPM_TRANSFORMER_CONTEXT.modelsFile;
   const TRANSFORMER_LAUNCH_CONTEXT_KEY = 'bidspm.transformerLaunchContext';
   const PENDING_TRANSFORMER_KEY = 'bidspm.pendingTransformerModel';
-  const TRANSFORMER_APPLIED_EVENT = 'bidspm-transformer-applied';
-  const EMBEDDED_MODE = window.self !== window.top;
   // bidspm only ever executes node Transformations for Run-level events.tsv data
   // (see convertOnsetTsvToMat.m) — Session/Subject/Dataset nodes never run them,
   // so they aren't offered as targets here.
@@ -317,31 +315,6 @@
     const targetProjectId = String(launchContext?.projectId || CURRENT_PROJECT_ID || '').trim();
     const targetLevels = getTargetLevels();
     const sourceScope = getEffectiveSourceScope();
-
-    if (EMBEDDED_MODE) {
-      try {
-        try {
-          sessionStorage.removeItem(PENDING_TRANSFORMER_KEY);
-        } catch (cleanupError) {
-          // Ignore stale payload cleanup failures.
-        }
-        window.parent.postMessage({
-          type: TRANSFORMER_APPLIED_EVENT,
-          launchId,
-          projectId: targetProjectId,
-          modelPath: targetModelPath,
-          transformations,
-          generatedColumns,
-          targetLevels,
-          sourceScope
-        }, window.location.origin);
-      } catch (e) {
-        setStatus('Transformer payload prepared, but parent editor could not be notified.', 'warning');
-        return;
-      }
-      setStatus(`Transformer applied for ${targetLevels.join(', ')} node level(s). Design Matrix is unchanged; generated outputs are available for manual Model.X selection.`, 'success');
-      return;
-    }
 
     const stored = persistPendingTransformerPayload({
       launchId,
