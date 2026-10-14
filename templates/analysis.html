@@ -9,6 +9,16 @@
 {% endblock %}
 
 {% block content %}
+{% macro path_input(key, label, value, kind='dir', col='col-md-6') %}
+<div class="{{ col }}">
+    <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">{{ label }}</label>
+    <div class="input-group input-group-sm">
+        <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="{{ key }}" id="input-{{ key }}" value="{{ value }}">
+        <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="{{ key }}" data-type="{{ kind }}"><i class="fas fa-ellipsis-h"></i></button>
+    </div>
+    {% if caller %}{{ caller() }}{% endif %}
+</div>
+{% endmacro %}
 <div class="container-fluid analysis-page-shell">
     <!-- Top Action Bar -->
     <div class="row mb-4">
@@ -101,52 +111,18 @@
                             <div id="collapseSettings" class="accordion-collapse collapse show" data-bs-parent="#formAccordion">
                                 <div class="accordion-body px-0 pt-3 analysis-config-body">
                                     <div id="settings-form-static" class="row g-3">
-                                        <!-- WD -->
-                                        <div class="col-md-6">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Working Directory</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="WD" id="input-WD" value="{{ project.config.output_folder if project else '' }}">
-                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="WD" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
-                                        </div>
-                                        <!-- BIDS_DIR -->
-                                        <div class="col-md-6">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">BIDS Folder</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="BIDS_DIR" id="input-BIDS_DIR" value="{{ project.config.bids_folder if project else '' }}">
-                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="BIDS_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
-                                        </div>
-                                        <!-- DERIVATIVES_DIR -->
-                                        <div class="col-md-6">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Derivatives Folder</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="DERIVATIVES_DIR" id="input-DERIVATIVES_DIR" value="{{ project.config.derivatives_folder if project else '' }}">
-                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="DERIVATIVES_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
-                                        </div>
-                                        <!-- FMRIPREP_DIR -->
-                                        <div class="col-md-6">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">fMRIPrep Folder</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="FMRIPREP_DIR" id="input-FMRIPREP_DIR" value="{{ project.config.fmriprep_folder if project else '' }}">
-                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="FMRIPREP_DIR" data-type="dir"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
-                                        </div>
-                                        <!-- MODELS_FILE -->
-                                        <div class="col-12">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Models File</label>
-                                            <div class="input-group input-group-sm">
-                                                <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="MODELS_FILE" id="input-MODELS_FILE" value="{{ project.config.models_file if project else '' }}">
-                                                <button class="btn btn-outline-secondary btn-browse px-3" type="button" data-key="MODELS_FILE" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
-                                            </div>
+                                        {{ path_input('WD', 'Working Directory', project.config.output_folder if project else '', 'dir', 'col-md-6') }}
+                                        {{ path_input('BIDS_DIR', 'BIDS Folder', project.config.bids_folder if project else '', 'dir', 'col-md-6') }}
+                                        {{ path_input('DERIVATIVES_DIR', 'Derivatives Folder', project.config.derivatives_folder if project else '', 'dir', 'col-md-6') }}
+                                        {{ path_input('FMRIPREP_DIR', 'fMRIPrep Folder', project.config.fmriprep_folder if project else '', 'dir', 'col-md-6') }}
+                                        {% call path_input('MODELS_FILE', 'Models File', project.config.models_file if project else '', 'file', 'col-12') %}
                                             <div id="model-validation-status" class="mt-2" style="display:none;">
                                                 <small class="d-flex align-items-center gap-2">
                                                     <span id="model-validation-icon"></span>
                                                     <span id="model-validation-message"></span>
                                                 </small>
                                             </div>
-                                        </div>
+                                        {% endcall %}
                                         <!-- SPACE / FWHM / VERBOSITY -->
                                         <div class="col-md-5">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Space</label>
