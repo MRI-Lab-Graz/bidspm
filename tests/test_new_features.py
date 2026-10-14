@@ -34,7 +34,6 @@ class TestNewFeatures(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertIn("Session node", text)
         self.assertIn('/static/js/analysis_model_schema.js', text)
         self.assertIn('/static/js/analysis_model_mutations.js', text)
         self.assertIn('/static/js/analysis_model_presets.js', text)
@@ -48,7 +47,8 @@ class TestNewFeatures(unittest.TestCase):
         scripts = "".join(
             self.client.get(src.split("?")[0]).get_data(as_text=True)
             for src in re.findall(r'<script src="(/static/js/[^"]+)"', text))
-        for name in ('createModelHelperApi', 'createNodePanelBuilders', 'createNodeSchemaHint', 'createTopLevelSchemaHint'):
+        for name in ('Session node', 'createModelHelperApi', 'createNodePanelBuilders', 'createNodeSchemaHint',
+                     'createTopLevelSchemaHint'):
             self.assertIn(name, text + scripts)
 
     def test_api_bids_entities_missing_path_returns_defaults(self):

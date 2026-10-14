@@ -343,3 +343,5 @@ async function syncInternalToForm() {
     const skipVal = document.getElementById('skip_validation');
     if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
 }
+
+window.addEventListener('DOMContentLoaded', initApp);
