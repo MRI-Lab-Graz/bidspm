@@ -129,6 +129,13 @@ pip install -r requirements.txt
 
 Point `container.json` at the image you built (`"docker_image": "bidspm/bidspm:latest"`).
 
+**Starting the GUI:** `./scripts/start_gui.sh` activates the project's `.bidspm` virtual environment and starts it
+(port `$BIDSPM_PORT`, default 5100; any options such as `--host` or `--no-browser` are passed on).
+
+**VS Code Remote SSH:** VS Code shows "Your application running on port 5100 is available. Open in Browser" every time.
+To open the browser at once instead, add this to the (untracked) `.vscode/settings.json`:
+`"remote.portsAttributes": {"5100": {"label": "BIDSPM GUI", "onAutoForward": "openBrowser"}}`.
+
 **On a remote server without a display:** the web GUI starts without opening a browser when it detects an SSH session
 (or with `--no-browser`). It listens on `127.0.0.1` only, because it has no login (anyone who can reach the port can run
 jobs and read files). Forward the port from your own machine instead of exposing it:
