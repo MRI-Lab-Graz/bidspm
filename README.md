@@ -124,8 +124,13 @@ Then get the Python side running:
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
-pip install -r requirements.txt
+./scripts/setup.sh        # uv builds .bidspm: its own Python 3.12 (.python-version) + the packages in uv.lock
+./scripts/start_gui.sh    # or: .bidspm/bin/python bidspm.py --help
 ```
+
+The environment is managed entirely by [uv](https://docs.astral.sh/uv/): dependencies live in `pyproject.toml` and are
+locked in `uv.lock`. It uses uv's own Python, never the OS's or FSL's. To change dependencies edit `pyproject.toml`, run
+`uv lock`, then `UV_PROJECT_ENVIRONMENT=.bidspm uv sync --managed-python`.
 
 Point `container.json` at the image you built (`"docker_image": "bidspm/bidspm:latest"`).
 
@@ -175,9 +180,8 @@ touching the venv, via `BIDSPM_PYTHON=/path/to/python python bidspm_gui.py`.
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+UV_PROJECT_ENVIRONMENT=.bidspm uv sync --managed-python   # needs uv (https://docs.astral.sh/uv/)
+source .bidspm/bin/activate
 ```
 
 ## Testing
@@ -185,8 +189,7 @@ pip install -r requirements.txt
 Run the test suite from repository root:
 
 ```bash
-pip install pytest        # not in requirements.txt
-python -m pytest -q tests # `python -m unittest discover -s tests -p "test_*.py"` also works
+.bidspm/bin/python -m pytest -q tests   # pytest, playwright, pandas and coverage are in the uv "dev" group
 ```
 
 A few tests need extras and skip themselves when they are missing (pandas for `scripts/fix_events_format.py`, GNU Octave on the host

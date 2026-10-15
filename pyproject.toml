@@ -1,0 +1,29 @@
+[project]
+name = "bidspm-runner"
+version = "2.0.0"
+description = "Run bidspm (SPM/Octave in containers) on BIDS datasets from a CLI or a local web GUI"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28.0",
+    "jsonschema>=4.17.0",
+    "openpyxl>=3.1.0",
+    "nibabel>=5.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
+    "flask>=2.3.0",
+    "waitress>=2.1.0",
+]
+
+[dependency-groups]
+# python -m pytest -q tests; browser tests also need `playwright install chromium`
+dev = [
+    "pytest>=7",
+    "playwright>=1.40",
+    "pandas>=2.0",
+    "coverage>=7.6",
+]
+
+[tool.uv]
+# an application, not an installable package: `uv sync` only installs the dependencies
+package = false

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 try:
     import pandas as pd
-except ImportError:  # not in requirements.txt: only scripts/fix_events_format.py needs it
+except ImportError:  # in the uv dev group, not a runtime dependency: only scripts/fix_events_format.py needs it
     raise unittest.SkipTest("pandas is not installed")
 
 

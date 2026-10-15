@@ -154,41 +154,13 @@ else
     success "UV $("$UV_BIN" --version) installed"
 fi
 
-# Find Python 3.9+
-PYTHON_BIN=""
-for candidate in python3.12 python3.11 python3.10 python3.9 python3; do
-    if command -v "$candidate" &>/dev/null; then
-        if "$candidate" -c "import sys; exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
-            PYTHON_BIN=$(command -v "$candidate")
-            break
-        fi
-    fi
-done
-if [[ -z "$PYTHON_BIN" ]]; then
-    echo ""
-    echo "  Python 3.9+ not found. Install via Homebrew:"
-    echo "    brew install python@3.12"
-    echo "  Then rerun this script."
-    exit 1
-fi
-info "Python $("$PYTHON_BIN" --version 2>&1 | awk '{print $2}') at ${PYTHON_BIN}"
-
-# Create venv
+# Create the environment: uv's own Python (.python-version) and the packages locked in uv.lock
 if [[ -d ".bidspm" ]]; then
     warn "Existing .bidspm environment found — recreating."
     rm -rf .bidspm
 fi
-"$UV_BIN" venv .bidspm --python "$PYTHON_BIN"
-success "Virtual environment created"
-
-# ---------------------------------------------------------------------------
-# Step 6 — Python dependencies
-# ---------------------------------------------------------------------------
-step "6/8  Installing Python dependencies"
-
-[[ -f "requirements.txt" ]] || error "requirements.txt not found — run this script from the repo root."
-"$UV_BIN" pip install --python ".bidspm/bin/python" -r requirements.txt
-success "Python dependencies installed"
+UV_PROJECT_ENVIRONMENT=.bidspm "$UV_BIN" sync --managed-python || error "uv sync failed — run this script from the repo root."
+success "Virtual environment and Python dependencies installed"
 
 # ---------------------------------------------------------------------------
 # Step 7 — Docker Desktop + image pull

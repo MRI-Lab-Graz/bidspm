@@ -3,6 +3,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -31,6 +32,10 @@ class TestStartGuiScript(unittest.TestCase):
         # a stand-in venv whose activate script only leaves a marker
         (self.dir / "venv" / "bin").mkdir(parents=True)
         (self.dir / "venv" / "bin" / "activate").write_text(f'echo activated > "{self.dir}/activated"\n')
+        # a wrapper, not a symlink: a symlink to a venv's python loses that venv (no pyvenv.cfg next to it)
+        fake_python = self.dir / "venv" / "bin" / "python"
+        fake_python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        fake_python.chmod(0o755)
         self.port = _free_port()
         self.proc = None
 
@@ -74,6 +79,17 @@ class TestStartGuiScript(unittest.TestCase):
         out, _ = self.proc.communicate(timeout=20)
         self.assertNotEqual(self.proc.returncode, 0)
         self.assertIn("setup.sh", out)
+
+    def test_a_venv_with_a_dangling_python_is_refused_not_silently_replaced(self):
+        # a dangling bin/python makes activation fall through to whatever python is first on PATH (e.g. FSL's)
+        (self.dir / "venv" / "bin" / "python").unlink()
+        (self.dir / "venv" / "bin" / "python").symlink_to("/nonexistent/python")
+        self.start()
+        out, _ = self.proc.communicate(timeout=20)
+        self.assertNotEqual(self.proc.returncode, 0)
+        self.assertIn("python", out.lower())
+        self.assertIn("setup.sh", out)
+        self.assertFalse(_listening(self.port))
 
     def test_arguments_are_passed_to_the_gui(self):
         self.start("--help")

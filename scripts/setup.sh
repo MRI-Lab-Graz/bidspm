@@ -203,23 +203,6 @@ setup_apptainer_environment() {
     print_status "   Available space: $SPACE"
 }
 
-# Check if Python 3.8+ is available
-check_python() {
-    if ! command -v python3 &> /dev/null; then
-        print_error "Python 3 is not installed. Please install Python 3.8 or higher."
-        exit 1
-    fi
-
-    python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-
-    if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)"; then
-        print_error "Python ${python_version} detected. Python 3.8 or higher is required."
-        exit 1
-    fi
-
-    print_success "Python ${python_version} detected"
-}
-
 # Install system dependencies
 install_uv() {
     print_status "Installing UV package manager locally to repository..."
@@ -268,46 +251,28 @@ install_uv() {
     fi
 }
 
-# Create and activate virtual environment
+# Create the virtual environment and install everything with uv: uv's own Python (pinned in .python-version,
+# independent of the OS and of FSL) and the packages locked in uv.lock.
 create_venv() {
-    print_status "Creating Python virtual environment '.bidspm'..."
+    print_status "Creating Python environment '.bidspm' with uv..."
 
-    # Remove existing venv if it exists
     if [ -d ".bidspm" ]; then
         print_warning "Existing .bidspm virtual environment found. Removing it..."
         rm -rf .bidspm
     fi
 
-    # Create new virtual environment using local UV
-    ./build/uv venv .bidspm
-
-    print_success "Virtual environment '.bidspm' created"
-}
-
-# Install dependencies using UV
-install_dependencies() {
-    print_status "Installing Python dependencies using UV..."
-
-    # Add UV to PATH if not already there
-    export PATH="$HOME/.cargo/bin:$PATH"
-
-    # Install dependencies from requirements.txt using UV with the virtual environment
-    if [ -f "requirements.txt" ]; then
-        print_status "Installing dependencies from requirements.txt..."
-        # main() runs inside `if main "$@"; then`, which suspends `set -e` for
-        # its entire call tree -- check the exit status explicitly instead of
-        # relying on errexit, or a failed install here is silently ignored.
-        if ! ./build/uv pip install --python .bidspm/bin/python -r requirements.txt; then
-            print_error "Failed to install Python dependencies from requirements.txt"
-            exit 1
-        fi
-        print_success "Dependencies installed successfully"
-    else
-        print_error "requirements.txt not found in current directory"
+    # main() runs inside `if main "$@"; then`, which suspends `set -e` for its entire call tree --
+    # check the exit status explicitly or a failed install is silently ignored.
+    if ! UV_PROJECT_ENVIRONMENT=.bidspm ./build/uv sync --managed-python; then
+        print_error "uv sync failed (Python download or package install)"
         exit 1
     fi
 
-    # Verify installation by listing installed packages
+    print_success "Environment '.bidspm' created"
+}
+
+# List what was installed
+install_dependencies() {
     print_status "Installed packages:"
     ./build/uv pip list --python .bidspm/bin/python
 }
@@ -369,7 +334,6 @@ main() {
     echo ""
 
     check_os
-    check_python
 
     detect_platform
     setup_containers

@@ -91,7 +91,6 @@ containers/container_active.json
 .ipynb_checkpoints
 
 # pyenv
-.python-version
 
 # pipenv
 Pipfile.lock
