@@ -1,3 +1,4 @@
+import os
 from typing import Callable, List, Optional, Tuple
 
 from flask import Flask, redirect, render_template
@@ -73,4 +74,26 @@ def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) 
             projects=projects,
             current_project_id=project_id,
             current_project=project,
+        )
+
+    @app.route('/model-wizard')
+    @app.route('/model-wizard/<project_id>')
+    def model_wizard_page(project_id: Optional[str] = None):
+        """Guided model builder; the work happens in /api/wizard/*."""
+        project, projects = _load_page_context(project_id, get_project_manager)
+        cfg = project.config if project else None
+        models_file = (cfg.models_file if cfg else '') or ''
+        return render_template(
+            'model_wizard.html',
+            project=project,
+            projects=projects,
+            current_project_id=project_id,
+            current_project=project,
+            wizard_context={
+                'projectId': project_id or '',
+                'bidsDir': (cfg.bids_folder if cfg else '') or '',
+                'fmriprepDir': (cfg.fmriprep_folder if cfg else '') or '',
+                'space': (cfg.space if cfg else '') or '',
+                'modelsDir': os.path.dirname(models_file) if models_file else '',
+            },
         )
