@@ -69,8 +69,9 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
-# Version info
-__version__ = "2.0.0"
+# Version info: single source is pyproject.toml
+import tomllib
+__version__ = tomllib.loads((Path(__file__).parent / "pyproject.toml").read_text())["project"]["version"]
 app.config['APP_VERSION'] = __version__
 
 def resolve_python_executable() -> str:

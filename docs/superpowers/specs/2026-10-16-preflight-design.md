@@ -7,14 +7,14 @@ A scientist supplying fMRIPrep derivatives + BIDS events should learn *before* a
 whether the run can succeed. Errors block Run; there is no override.
 
 ## Version
-Single source: `pyproject.toml` `version = "2.0.1"`. `bidspm_gui.py` reads it via `importlib.metadata`
-(fallback: parse pyproject) into `app.config['APP_VERSION']`; `base.html` footer shows `v2.0.1`.
+Single source: `pyproject.toml` `version = "2.0.1"`. `bidspm_gui.py` reads it (tomllib) into `app.config['APP_VERSION']`; `base.html` footer shows `v2.0.1`.
 No git tag is created until the user asks.
 
 ## Architecture
 - `lib/preflight.py`: pure functions, no Flask. `run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects) -> dict`
   returning `{verdict: ready|blocked|warnings, checks: [{id, severity: error|warn|ok, subject, message, fix}]}`.
 - `bidspm.py preflight ...` CLI command prints/returns the same JSON (GUI triggers the CLI/lib; logic stays in `lib/`).
+- `/run` gates only smooth/stats/dataset; the CLI run path is not gated (only `--preflight` reports).
 - `webapp/`: thin `POST /api/preflight` route. "Check Folders" becomes "Check readiness"; Run executes the
   preflight first and refuses to start while any check has severity `error`.
 
@@ -23,20 +23,19 @@ No git tag is created until the user asks.
 2. Selected subjects exist in BIDS and in fMRIPrep (error).
 3. Per subject/task: `desc-preproc_bold` in the requested space (error).
 4. Per subject/task: `*_events.tsv` with `onset`, `duration` columns (error).
-5. Events plausible: numeric onsets, non-negative durations; `trial_type` present when model uses it (error); onset beyond scan length (warn).
-6. Model-referenced conditions exist in the events (error).
-7. Confounds file exists and model-used regressors are among its columns (error).
+5. Events plausible: numeric onsets, non-negative durations; `trial_type` present when model uses it (error); onset beyond scan length (warn). Scan-length compares only when a subject/task has exactly one events file and one preproc file.
+6. Model-referenced conditions exist in the events: error if a condition is absent from every events file of the task; warn per subject if absent only for some.
+7. Confounds file exists and model-used regressors are among its columns (error). Check 7 runs only when the model lists nuisance regressors.
 8. Model passes existing checks: dataset node name, empty contrasts, schema (reuses `lib/core.py`).
 9. Container image/engine available (warn).
 
 ## Dataset validator (check 0)
-- `prism-validator <bids_dir> --json` as a subprocess (BIDS validator + PRISM checks; `--no-prism` for plain BIDS, chosen by
-  PRISM marker detection with a manual project override). Never `--fix`, never `--plugins`.
+- `prism-validator <bids_dir> --json` as a subprocess (BIDS validator + PRISM checks; `--no-prism` for plain BIDS). Mode is a user choice, default `prism`: GUI select (PRISM / plain BIDS / skip), CLI `--validator {prism,bids,skip}` + alias `--skip-validator`; remembered per project in localStorage. No marker detection. Never `--fix`, never `--plugins`.
 - Validator errors -> `error` (blocks Run); warnings -> `warn`. Dependency in `pyproject.toml`/`uv.lock`; if missing -> `warn`, other checks still run.
 - **Skip option:** CLI `--skip-validator`, GUI checkbox "Skip dataset validator" (remembered per project). Skips only this check
   (e.g. unrelated DWI problems); every other preflight check still blocks. A skipped validator is reported as a `warn` ("validator skipped").
-- Result cached per dataset until files change; shown as its own labelled section in the panel.
-- Open: exact PRISM marker; the first test fixture is a real `--json` run on a small dataset to pin the severity mapping.
+- No result cache in v1 (add if validation proves slow); shown as its own labelled section in the panel.
+- The first test fixture is a real `--json` run on a small dataset to pin the severity mapping.
 
 ## Testing (TDD)
 Failing test first for each check, using small synthetic BIDS/fMRIPrep trees in `tmp_path`
