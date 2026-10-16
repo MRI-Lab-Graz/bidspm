@@ -60,7 +60,7 @@ def _func_files(root, sub, pattern):
 
 
 def _read_tsv(path):
-    with open(path, newline="", encoding="utf-8") as fh:
+    with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         rows = list(reader)
         return list(reader.fieldnames or []), rows
@@ -83,9 +83,48 @@ def _events_problems(sub, name, cols, rows):
     return []
 
 
-def check_subject_task(bids_dir, fmriprep_dir, sub, task, space):
-    out = []
-    if not _func_files(fmriprep_dir, sub, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz"):
+def _model_needs(model_file):
+    """(trial_type conditions, nuisance regressor names, uses Transformations) from the Run-level nodes."""
+    conditions, nuisance, transformed = set(), [], False
+    try:
+        model = json.loads(Path(model_file).read_text()) if model_file else {}
+    except (OSError, ValueError):
+        return conditions, nuisance, transformed  # check_model reports unreadable models
+    for node in model.get("Nodes", []):
+        if node.get("Level") != "Run":
+            continue
+        transformed = transformed or bool(node.get("Transformations"))
+        for x in node.get("Model", {}).get("X", []):
+            if not isinstance(x, str):
+                continue
+            if x.startswith("trial_type."):
+                conditions.add(x.split(".", 1)[1])
+            elif "." not in x:
+                nuisance.append(x)
+    return conditions, nuisance, transformed
+
+
+def _scan_length_warning(sub, preproc, events_rows):
+    import nibabel as nib
+    sidecar = preproc.with_name(preproc.name.replace(".nii.gz", ".json"))
+    try:
+        tr = json.loads(sidecar.read_text())["RepetitionTime"]
+        scan = nib.load(preproc).shape[3] * tr
+        end = max(float(r["onset"]) + float(r["duration"]) for r in events_rows)
+    except (OSError, ValueError, KeyError, IndexError):
+        return []
+    if end > scan + tr:
+        return [_item("scan_length", WARN, f"sub-{sub}: events run to {end:.0f}s but the scan is only {scan:.0f}s long",
+                      "Check that the events file belongs to this run.", sub)]
+    return []
+
+
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs=(set(), [], False)):
+    """Returns (items, trial_type values seen in this subject's events files)."""
+    conditions, nuisance, transformed = needs
+    out, seen = [], set()
+    preproc = _func_files(fmriprep_dir, sub, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz")
+    if not preproc:
         out.append(_item("preproc_missing", ERROR,
                          f"sub-{sub} has no preprocessed BOLD for task-{task} in space {space or '(any)'}",
                          f"Re-run fMRIPrep with --output-spaces {space or '<space>'}, or change the Space setting.", sub))
@@ -93,10 +132,47 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space):
     if not events:
         out.append(_item("events_missing", ERROR, f"sub-{sub} has no events file for task-{task}",
                          "Add sub-*/func/*_task-*_events.tsv to the BIDS dataset.", sub))
+    events_ok = True
     for path in events:
-        cols, rows = _read_tsv(path)
-        out += _events_problems(sub, path.name, cols, rows)
-    return out
+        try:
+            cols, rows = _read_tsv(path)
+        except (OSError, UnicodeDecodeError, csv.Error) as e:
+            out.append(_item("events_columns", ERROR, f"{path.name} cannot be read as UTF-8 text ({e})",
+                             "Save the events file as a tab-separated UTF-8 text file.", sub))
+            events_ok = False
+            continue
+        problems = _events_problems(sub, path.name, cols, rows)
+        out += problems
+        events_ok = events_ok and not problems
+        if conditions and not transformed:
+            if "trial_type" not in cols:
+                out.append(_item("events_trial_type", ERROR,
+                                 f"{path.name} has no trial_type column but the model uses trial_type.* conditions",
+                                 "Add a trial_type column or change the model's regressors.", sub))
+                events_ok = False
+            else:
+                seen |= {r["trial_type"] for r in rows}
+    if len(preproc) == 1 and len(events) == 1 and events_ok:
+        out += _scan_length_warning(sub, preproc[0], rows)
+    if nuisance:
+        files = _func_files(fmriprep_dir, sub, f"*task-{task}_*desc-confounds_timeseries.tsv")
+        if not files:
+            out.append(_item("confounds_missing", ERROR,
+                             f"sub-{sub} has no confounds file for task-{task}",
+                             f"Re-run fMRIPrep; confounds are needed for {', '.join(nuisance)}.", sub))
+        for f in files:
+            try:
+                cols = _read_tsv(f)[0]
+            except (OSError, UnicodeDecodeError, csv.Error) as e:
+                out.append(_item("confound_columns", ERROR, f"{f.name} cannot be read as UTF-8 text ({e})",
+                                 "Re-run fMRIPrep to regenerate the confounds file.", sub))
+                continue
+            missing = [n for n in nuisance if not any(fnmatch.fnmatch(c, n) for c in cols)]
+            if missing:
+                out.append(_item("confound_columns", ERROR,
+                                 f"{f.name} lacks the model's regressors: {', '.join(missing)}",
+                                 "Fix the regressor names in the model, or re-run fMRIPrep so they are produced.", sub))
+    return out, seen
 
 
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
@@ -105,11 +181,31 @@ def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", sub
     if not checks:
         from lib.core import discover_tasks  # lazy: keeps module import light
         tasks = list(tasks) or discover_tasks(Path(bids_dir))
+        if not tasks:
+            checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
+                                "check the BIDS folder or set the task in the project settings"))
         selected, found = check_subjects(bids_dir, fmriprep_dir, subjects)
         checks += found
         present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))
+        needs = _model_needs(model_file)
+        conditions, _, transformed = needs
         for task in tasks:
+            seen_by_sub = {}
             for sub in selected:
                 if sub in present:
-                    checks += check_subject_task(bids_dir, fmriprep_dir, sub, task, space)
+                    items, seen = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs)
+                    checks += items
+                    if _func_files(bids_dir, sub, f"*task-{task}_*events.tsv"):
+                        seen_by_sub[sub] = seen
+            if conditions and not transformed:
+                union = set().union(*seen_by_sub.values()) if seen_by_sub else set()
+                for c in sorted(conditions - union):
+                    checks.append(_item("condition_missing", ERROR,
+                                        f"condition '{c}' is in the model but in none of the task-{task} events files",
+                                        "Fix the condition name in the model, or the trial_type values in the events."))
+                for sub, seen in seen_by_sub.items():
+                    absent = sorted((conditions & union) - seen)
+                    if absent:
+                        checks.append(_item("condition_missing", WARN, f"sub-{sub} has no events for: {', '.join(absent)}",
+                                            "Expected if the subject never produced that condition; bidspm will warn and skip it.", sub))
     return {"verdict": _verdict(checks), "checks": checks}

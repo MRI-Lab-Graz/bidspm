@@ -3,7 +3,7 @@ import shutil
 import pytest
 
 from lib.preflight import run_preflight, _verdict
-from tests.preflight_support import make_trees
+from tests.preflight_support import make_trees, write_model
 
 
 def ids(result, severity):
@@ -107,3 +107,83 @@ def test_tasks_default_to_those_found_in_bids(tmp_path):
     next(fmriprep.rglob("*desc-preproc_bold.nii.gz")).unlink()
     result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, space="MNI", validator="skip")
     assert "preproc_missing" in ids(result, "error")
+
+
+def test_condition_absent_everywhere_blocks(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.a", "trial_type.zzz", 1))
+    result = run(tmp_path, model_file=model)
+    (item,) = _only(result, "condition_missing")
+    assert item["severity"] == "error" and "zzz" in item["message"]
+
+
+def test_condition_absent_for_one_subject_only_warns(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, subjects=("01", "02"))
+    (bids / "sub-02" / "func" / "sub-02_task-x_events.tsv").write_text("onset\tduration\ttrial_type\n1\t1\ta\n")
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip",
+                           model_file=write_model(tmp_path))
+    (item,) = _only(result, "condition_missing")
+    assert item["severity"] == "warn" and item["subject"] == "02" and "b" in item["message"]
+
+
+def test_condition_check_is_skipped_when_the_model_transforms_events(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.zzz", 1), transformations=True)
+    assert "condition_missing" not in ids(run(tmp_path, model_file=model), "error")
+
+
+def test_trial_type_column_required_when_model_uses_conditions(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, events="onset\tduration\n1\t1\n")
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip",
+                           model_file=write_model(tmp_path))
+    assert "events_trial_type" in ids(result, "error")
+
+
+def test_model_nuisance_regressor_must_exist_in_confounds(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.a", "trans_x", "framewise_displacement", 1))
+    result = run(tmp_path, model_file=model)
+    (item,) = _only(result, "confound_columns")
+    assert "framewise_displacement" in item["message"] and "trans_x" not in item["message"]
+
+
+def test_missing_confounds_file_blocks_only_when_model_needs_it(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    next(fmriprep.rglob("*confounds_timeseries.tsv")).unlink()
+    base = dict(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
+    assert "confounds_missing" not in ids(run_preflight(**base, model_file=write_model(tmp_path)), "error")
+    needs = write_model(tmp_path, x=("trial_type.a", "trans_x", 1))
+    assert "confounds_missing" in ids(run_preflight(**base, model_file=needs), "error")
+
+
+def test_events_beyond_the_scan_warn(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, tr=2.0, nvols=10, events="onset\tduration\ttrial_type\n100\t1\ta\n")
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
+    assert "scan_length" in ids(result, "warn")
+
+
+def test_events_file_with_excel_bom_is_read(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, events="\ufeffonset\tduration\ttrial_type\n1\t1\ta\n")
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
+    assert "events_columns" not in ids(result, "error")
+
+
+def test_undecodable_events_file_is_an_error_not_a_crash(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    next(bids.rglob("*_events.tsv")).write_bytes(b"onset\tduration\n1\t1\xe9\xff\n")
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
+    assert "events_columns" in ids(result, "error")
+
+
+def test_undecodable_confounds_file_is_an_error_not_a_crash(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    next(fmriprep.rglob("*confounds_timeseries.tsv")).write_bytes(b"trans_x\n\xe9\xff\n")
+    model = write_model(tmp_path, x=("trial_type.a", "trans_x", 1))
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip",
+                           model_file=model)
+    assert "confound_columns" in ids(result, "error")
+
+
+def test_no_tasks_found_blocks(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    for f in bids.rglob("*_events.tsv"):
+        f.unlink()
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, space="MNI", validator="skip")
+    assert "no_tasks" in ids(result, "error")
