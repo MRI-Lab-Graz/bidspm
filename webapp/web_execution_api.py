@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
+from lib.preflight import run_preflight_from_config
 from lib.project_manager import GLOBAL_CONFIG_DIR
 
 
@@ -181,6 +182,17 @@ def register_execution_routes(
                 result = validate_bids_model(Path(model_file))
                 if not result['valid']:
                     return jsonify({'error': f"Model validation failed: {result.get('error', 'Unknown error')}"}), 400
+
+        if data.get('settings') and any(a in ('smooth', 'stats', 'dataset') for a in actions):
+            try:
+                with open(data['settings'], encoding='utf-8') as stream:
+                    preflight = run_preflight_from_config(
+                        json.load(stream), model=data.get('model') or '', validator=data.get('validator') or 'prism')
+            except (OSError, ValueError) as exc:
+                return jsonify({'error': f'Failed to read settings file: {exc}'}), 400
+            if preflight['verdict'] == 'blocked':
+                return jsonify({'error': 'Preflight check failed: fix the listed problems before running.',
+                                'preflight': preflight}), 400
 
         python_exe = python_exe_path if os.path.exists(python_exe_path) else 'python3'
         command = [python_exe, bidspm_script]
