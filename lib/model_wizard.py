@@ -48,7 +48,7 @@ def second_level_nodes(names):
     return [
         {"Level": "Subject", "Name": "subject_level", "GroupBy": ["subject", "contrast"],
          "Model": {"Type": "glm", "X": list(names) or ["contrast"]}, "Contrasts": contrasts()},
-        {"Level": "Dataset", "Name": "dataset_level", "GroupBy": ["contrast"],
+        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"],
          "Model": {"Type": "glm", "X": [1]}, "Contrasts": contrasts()},
     ]
 

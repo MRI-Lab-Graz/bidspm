@@ -518,3 +518,8 @@ def test_wizard_reproduces_the_141_run_node():
     assert set(mine["Model"]["HRF"]["Variables"]) == set(ref["Model"]["HRF"]["Variables"])
     ref_pmod_conditions = {c["ConditionList"][0] for c in ref["Contrasts"] if ":" in c["ConditionList"][0]}
     assert ref_pmod_conditions <= {c["ConditionList"][0] for c in mine["Contrasts"]}
+
+
+def test_dataset_node_is_named_dataset():
+    # bidspm looks the Dataset node up by exact name; preflight warns otherwise
+    assert second_level_nodes(["a"])[1]["Name"] == "dataset"
