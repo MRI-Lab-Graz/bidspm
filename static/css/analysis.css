@@ -956,35 +956,3 @@
     color: #94adc5;
     font-size: 0.85rem;
 }
-/* --- Analysis stages (static/js/analysis_stages.js) --- */
-.stage-hidden { display: none !important; }
-.stage-btn {
-    border: 1.5px solid #dee2e6;
-    background: #fff;
-    color: #6c757d;
-    border-radius: .375rem;
-    font-size: .8rem;
-    padding: .25rem .6rem;
-    text-align: left;
-    max-width: 16rem;
-}
-.stage-btn.current { border-color: #0d6efd; background: #0d6efd; color: #fff; }
-.stage-btn.done { border-color: #198754; color: #198754; }
-.stage-btn-num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.1rem;
-    height: 1.1rem;
-    border-radius: 50%;
-    background: rgba(108,117,125,.2);
-    font-size: .65rem;
-    font-weight: 700;
-}
-.stage-btn.current .stage-btn-num { background: rgba(255,255,255,.25); }
-.stage-btn.done .stage-btn-num::before { content: "\2713"; }
-.stage-btn.done .stage-btn-num { font-size: 0; }
-.stage-btn.done .stage-btn-num::before { font-size: .65rem; }
-.stage-btn-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stage-btn-summary:empty { display: none !important; }
-#stage-heading:focus { outline: none; }

@@ -11,6 +11,20 @@ EVENTS = ("onset\tduration\ttrial_type\tresponse_validity\trt\n"
           "1\t1\ta\tvalid\t0.5\n5\t1\titem\tvalid\t0.7\n9\t1\titem\tinvalid\t0.4\n13\t1\tb\tvalid\t0.6\n")
 
 
+STEPS = ["task", "recipes", "nuisance", "contrasts", "review"]
+
+
+def wizard_go_to(page, step):
+    """Click the strip button of a step (every earlier step must be complete) and wait until it is current."""
+    page.click(f"[data-wiz-btn={step}]")
+    page.wait_for_selector(f"[data-wiz-btn={step}][aria-current=step]")
+
+
+def add_recipe_card(page, rid):
+    wizard_go_to(page, "recipes")
+    page.click(f"#wiz-gallery .wiz-card[data-recipe={rid}]")
+
+
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
 class TestWizardPage(unittest.TestCase):
     @classmethod
@@ -55,8 +69,7 @@ class TestWizardPage(unittest.TestCase):
 
     def test_adding_a_valid_only_recipe_updates_the_preview(self):
         page = self.open_wizard()
-        page.select_option("#wiz-recipe-add", "valid_only")
-        page.click("#wiz-add-recipe")
+        add_recipe_card(page, "valid_only")
         card = page.locator("#wiz-recipes .wiz-recipe")
         card.locator("[data-param=condition]").select_option("item")
         card.locator("[data-param=column]").select_option("response_validity")
@@ -93,6 +106,7 @@ class TestWizardPage(unittest.TestCase):
 
     def test_save_writes_the_model_and_returns_to_analysis(self):
         page = self.open_wizard()
+        wizard_go_to(page, "review")
         target = self.root / "out" / "saved.json"
         page.fill("#wiz-save-path", str(target))
         page.click("#wiz-save")
@@ -108,8 +122,11 @@ class TestWizardPage(unittest.TestCase):
         page.wait_for_url(f"**/model-wizard/{self.project_id}")
 
     def add_recipe(self, page, rid):
-        page.select_option("#wiz-recipe-add", rid)
-        page.click("#wiz-add-recipe")
+        add_recipe_card(page, rid)
+
+    def open_pairs(self, page):
+        wizard_go_to(page, "contrasts")
+        page.click("#wiz-pairs-details > summary")
 
     def valid_item_then_pmod(self, page):
         self.add_recipe(page, "valid_only")
@@ -137,7 +154,8 @@ class TestWizardPage(unittest.TestCase):
             self.assertIn(expect, page.inner_text("#wiz-error"))
             self.assertEqual(page.locator("#wiz-error b").count(), 0)
             self.assertTrue(page.is_disabled("#wiz-save"))
-            self.assertTrue(page.is_disabled("#wiz-add-recipe"))
+            self.assertEqual(page.get_attribute("#wiz-next", "aria-disabled"), "true")
+            self.assertIn("scan", page.inner_text("#wiz-hint").lower())
             self.assertEqual(errors, [])
 
     def test_recipe_order_can_be_changed_and_pmod_must_be_last(self):
@@ -158,9 +176,10 @@ class TestWizardPage(unittest.TestCase):
     def test_a_late_build_response_does_not_wipe_typing(self):
         import time
         page = self.open_wizard()
+        self.open_pairs(page)
         page.click("#wiz-add-pair")
         page.route("**/api/wizard/build", lambda r: (time.sleep(0.6), r.continue_()))
-        page.uncheck("#wiz-conditions input[value=b]")
+        page.evaluate("document.querySelector('#wiz-conditions input[value=b]').click()")  # step 1 is hidden
         box = page.locator("#wiz-pair-table input")
         box.click()
         box.press_sequentially("a_vs")
@@ -170,6 +189,7 @@ class TestWizardPage(unittest.TestCase):
 
     def test_overwrite_flow_on_409(self):
         page = self.open_wizard()
+        wizard_go_to(page, "review")
         seen = []
 
         def handler(route):
@@ -187,13 +207,16 @@ class TestWizardPage(unittest.TestCase):
 
     def test_custom_nuisance_list(self):
         page = self.open_wizard()
-        page.select_option("#wiz-nuisance", "custom")
+        wizard_go_to(page, "nuisance")
+        page.click("#wiz-nuisance-details > summary")
+        page.check("#wiz-nuisance-details input[value=custom]")
         page.fill("#wiz-nuisance-custom", "trans_x, trans_y")
         page.press("#wiz-nuisance-custom", "Tab")
         page.wait_for_function("document.getElementById('wiz-review').innerText.includes('2 columns')")
 
     def test_pair_table_adds_a_contrast(self):
         page = self.open_wizard()
+        self.open_pairs(page)
         page.click("#wiz-add-pair")
         page.fill("#wiz-pair-table input", "a_vs_b")
         page.locator("#wiz-pair-table select").nth(0).select_option("trial_type.a")
@@ -213,6 +236,7 @@ class TestWizardPage(unittest.TestCase):
         page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
         page.wait_for_selector("#wiz-conditions input")
         self.add_recipe(page, "valid_only")
+        wizard_go_to(page, "task")
         self.assertEqual(page.locator("#wiz-conditions i, #wiz-recipes b").count(), 0)
         self.assertIn("<i>q</i>", page.inner_text("#wiz-conditions"))
         labels = page.locator("#wiz-recipes [data-param=value] option").all_text_contents()
@@ -243,9 +267,10 @@ class TestWizardPage(unittest.TestCase):
     def test_deferred_rerender_runs_after_focus_leaves_pairs(self):
         import time
         page = self.open_wizard()
+        self.open_pairs(page)
         page.click("#wiz-add-pair")
         page.route("**/api/wizard/build", lambda r: (time.sleep(0.6), r.continue_()))
-        page.uncheck("#wiz-conditions input[value=b]")
+        page.evaluate("document.querySelector('#wiz-conditions input[value=b]').click()")  # step 1 is hidden
         box = page.locator("#wiz-pair-table input")
         box.click()
         box.press_sequentially("zz")
@@ -292,6 +317,7 @@ class TestWizardPage(unittest.TestCase):
         page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
         self.assertTrue(bodies and all(b["preflight"] is False for b in bodies))
         self.assertIn("not checked", page.inner_text("#wiz-review"))
+        wizard_go_to(page, "review")
         page.click("#wiz-check")
         page.wait_for_selector("#wiz-review .preflight-verdict")
         self.assertIs(bodies[-1]["preflight"], True)
@@ -301,13 +327,14 @@ class TestWizardPage(unittest.TestCase):
         bodies = self.build_bodies(page)
         page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
         page.wait_for_selector("#wiz-review .wiz-regressor")
-        page.select_option("#wiz-recipe-add", "merge_rename")
-        page.click("#wiz-add-recipe")
+        add_recipe_card(page, "merge_rename")
         page.wait_for_selector("#wiz-recipes .wiz-incomplete-note:not([hidden])")
+        wizard_go_to(page, "task")
         page.uncheck("#wiz-conditions input[value=b]")  # forces another build
         page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
         self.assertTrue(all(b["choices"]["recipes"] == [] for b in bodies))
         self.assertTrue(page.locator("#wiz-error").is_hidden())
+        wizard_go_to(page, "recipes")
         self.assertIn("incomplete", page.inner_text("#wiz-recipes"))
 
     def test_save_refuses_while_a_recipe_is_incomplete(self):
@@ -316,12 +343,164 @@ class TestWizardPage(unittest.TestCase):
         page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
         page.wait_for_selector("#wiz-review .wiz-regressor")
         target = self.root / "never_written.json"
+        wizard_go_to(page, "review")
         page.fill("#wiz-save-path", str(target))
-        page.select_option("#wiz-recipe-add", "merge_rename")
-        page.click("#wiz-add-recipe")
+        add_recipe_card(page, "merge_rename")
         page.wait_for_selector("#wiz-recipes .wiz-incomplete-note:not([hidden])")
-        page.click("#wiz-save")
+        page.evaluate("save()")  # the stepper no longer reaches Review with an incomplete recipe; save() still refuses
         page.wait_for_function("document.getElementById('wiz-error').innerText.includes('incomplete recipe')")
         page.wait_for_timeout(500)
         self.assertFalse(any(b.get("save_path") for b in bodies))
         self.assertFalse(target.exists())
+
+    # ---- stepper ---------------------------------------------------------------------------------------
+    def visible_steps(self, page):
+        return page.eval_on_selector_all("[data-wiz-step]", "els => els.filter(e => e.offsetParent !== null).map(e => e.dataset.wizStep)")
+
+    def test_only_one_step_is_visible_at_a_time(self):
+        page = self.open_wizard()
+        for i, step in enumerate(STEPS):
+            self.assertEqual(self.visible_steps(page), [step])
+            self.assertTrue(page.locator("#wiz-rail").is_visible())
+            if i < len(STEPS) - 1:
+                page.click("#wiz-next")
+                page.wait_for_selector(f"[data-wiz-btn={STEPS[i + 1]}][aria-current=step]")
+        self.assertTrue(page.locator("#wiz-next").is_hidden())
+
+    def test_strip_marks_done_current_upcoming_with_summaries(self):
+        page = self.open_wizard()
+        cls = lambda s: page.get_attribute(f"[data-wiz-btn={s}]", "class").split()
+        self.assertIn("current", cls("task"))
+        self.assertIn("upcoming", cls("recipes"))
+        self.assertEqual(page.inner_text("[data-wiz-btn=task] .stage-btn-summary").strip(), "")
+        self.valid_item_then_pmod(page)
+        wizard_go_to(page, "nuisance")
+        page.check("#wiz-nuisance input[value=motion6]")
+        wizard_go_to(page, "contrasts")
+        self.assertIn("done", cls("task"))
+        self.assertIn("done", cls("recipes"))
+        self.assertIn("current", cls("contrasts"))
+        self.assertIn("upcoming", cls("review"))
+        self.assertIn("x", page.inner_text("[data-wiz-btn=task] .stage-btn-summary"))
+        self.assertIn("2 recipes", page.inner_text("[data-wiz-btn=recipes] .stage-btn-summary"))
+        page.wait_for_function("document.querySelector('[data-wiz-btn=nuisance] .stage-btn-summary').innerText.includes('motion6')")
+        self.assertIn("6", page.inner_text("[data-wiz-btn=nuisance] .stage-btn-summary"))
+
+    def test_next_is_blocked_with_a_visible_reason(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "recipes")
+        self.assertEqual(page.get_attribute("#wiz-next", "aria-disabled"), "false")
+        add_recipe_card(page, "merge_rename")
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'true'")
+        self.assertIn("incomplete", page.inner_text("#wiz-hint"))
+        page.click("#wiz-next", force=True)  # aria-disabled keeps it focusable and clickable
+        self.assertEqual(self.visible_steps(page), ["recipes"])
+        page.click("[data-wiz-btn=review]")  # a forward jump is refused with a reason too
+        self.assertEqual(self.visible_steps(page), ["recipes"])
+        self.assertIn("incomplete", page.inner_text("#wiz-hint"))
+        page.locator("#wiz-recipes .wiz-recipe").get_by_label("Remove recipe").click()
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'false'")
+        self.assertEqual(page.inner_text("#wiz-hint").strip(), "")
+
+    def test_next_is_blocked_when_no_regressor_is_left(self):
+        page = self.open_wizard()
+        for c in ("a", "item", "b"):
+            page.uncheck(f"#wiz-conditions input[value={c}]")
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'true'")
+        self.assertIn("regressor", page.inner_text("#wiz-hint"))
+        page.click("#wiz-next", force=True)
+        self.assertEqual(self.visible_steps(page), ["task"])
+        page.check("#wiz-conditions input[value=a]")
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'false'")
+
+    def test_scan_failure_keeps_next_blocked(self):
+        page = self.browser.new_page()
+        page.route("**/api/wizard/scan", lambda r: r.fulfill(status=500, body="boom", content_type="text/plain"))
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_function("document.getElementById('wiz-error').innerText !== ''")
+        self.assertEqual(page.get_attribute("#wiz-next", "aria-disabled"), "true")
+        self.assertIn("scan", page.inner_text("#wiz-hint").lower())
+        page.click("#wiz-next", force=True)
+        self.assertEqual(self.visible_steps(page), ["task"])
+
+    def test_gallery_adds_a_recipe_and_opens_its_form(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "recipes")
+        catalog = page.evaluate("wiz.scan.catalog")
+        cards = page.locator("#wiz-gallery .wiz-card")
+        self.assertEqual(cards.count(), len(catalog))
+        for c in catalog:
+            text = page.inner_text(f"#wiz-gallery .wiz-card[data-recipe={c['id']}]")
+            self.assertIn(c["title"], text)
+            self.assertIn(c["description"], text)
+        self.assertIn("No special handling needed", page.inner_text("#wiz-recipes-empty"))
+        page.click("#wiz-gallery .wiz-card[data-recipe=valid_only]")
+        self.assertEqual(page.locator("#wiz-recipes .wiz-recipe").count(), 1)
+        self.assertTrue(page.locator("#wiz-recipes-empty").is_hidden())
+        page.wait_for_function("document.activeElement && document.activeElement.closest('#wiz-recipes')")
+        self.assertEqual(page.locator("#wiz-add-recipe, #wiz-recipe-add").count(), 0)
+
+    def test_rail_is_visible_on_every_step_and_updates(self):
+        page = self.open_wizard()
+        page.uncheck("#wiz-conditions input[value=b]")
+        page.wait_for_function("!document.getElementById('wiz-rail').innerText.includes('trial_type.b')")
+        for step in STEPS:
+            wizard_go_to(page, step)
+            self.assertTrue(page.locator("#wiz-rail").is_visible())
+            self.assertIn("trial_type.a", page.inner_text("#wiz-rail"))
+        self.assertTrue(page.locator("#wiz-rail #wiz-review").count() == 1)
+
+    def test_advanced_disclosures_are_collapsed_by_default(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "nuisance")
+        self.assertFalse(page.evaluate("document.getElementById('wiz-nuisance-details').open"))
+        self.assertTrue(page.locator("#wiz-nuisance-custom").is_hidden())
+        wizard_go_to(page, "contrasts")
+        self.assertFalse(page.evaluate("document.getElementById('wiz-pairs-details').open"))
+        self.assertTrue(page.locator("#wiz-pair-table").is_hidden())
+        self.assertTrue(page.get_by_role("link", name="contrast builder").is_visible())
+        self.assertTrue(page.is_checked("#wiz-auto-contrasts"))
+
+    def test_back_and_strip_jump(self):
+        page = self.open_wizard()
+        page.click("#wiz-next")
+        page.click("#wiz-next")
+        page.wait_for_selector("[data-wiz-btn=nuisance][aria-current=step]")
+        page.click("#wiz-back")
+        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")
+        wizard_go_to(page, "contrasts")
+        wizard_go_to(page, "task")  # a visited step is one click away
+        self.assertEqual(self.visible_steps(page), ["task"])
+        self.assertTrue(page.locator("#wiz-back").is_hidden())
+
+    def test_keyboard_navigation_moves_aria_current_and_focus(self):
+        page = self.open_wizard()
+        page.focus("#wiz-next")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")
+        self.assertEqual(page.locator("[aria-current=step]").count(), 1)
+        self.assertEqual(page.evaluate("document.activeElement.id"), "wiz-heading")
+        self.assertIn("Recipes", page.inner_text("#wiz-heading"))
+        self.assertEqual(page.get_attribute("#wiz-next", "type"), "button")
+
+    def test_server_strings_in_gallery_forms_and_rail_are_text(self):
+        page = self.browser.new_page()
+
+        def scan(route):
+            data = route.fetch().json()
+            data["columns"]["trial_type"].append("<i>q</i>")
+            data["catalog"][0]["description"] = "d <b>x</b>"
+            route.fulfill(status=200, body=json.dumps(data), content_type="application/json")
+
+        def build(route):
+            data = route.fetch().json()
+            data["preview"]["regressors"].append("trial_type.<i>q</i>")
+            route.fulfill(status=200, body=json.dumps(data), content_type="application/json")
+        page.route("**/api/wizard/scan", scan)
+        page.route("**/api/wizard/build", build)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_function("document.getElementById('wiz-rail').innerText.includes('<i>q</i>')")
+        wizard_go_to(page, "recipes")
+        page.locator("#wiz-gallery .wiz-card").first.click()
+        self.assertIn("<b>x</b>", page.inner_text("#wiz-gallery"))
+        self.assertEqual(page.locator("#wiz-gallery b, #wiz-recipes b, #wiz-rail i, #wiz-rail b, [data-wiz-btn] i").count(), 0)

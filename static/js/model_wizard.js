@@ -1,7 +1,7 @@
 // model_wizard.js -- renders the wizard form and collects choices. All logic lives in lib/model_wizard.py
 // (/api/wizard/scan, /api/wizard/build). Server strings go in via textContent/DOM nodes, never innerHTML.
 const WIZ = window.BIDSPM_WIZARD_CONTEXT;
-const wiz = {scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
+const wiz = {step: 'task', scanError: false, scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...kids) {
@@ -32,7 +32,7 @@ function excluded() {
 }
 
 function nuisanceChoice() {
-    const v = $('wiz-nuisance').value;
+    const v = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
     if (v !== 'custom') return v;
     return $('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -73,6 +73,7 @@ function setEnabled(on) {
 }
 
 function scheduleBuild() {
+    renderStage();  // gating reacts at once; the preview follows after the debounce
     clearTimeout(wiz.timer);
     wiz.timer = setTimeout(() => build(), 300);
 }
@@ -104,6 +105,7 @@ async function build(withPreflight = false) {
         wiz.preview = data.preview;
         renderReview(data.preview, data.preflight);
         refreshOptions();
+        renderStage();
     } catch (e) {
         if (seq === wiz.seq) showError(`Preview failed: ${e.message}`);
     }
@@ -250,7 +252,22 @@ function renderRecipes() {
             incomplete, ...note, ...def.params.map((spec) => paramField(recipe, spec)));
     }).filter(Boolean);
     $('wiz-recipes').replaceChildren(...nodes);
+    $('wiz-recipes-empty').hidden = wiz.recipes.length > 0;
     markIncomplete();
+}
+
+function renderGallery() {
+    $('wiz-gallery').replaceChildren(...wiz.scan.catalog.map((c) => {
+        const card = el('button', {type: 'button', className: 'btn btn-outline-secondary btn-sm wiz-card', dataset: {recipe: c.id}},
+            el('strong', {textContent: c.title}), el('small', {className: 'text-muted', textContent: c.description || ''}));
+        card.addEventListener('click', () => {
+            wiz.recipes.push({id: c.id, uid: ++wiz.uid, params: {}});
+            renderRecipes();
+            scheduleBuild();
+            $('wiz-recipes').lastElementChild?.querySelector('[data-param]')?.focus();  // opens the form
+        });
+        return el('div', {className: 'col-md-6'}, card);
+    }));
 }
 
 // ---- contrast pairs -----------------------------------------------------------------------------
@@ -295,14 +312,17 @@ async function loadScan(task) {
     } catch (e) {
         if (seq !== wiz.scanSeq) return;
         wiz.scan = null;
+        wiz.scanError = true;
         wiz.seq++;  // an in-flight build must not paint a stale preview
         showError(`Scan failed: ${e.message}`);
         setEnabled(false);
         $('wiz-task').disabled = false;  // allow retrying another task
+        renderStage();
         return;
     }
     showError('');
     setEnabled(true);
+    wiz.scanError = false;
     wiz.scan = data;
     wiz.recipes = [];
     wiz.pairs = [];
@@ -317,13 +337,17 @@ async function loadScan(task) {
     }));
     if (!wiz.nameEdited) $('wiz-name').value = `${data.task}_model`;
     if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath();
-    $('wiz-recipe-add').replaceChildren(...data.catalog.map((c) => option(c.id, c.title)));
-    $('wiz-recipe-add').dispatchEvent(new Event('change'));
-    const current = $('wiz-nuisance').value;
-    $('wiz-nuisance').replaceChildren(...Object.keys(data.nuisance_presets).map((n) => option(n)), option('custom', 'custom...'));
-    $('wiz-nuisance').value = current || 'none';
+    const current = nuisanceChoice();
+    $('wiz-nuisance').replaceChildren(...Object.keys(data.nuisance_presets).map((n) => {
+        const input = el('input', {type: 'radio', name: 'wiz-nuisance', value: n, id: `wiz-nuisance-radio-${n}`, className: 'form-check-input',
+            checked: n === (typeof current === 'string' ? current : 'none')});
+        return el('div', {className: 'form-check small'}, input, el('label', {className: 'form-check-label', htmlFor: input.id, textContent: n}));
+    }));
+    if (current === 'custom') $('wiz-nuisance-radio-custom').checked = true;
+    renderGallery();
     renderRecipes();
     renderPairs();
+    renderStage();
     build();
 }
 
@@ -349,18 +373,9 @@ async function save(overwrite = false) {
 }
 
 function init() {
-    const nuisance = $('wiz-nuisance');
     $('wiz-task').addEventListener('change', () => loadScan($('wiz-task').value));
-    $('wiz-add-recipe').addEventListener('click', () => {
-        if (!$('wiz-recipe-add').value) return;
-        wiz.recipes.push({id: $('wiz-recipe-add').value, uid: ++wiz.uid, params: {}});
-        renderRecipes();
-        scheduleBuild();
-    });
-    $('wiz-recipe-add').addEventListener('change', () => {
-        $('wiz-recipe-help').textContent = wiz.scan?.catalog.find((c) => c.id === $('wiz-recipe-add').value)?.description || '';
-    });
-    nuisance.addEventListener('change', () => { $('wiz-nuisance-custom').hidden = nuisance.value !== 'custom'; scheduleBuild(); });
+    $('wiz-form').addEventListener('change', (e) => { if (e.target.name === 'wiz-nuisance') scheduleBuild(); });
+    $('wiz-nuisance-custom').addEventListener('input', () => { $('wiz-nuisance-radio-custom').checked = true; });  // typing means "use it"
     $('wiz-nuisance-custom').addEventListener('change', scheduleBuild);
     $('wiz-auto-contrasts').addEventListener('change', scheduleBuild);
     $('wiz-add-pair').addEventListener('click', () => { wiz.pairs.push({name: '', positive: [], negative: []}); renderPairs(); });
@@ -377,6 +392,7 @@ function init() {
     for (const id of ['wiz-recipes', 'wiz-pair-table']) {
         $(id).addEventListener('focusout', () => setTimeout(refreshOptions, 0));
     }
+    initStages();
     loadScan('');
 }
 
