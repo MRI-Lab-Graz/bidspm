@@ -172,6 +172,11 @@ def parse_arguments():
                        help='List available subjects and exit')
     parser.add_argument('--list-tasks', action='store_true',
                        help='List available tasks and exit')
+    parser.add_argument('--preflight', action='store_true',
+                        help='Check that BIDS, fMRIPrep and the model can run; print a JSON report, exit 1 if blocked')
+    parser.add_argument('--validator', choices=['prism', 'bids', 'skip'], default='prism',
+                        help='Dataset validator for --preflight: PRISM+BIDS (default), plain BIDS, or skip')
+    parser.add_argument('--skip-validator', action='store_true', help='Same as --validator skip')
     parser.add_argument('--estimate-time', action='store_true',
                        help='Estimate processing time and exit')
     parser.add_argument('--check-environment', action='store_true',
@@ -239,6 +244,18 @@ def handle_estimate_time(config_file: str, actions: list):
     print(f"\n  Note: {estimate['note']}\n")
     
     sys.exit(0)
+
+
+def handle_preflight(config_file, args):
+    """Print the preflight report as JSON; exit 1 when a check blocks the run."""
+    import json
+    from lib.preflight import run_preflight_from_config
+    with open(config_file, encoding='utf-8') as fh:
+        cfg = json.load(fh)
+    result = run_preflight_from_config(cfg, model=args.model or '',
+                                       validator='skip' if args.skip_validator else args.validator)
+    print(json.dumps(result, indent=2))
+    sys.exit(1 if result['verdict'] == 'blocked' else 0)
 
 
 def handle_check_environment():
@@ -381,6 +398,9 @@ def main():
     
     if args.check_environment:
         handle_check_environment()
+
+    if args.preflight:
+        handle_preflight(config_file, args)
     
     if args.estimate_time:
         if not args.action:

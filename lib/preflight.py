@@ -275,3 +275,11 @@ def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", sub
                         checks.append(_item("condition_missing", WARN, f"sub-{sub} has no events for: {', '.join(absent)}",
                                             "Expected if the subject never produced that condition; bidspm will warn and skip it.", sub))
     return {"verdict": _verdict(checks), "checks": checks}
+
+
+def run_preflight_from_config(cfg, model="", validator="prism"):
+    return run_preflight(
+        bids_dir=cfg.get("BIDS_DIR", ""), fmriprep_dir=cfg.get("FMRIPREP_DIR", ""),
+        model_file=model or cfg.get("MODELS_FILE", ""), tasks=cfg.get("TASKS") or [],
+        space=cfg.get("SPACE", ""), subjects=cfg.get("SUBJECTS") or [],
+        validator=validator, container_type=cfg.get("container_type", ""))
