@@ -99,12 +99,14 @@ async function startExecution(payload) {
     execStatus.className = 'badge bg-danger';
     resetRunIssues();
 
+    payload.validator = validatorMode();
     const res = await fetch('/run', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
     });
     const result = await res.json();
+    if (result.preflight) renderPreflight(result.preflight);
     if (result.error) { terminal.innerText += 'ERROR: ' + result.error; resetStatus(); return; }
 
     if (result.log_file) {
