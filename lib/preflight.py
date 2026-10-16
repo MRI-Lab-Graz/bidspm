@@ -3,9 +3,11 @@
 Pure functions, no Flask. Every check returns a list of items
 {"id", "severity": "error"|"warn", "subject", "message", "fix"}; run_preflight() returns {"verdict", "checks"}.
 """
+import concurrent.futures
 import csv
 import fnmatch
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -55,8 +57,19 @@ def check_subjects(bids_dir, fmriprep_dir, subjects):
     return selected, out
 
 
-def _func_files(root, sub, pattern):
-    return sorted(p for p in (Path(root) / f"sub-{sub}").rglob(pattern) if p.parent.name == "func")
+def _func_listing(root, sub):
+    """Every file under sub-<sub> whose parent folder is named func: one directory walk."""
+    return [Path(d) / f for d, _, files in os.walk(Path(root) / f"sub-{sub}") if Path(d).name == "func" for f in files]
+
+
+def _match(listing, pattern):
+    return sorted(p for p in listing if fnmatch.fnmatchcase(p.name, pattern))
+
+
+def _read_header(path):
+    """Column names only: confounds files are huge and only their header is checked."""
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        return next(csv.reader(fh, delimiter="\t"), [])
 
 
 def _read_tsv(path):
@@ -130,23 +143,26 @@ def _scan_length_warning(sub, preproc, events_rows):
     return []
 
 
-def _events_files(bids_dir, sub, task):
+def _events_files(bids_dir, bids_listing, task):
     """The subject's events files, else the dataset-level task-<task>_events.tsv (BIDS inheritance)."""
-    return _func_files(bids_dir, sub, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
+    return _match(bids_listing, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
 
 
-def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True):
-    """Returns (items, trial_type values seen in this subject's events files)."""
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True, listings=None):
+    """Returns (items, trial_type values seen in this subject's events files, events files).
+
+    listings: optional (bids, fmriprep) _func_listing results, so callers walk each subject tree once."""
+    bids_listing, fmriprep_listing = listings or (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
     conditions, nuisance, transformed, produced = needs
     out, seen, event_cols = [], set(), set()
-    preproc = _func_files(fmriprep_dir, sub, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz")
+    preproc = _match(fmriprep_listing, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz")
     if not preproc:
         out.append(_item("preproc_missing", ERROR,
                          f"sub-{sub} has no preprocessed BOLD for task-{task} in space {space or '(any)'}",
                          f"Re-run fMRIPrep with --output-spaces {space or '<space>'}, or change the Space setting.", sub))
     if not full:
-        return out, seen
-    events = _events_files(bids_dir, sub, task)
+        return out, seen, []
+    events = _events_files(bids_dir, bids_listing, task)
     if not events:
         out.append(_item("events_missing", ERROR, f"sub-{sub} has no events file for task-{task}",
                          "Add sub-*/func/*_task-*_events.tsv to the BIDS dataset.", sub))
@@ -175,14 +191,14 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
         out += _scan_length_warning(sub, preproc[0], rows)
     nuisance = [n for n in nuisance if n not in event_cols and n not in produced]
     if nuisance:
-        files = _func_files(fmriprep_dir, sub, f"*task-{task}_*desc-confounds_timeseries.tsv")
+        files = _match(fmriprep_listing, f"*task-{task}_*desc-confounds_timeseries.tsv")
         if not files:
             out.append(_item("confounds_missing", ERROR,
                              f"sub-{sub} has no confounds file for task-{task}",
                              f"Re-run fMRIPrep; confounds are needed for {', '.join(nuisance)}.", sub))
         for f in files:
             try:
-                cols = _read_tsv(f)[0]
+                cols = _read_header(f)
             except (OSError, UnicodeDecodeError, csv.Error) as e:
                 out.append(_item("confound_columns", ERROR, f"{f.name} cannot be read as UTF-8 text ({e})",
                                  "Re-run fMRIPrep to regenerate the confounds file.", sub))
@@ -192,7 +208,7 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
                 out.append(_item("confound_columns", WARN if transformed else ERROR,
                                  f"{f.name} lacks the model's regressors: {', '.join(missing)}",
                                  "Fix the regressor names in the model, or re-run fMRIPrep so they are produced.", sub))
-    return out, seen
+    return out, seen, events
 
 
 def check_model(model_file):
@@ -280,45 +296,65 @@ def check_validator(bids_dir, mode="auto", run=None):
     return out
 
 
+def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full):
+    checks = []
+    from lib.core import discover_tasks  # lazy: keeps module import light
+    tasks = list(tasks) or discover_tasks(Path(bids_dir))
+    if not tasks:
+        checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
+                            "check the BIDS folder or set the task in the project settings"))
+    if full and not skip_model_validation:
+        checks += check_model(model_file)
+    checks += check_container(container_type)
+    selected, found = check_subjects(bids_dir, fmriprep_dir, subjects)
+    checks += found
+    present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))
+    needs = _model_needs(model_file)
+    conditions, _, transformed, _ = needs
+    listings = {}  # one directory walk per subject and root, shared by all tasks
+    for task in tasks:
+        seen_by_sub = {}
+        for sub in selected:
+            if sub in present:
+                if sub not in listings:
+                    listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
+                items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub])
+                checks += items
+                if full and events:
+                    seen_by_sub[sub] = seen
+        if full and conditions and not transformed:
+            union = set().union(*seen_by_sub.values()) if seen_by_sub else set()
+            for c in sorted(conditions - union):
+                checks.append(_item("condition_missing", ERROR,
+                                    f"condition '{c}' is in the model but in none of the task-{task} events files",
+                                    "Fix the condition name in the model, or the trial_type values in the events."))
+            for sub, seen in seen_by_sub.items():
+                absent = sorted((conditions & union) - seen)
+                if absent:
+                    checks.append(_item("condition_missing", WARN, f"sub-{sub} has no events for: {', '.join(absent)}",
+                                        "Expected if the subject never produced that condition; bidspm will warn and skip it.", sub))
+    return checks
+
+
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="auto", container_type="", skip_model_validation=False, actions=None):
     """actions=None checks everything; without 'stats'/'dataset' only folders, subjects, preproc and validator are checked."""
     full = not actions or any(str(a).lower() in ("stats", "dataset") for a in actions)
     checks = check_dirs(bids_dir, fmriprep_dir)
     if not checks:
-        checks += check_validator(bids_dir, validator)
-        from lib.core import discover_tasks  # lazy: keeps module import light
-        tasks = list(tasks) or discover_tasks(Path(bids_dir))
-        if not tasks:
-            checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
-                                "check the BIDS folder or set the task in the project settings"))
-        if full and not skip_model_validation:
-            checks += check_model(model_file)
-        checks += check_container(container_type)
-        selected, found = check_subjects(bids_dir, fmriprep_dir, subjects)
-        checks += found
-        present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))
-        needs = _model_needs(model_file)
-        conditions, _, transformed, _ = needs
-        for task in tasks:
-            seen_by_sub = {}
-            for sub in selected:
-                if sub in present:
-                    items, seen = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full)
-                    checks += items
-                    if full and _events_files(bids_dir, sub, task):
-                        seen_by_sub[sub] = seen
-            if full and conditions and not transformed:
-                union = set().union(*seen_by_sub.values()) if seen_by_sub else set()
-                for c in sorted(conditions - union):
-                    checks.append(_item("condition_missing", ERROR,
-                                        f"condition '{c}' is in the model but in none of the task-{task} events files",
-                                        "Fix the condition name in the model, or the trial_type values in the events."))
-                for sub, seen in seen_by_sub.items():
-                    absent = sorted((conditions & union) - seen)
-                    if absent:
-                        checks.append(_item("condition_missing", WARN, f"sub-{sub} has no events for: {', '.join(absent)}",
-                                            "Expected if the subject never produced that condition; bidspm will warn and skip it.", sub))
+        if validator == "skip":  # nothing slow to overlap: no thread
+            pool, pending = None, None
+            front = check_validator(bids_dir, validator)
+        else:  # blocking subprocess: overlap it with the per-subject checks
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            pending = pool.submit(check_validator, bids_dir, validator)
+        try:
+            checks += _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects,
+                                      container_type, skip_model_validation, full)
+        finally:
+            if pool:
+                pool.shutdown(wait=True)
+        checks[:0] = pending.result() if pending else front  # validator items stay first
     return {"verdict": _verdict(checks), "checks": checks}
 
 
