@@ -277,3 +277,35 @@ class TestWizardPage(unittest.TestCase):
         page.select_option("#wiz-task", "x")
         page.wait_for_function("document.getElementById('wiz-error').innerText === ''")
         self.assertTrue(page.is_enabled("#wiz-save"))
+
+    def build_bodies(self, page):
+        bodies = []
+        page.on("request", lambda r: bodies.append(json.loads(r.post_data)) if r.url.endswith("/api/wizard/build") else None)
+        return bodies
+
+    def test_preview_builds_do_not_request_preflight_but_the_button_does(self):
+        page = self.browser.new_page()
+        bodies = self.build_bodies(page)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        page.uncheck("#wiz-conditions input[value=b]")
+        page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
+        self.assertTrue(bodies and all(b["preflight"] is False for b in bodies))
+        self.assertIn("not checked", page.inner_text("#wiz-review"))
+        page.click("#wiz-check")
+        page.wait_for_selector("#wiz-review .preflight-verdict")
+        self.assertIs(bodies[-1]["preflight"], True)
+
+    def test_incomplete_recipe_is_not_sent_and_is_marked(self):
+        page = self.browser.new_page()
+        bodies = self.build_bodies(page)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        page.select_option("#wiz-recipe-add", "merge_rename")
+        page.click("#wiz-add-recipe")
+        page.wait_for_selector("#wiz-recipes .wiz-incomplete-note:not([hidden])")
+        page.uncheck("#wiz-conditions input[value=b]")  # forces another build
+        page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
+        self.assertTrue(all(b["choices"]["recipes"] == [] for b in bodies))
+        self.assertTrue(page.locator("#wiz-error").is_hidden())
+        self.assertIn("incomplete", page.inner_text("#wiz-recipes"))
