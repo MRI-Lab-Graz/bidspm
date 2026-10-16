@@ -199,6 +199,8 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.click("#btn-preflight")
         page.click("#preflight-panel .rp-retry")
         page.wait_for_function("document.getElementById('preflight-panel').innerText.includes('job not found')")
+        page.evaluate("1")  # a round trip: a stray cancel request would have been issued by now
+        self.assertFalse(any("/cancel/" in u for u in self.requests), self.requests)
         self.assertEqual(page.locator("#preflight-panel .rp-retry").count(), 0)
 
     def test_terminal_error_event_shows_its_message(self):
@@ -409,6 +411,43 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.evaluate("() => window.t.remove()")
         page.evaluate(self.SEND, [0, {"phase": "folders", "state": "start", "seq": 0}])
         self.assertTrue(page.evaluate("window.sources[0].closed"))
+        self.assertTrue(page.evaluate("window.cancels[0]").endswith("/cancel/j1"))  # frees the server slot
+
+    def test_a_target_attached_after_run_is_not_treated_as_detached(self):
+        page = self.fake_page()
+        page.evaluate("""() => { window.t = document.createElement('div');
+            ReadinessPanel.run({target: window.t, body: {}}); window.starts[0](); }""")
+        page.wait_for_function("window.sources.length === 1")
+        page.evaluate(self.SEND, [0, {"phase": "folders", "state": "start", "seq": 0}])  # not attached yet
+        page.evaluate("document.body.append(window.t)")
+        page.evaluate(self.SEND, [0, {"phase": "folders", "state": "done", "seq": 1}])
+        self.assertFalse(page.evaluate("window.sources[0].closed"))
+        self.assertEqual(page.evaluate("window.cancels.length"), 0)
+
+    ANNOUNCED = """() => { const out = [];
+        const walk = (n) => { if (n.nodeType === 3) out.push(n.textContent);
+            else if (n.getAttribute && n.getAttribute('aria-live') !== 'off') n.childNodes.forEach(walk); };
+        walk(document.getElementById('preflight-panel')); return out.join('|'); }"""
+
+    def test_progress_events_are_not_announced_only_the_verdict(self):
+        page = self.fake_page()
+        page.click("#btn-preflight")
+        page.evaluate("window.starts[0]()")
+        page.wait_for_function("window.sources.length === 1")
+        before = page.evaluate(self.ANNOUNCED)
+        for i, e in enumerate(HEAD + [subject_step(1, [item("bad")]), subject_step(2)]):
+            page.evaluate(self.SEND, [0, {**e, "seq": i}])
+        self.assertIn("2 / 3 subject checks", self.panel(page))
+        self.assertEqual(page.evaluate(self.ANNOUNCED), before)
+        page.evaluate(self.SEND, [0, {**done([item("bad")], "blocked"), "seq": 99}])
+        self.assertIn("blocked", page.evaluate(self.ANNOUNCED))
+
+    def test_failure_and_lost_connection_banners_are_alerts(self):
+        page = self.open_page([sse(HEAD), sse([ev("error", "done", message="RuntimeError: boom")], first_seq=7)])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost[role=alert]")
+        page.click("#preflight-panel .rp-retry")
+        page.wait_for_selector("#preflight-panel .preflight-verdict[role=alert]")
 
     def test_cancel_before_start_returns_cancels_the_late_job(self):
         page = self.fake_page()

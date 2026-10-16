@@ -16,6 +16,7 @@ window.ReadinessPanel = (function () {
     function reportNodes(report) {
         const tone = {blocked: 'danger', warnings: 'warning', ready: 'success'}[report.verdict] || 'secondary';
         const verdict = el('div', `alert alert-${tone} py-1 mb-1 preflight-verdict`, 'Readiness: ');
+        if (report.failed) verdict.setAttribute('role', 'alert');
         verdict.append(el('strong', '', report.verdict || 'unknown'));
         const list = el('ul', 'list-unstyled mb-0');
         for (const c of report.checks || []) list.append(itemNode(c));
@@ -36,7 +37,7 @@ window.ReadinessPanel = (function () {
     function failure(message, fix) {
         const check = {severity: 'error', subject: null, message: `Readiness check failed: ${message}`};
         if (fix) check.fix = fix;
-        return {verdict: 'blocked', checks: [check]};
+        return {verdict: 'blocked', failed: true, checks: [check]};
     }
     const TRY_AGAIN = 'Check that the server is running and try again.';
 
@@ -51,7 +52,7 @@ window.ReadinessPanel = (function () {
         if (current) current.cancel();
         const mine = ++runSeq;
         let stopped = false, jobId = null, source = null, lastSeq = -1, finished = false, subjectsTotal = 0;
-        let errors = 0, warnings = 0, shown = 0;
+        let errors = 0, warnings = 0, shown = 0, attached = target.isConnected;
         const collected = [];
         const live = () => mine === runSeq && !stopped;
 
@@ -60,7 +61,6 @@ window.ReadinessPanel = (function () {
         target.setAttribute('aria-live', 'polite');
         const phaseEls = new Map();
         const phaseList = el('ul', 'list-unstyled mb-1 small rp-phases');
-        phaseList.setAttribute('aria-live', 'off');
         for (const [key, label] of PHASES) {
             const li = el('li', 'rp-phase');
             li.dataset.phase = key;
@@ -86,13 +86,16 @@ window.ReadinessPanel = (function () {
         const counts = el('div', 'small fw-semibold rp-counts');
         const items = el('ul', 'list-unstyled mb-1 rp-items');
         items.style.cssText = 'max-height: 12rem; overflow-y: auto;';
-        items.setAttribute('aria-live', 'off');
         const more = el('li', 'small text-muted rp-more');
         const cancelBtn = el('button', 'btn btn-sm btn-outline-secondary rp-cancel', 'Cancel');
         cancelBtn.type = 'button';
         const notice = el('div', 'rp-notice');
         const root = el('div', 'rp-root');
-        root.append(status, phaseList, bar, count, counts, items, notice, cancelBtn);
+        // Progress details change on every event: keep them out of the live region so only the verdict/notices are announced.
+        const progress = el('div', 'rp-progress');
+        progress.setAttribute('aria-live', 'off');
+        progress.append(phaseList, bar, count, counts, items);
+        root.append(status, progress, notice, cancelBtn);
         target.replaceChildren(root);
 
         function setPhase(key, state) {
@@ -132,9 +135,9 @@ window.ReadinessPanel = (function () {
             source = null;
         }
 
-        function showFailure(message, fix) {
+        function showFailure(message, fix, freeSlot = true) {
             end();
-            if (jobId) post(cancelUrl(jobId)).catch(() => {});  // free the server slot of a job that errored
+            if (jobId && freeSlot) post(cancelUrl(jobId)).catch(() => {});  // free the server slot of a job that errored
             renderReport(target, failure(message, fix));
         }
 
@@ -145,6 +148,7 @@ window.ReadinessPanel = (function () {
             retry.type = 'button';
             retry.addEventListener('click', () => { if (live()) connect(); });
             const lost = el('div', 'alert alert-warning py-1 mb-1 rp-lost', 'Lost connection to the server.');
+            lost.setAttribute('role', 'alert');
             lost.append(retry);
             notice.replaceChildren(lost);
         }
@@ -157,7 +161,7 @@ window.ReadinessPanel = (function () {
             if (ev.phase === 'error') {
                 // A stream-lifetime timeout has state "done" but no seq: the job may still run, so offer Retry.
                 if (ev.state === 'done' && typeof ev.seq !== 'number') return showLost();
-                return showFailure(ev.message || 'unknown error');
+                return showFailure(ev.message || 'unknown error', '', ev.message !== 'job not found');
             }
             if (ev.phase === 'done') return finish(ev);
             if (!phaseEls.has(ev.phase)) return;
@@ -180,7 +184,7 @@ window.ReadinessPanel = (function () {
             const report = ev.report || {verdict: ev.verdict, checks: collected};
             for (const [key, li] of phaseEls) { if (li.hidden) li.remove(); else setPhase(key, 'done'); }
             status.remove(); bar.remove(); counts.remove(); items.remove(); notice.remove(); cancelBtn.remove();
-            root.append(...reportNodes(report));
+            progress.after(...reportNodes(report));
             if (onDone) {
                 try { onDone(report); } catch (e) { console.error('ReadinessPanel onDone failed', e); }
             }
@@ -192,7 +196,8 @@ window.ReadinessPanel = (function () {
             source = new EventSource(url);
             source.onmessage = (m) => {
                 if (!live() || finished) return;
-                if (!target.isConnected) { stopped = true; return end(); }  // the page moved on: stop streaming
+                if (target.isConnected) attached = true;
+                else if (attached) return abandon();  // the page moved on: stop streaming and free the server slot
                 let ev;
                 try { ev = JSON.parse(m.data); } catch (e) { return; }
                 handle(ev);
@@ -203,15 +208,19 @@ window.ReadinessPanel = (function () {
             };
         }
 
-        function cancel() {
-            if (stopped || finished) return;
+        function abandon() {
             stopped = true;
             if (source) source.close();
             source = null;
+            if (jobId) postCancel(jobId);
+        }
+
+        function cancel() {
+            if (stopped || finished) return;
+            abandon();
             notice.replaceChildren();
             cancelBtn.remove(); bar.remove();
             status.textContent = 'Cancelled';
-            if (jobId) postCancel(jobId);
         }
 
         function postCancel(id) {
