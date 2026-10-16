@@ -152,6 +152,8 @@ def _first_filter(state, condition):
     out = f"trial_{_coerce(condition)}"
     instruction = {"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out}
     if instruction in state["instructions"]:
+        if any(i["Name"] == "Replace" for i in state["instructions"][state["instructions"].index(instruction):]):
+            raise WizardError(f"the filter for {condition!r} predates a merge/rename and would miss the merged rows; put that recipe before the earlier one")
         return out
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
         raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
@@ -161,6 +163,8 @@ def _first_filter(state, condition):
 
 def _second_filter(state, source, column, value, condition):
     out = f"{_coerce(value)}_{_coerce(condition)}"
+    if out[0].isdigit():  # Octave copes, but MATLAB struct fields and SPM names must not start with a digit
+        raise WizardError(f"the output name {out!r} would start with a digit; rename the value {value!r} in the events first")
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
         raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
     state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})
@@ -232,6 +236,15 @@ def merge_rename(state, p):
         _need_condition(state, s)
         _safe("condition", s, hyphen=True)
     _safe("new name", target, hyphen=True)
+    ref = f"trial_type.{target}"
+    if ref not in state["regressors"]:
+        if target in state["columns"]["trial_type"]:
+            raise WizardError(f"new name {target!r} is a condition that is excluded or already used by an earlier recipe; merging into it would model those events twice")
+        for r in state["regressors"]:
+            if r.startswith("trial_type.") and r != f"trial_type.{target}" and _coerce(r[11:]) == _coerce(target) and r[11:] not in sources:
+                raise WizardError(f"new name {target!r} clashes with {r[11:]!r} once output names are coerced; choose another name")
+    elif any(ref in pm["Conditions"] for pm in state["pmods"]):
+        raise WizardError(f"{ref!r} has a parametric modulator, so nothing can be merged into it; add the modulator last")
     state["instructions"].append({"Name": "Replace", "Input": "trial_type", "Output": "trial_type",
                                   "Replace": [{"key": f"^{re.escape(s)}$", "value": target} for s in sources]})
     for s in sources:

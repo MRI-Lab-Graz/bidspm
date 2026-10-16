@@ -421,3 +421,58 @@ def test_split_dropping_a_pmod_regressor_is_rejected_unless_kept():
     with pytest.raises(WizardError, match="parametric"):
         build_model(choices(recipes=[pmod(), split]), SCAN)
     build_model(choices(recipes=[pmod(), {**split, "keep_original": True}]), SCAN)
+
+
+def merge(sources, target):
+    return {"id": "merge_rename", "sources": sources, "target": target}
+
+
+def test_merge_target_consumed_by_an_earlier_recipe_is_rejected():
+    with pytest.raises(WizardError, match="already"):
+        build_model(choices(recipes=[valid_only(condition="item"), merge(["a"], "item")]), SCAN)
+
+
+def test_merge_target_excluded_is_rejected():
+    with pytest.raises(WizardError, match="already"):
+        build_model(choices(exclude=["b"], recipes=[merge(["a"], "b")]), SCAN)
+
+
+def test_merge_onto_an_existing_regressor_is_allowed():
+    node = run_node(build_model(choices(recipes=[merge(["a"], "b")]), SCAN))
+    assert node["Model"]["X"] == ["trial_type.b", "trial_type.item", 1]
+
+
+def test_merge_target_onto_a_regressor_with_a_pmod_is_rejected():
+    with pytest.raises(WizardError, match="parametric"):
+        build_model(choices(recipes=[pmod(regressor="trial_type.b"), merge(["a"], "b")]), SCAN)
+
+
+def test_stale_first_filter_after_a_merge_is_not_reused():
+    recipes = [valid_only(condition="a", keep_original=True), merge(["b"], "a"), valid_only(condition="a", value="invalid", keep_original=True)]
+    with pytest.raises(WizardError, match="clash|earlier|stale"):
+        build_model(choices(recipes=recipes), SCAN)
+
+
+def test_merge_target_coercing_to_another_regressor_name_is_rejected():
+    scan = {**SCAN, "columns": {**SCAN["columns"], "trial_type": ["face-happy", "a", "b"]}}
+    with pytest.raises(WizardError, match="coerce|clash"):
+        build_model(choices(recipes=[merge(["a"], "facehappy")]), scan)
+
+
+def test_digit_leading_split_output_is_rejected():
+    scan = {**SCAN, "columns": {**SCAN["columns"], "response_validity": ["1ok", "bad"]}}
+    with pytest.raises(WizardError, match="digit"):
+        build_model(choices(recipes=[valid_only(value="1ok")]), scan)
+
+
+def test_merge_after_a_split():
+    split = {"id": "split_by_column", "condition": "item", "column": "response_validity", "values": ["valid"]}
+    node = run_node(build_model(choices(recipes=[split, merge(["a", "b"], "ab")]), SCAN))
+    assert node["Model"]["X"] == ["valid_item.item", "trial_type.ab", 1]
+
+
+def test_chained_merges_apply_in_order():
+    node = run_node(build_model(choices(recipes=[merge(["a"], "b"), merge(["b"], "c")]), SCAN))
+    instr = node["Transformations"]["Instructions"]
+    assert [i["Replace"][0]["key"] for i in instr] == ["^a$", "^b$"]
+    assert node["Model"]["X"] == ["trial_type.item", "trial_type.c", 1]
