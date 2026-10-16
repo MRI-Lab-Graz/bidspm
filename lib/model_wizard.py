@@ -163,8 +163,8 @@ def _first_filter(state, condition):
 
 def _second_filter(state, source, column, value, condition):
     out = f"{_coerce(value)}_{_coerce(condition)}"
-    if out[0].isdigit():  # Octave copes, but MATLAB struct fields and SPM names must not start with a digit
-        raise WizardError(f"the output name {out!r} would start with a digit; rename the value {value!r} in the events first")
+    if out[0].isdigit():  # field names must not start with a digit; checked in Octave (see task-3 report)
+        out = "v" + out
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
         raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
     state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})

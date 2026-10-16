@@ -459,10 +459,28 @@ def test_merge_target_coercing_to_another_regressor_name_is_rejected():
         build_model(choices(recipes=[merge(["a"], "facehappy")]), scan)
 
 
-def test_digit_leading_split_output_is_rejected():
-    scan = {**SCAN, "columns": {**SCAN["columns"], "response_validity": ["1ok", "bad"]}}
-    with pytest.raises(WizardError, match="digit"):
-        build_model(choices(recipes=[valid_only(value="1ok")]), scan)
+SCAN_DIGITS = {**SCAN, "columns": {**SCAN["columns"], "response_validity": ["1", "2"]}}
+
+
+def test_digit_leading_value_gets_a_v_prefix():
+    result = build_model(choices(recipes=[valid_only(value="1")]), SCAN_DIGITS)
+    node = run_node(result)
+    assert node["Transformations"]["Instructions"][1] == {
+        "Name": "Filter", "Input": "trial_item", "Query": "response_validity==1", "Output": "v1_item"}
+    assert "v1_item.item" in node["Model"]["X"]
+
+
+def test_split_by_column_with_digit_values():
+    split = {"id": "split_by_column", "condition": "item", "column": "response_validity", "values": ["1", "2"]}
+    node = run_node(build_model(choices(recipes=[split]), SCAN_DIGITS))
+    assert [i["Output"] for i in node["Transformations"]["Instructions"]] == ["trial_item", "v1_item", "v2_item"]
+    assert node["Model"]["X"] == ["trial_type.a", "trial_type.b", "v1_item.item", "v2_item.item", 1]
+
+
+def test_prefixed_output_still_clashes_with_an_events_column():
+    scan = {**SCAN_DIGITS, "columns": {**SCAN_DIGITS["columns"], "v1_item": ["x"]}}
+    with pytest.raises(WizardError, match="clash"):
+        build_model(choices(recipes=[valid_only(value="1")]), scan)
 
 
 def test_merge_after_a_split():
