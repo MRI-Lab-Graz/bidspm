@@ -100,17 +100,58 @@ class TestAnalysisStages(unittest.TestCase):
         page.click("#stage-next")
         self.assertEqual(self.current(page), "model")
 
-    def test_clicking_a_blocked_next_stays_and_opens_the_advanced_field(self):
+    def test_derivatives_folder_is_optional_and_explained(self):
         page = self.open_page(self.partial_id)
         page.fill("#input-WD", "/tmp/wd")
         page.fill("#input-FMRIPREP_DIR", "/tmp/fp")
         page.evaluate("""() => { const f = document.getElementById('input-DERIVATIVES_DIR'); f.value = '';
-            f.dispatchEvent(new Event('input', {bubbles: true})); f.closest('details').open = false; }""")
+            f.dispatchEvent(new Event('input', {bubbles: true})); }""")
+        self.assertTrue(page.is_enabled("#stage-next"))
+        self.assertEqual(page.inner_text("#stage-hint").strip(), "")
+        page.click("#folders-advanced > summary")
+        self.assertIn("Defaults to the Working Directory when empty", page.inner_text("#folders-advanced"))
+        page.click("#stage-next")
+        self.assertEqual(self.current(page), "model")
+
+    def test_clicking_a_blocked_next_stays_and_focuses_the_missing_field(self):
+        page = self.open_page(self.partial_id)
         page.click("#stage-next", force=True)  # aria-disabled: Playwright would wait forever otherwise
         self.assertEqual(self.current(page), "folders")
-        self.assertIn("Derivatives", page.inner_text("#stage-hint"))
-        self.assertTrue(page.is_visible("#input-DERIVATIVES_DIR"))
-        self.assertEqual(page.evaluate("document.activeElement.id"), "input-DERIVATIVES_DIR")
+        self.assertEqual(page.evaluate("document.activeElement.id"), "input-WD")
+
+    def test_there_is_no_collapsible_settings_accordion(self):
+        page = self.open_page()
+        self.assertEqual(page.locator("#formAccordion [data-bs-toggle=collapse], [data-bs-target='#collapseSettings']").count(), 0)
+        self.assertEqual(page.locator("text=Settings Details").count(), 0)
+        for name in STAGES:
+            go_to_stage(page, name)
+            self.assertEqual(page.locator("#formAccordion .accordion-header:visible, #formAccordion .accordion-button:visible").count(), 0)
+        for i in ("collapseSettings", "settings-form-static", "formAccordion"):
+            self.assertTrue(page.evaluate("i => !!document.getElementById(i)", i))
+        go_to_stage(page, "folders")
+        self.assertTrue(page.is_visible("#input-WD"))  # always shown: nothing can collapse it
+
+    def test_typing_outside_the_stage_fields_does_not_rerender(self):
+        page = self.open_page()
+        go_to_stage(page, "model")
+        page.evaluate("""() => { window.renders = 0;
+            new MutationObserver(() => window.renders++).observe(document.getElementById('stage-heading'), {childList: true});
+            const area = document.createElement('textarea'); area.id = 'fake-json';
+            document.getElementById('analysis-model-workspace-section').appendChild(area); }""")
+        page.fill("#fake-json", "{}")
+        page.fill("#input-MODELS_FILE", "/tmp/other.json")
+        page.wait_for_function("window.renders > 0")
+        self.assertEqual(page.evaluate("window.renders"), 1)  # only the models-file edit
+
+    def test_run_stage_by_deep_link_with_incomplete_folders_explains_and_links_back(self):
+        page = self.open_page(self.partial_id, suffix="#stage=run")
+        self.assertEqual(self.current(page), "run")
+        self.assertIn("Folders", page.inner_text("#stage-summary"))
+        self.assertIn("not complete", page.inner_text("#stage-summary"))
+        self.assertTrue(page.is_enabled("#btn-save-start"))  # nothing is disabled; the server-side check still blocks
+        page.click("#stage-summary button")
+        self.assertEqual(self.current(page), "folders")
+        self.assertEqual(page.evaluate("document.activeElement.id"), "stage-heading")
 
     def test_model_and_options_gate_next(self):
         page = self.open_page()

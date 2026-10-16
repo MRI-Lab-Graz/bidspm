@@ -97,18 +97,9 @@
             <div class="p-4 analysis-config-shell">
                 <form id="bidspm-form">
                     <div id="stage-summary" class="border rounded p-2 mb-3 small" data-stage="run" role="group" aria-label="Summary of your choices"></div>
-                    <!-- Accordion for Detailed Sections -->
-                    <div class="accordion accordion-flush pt-3 border-top analysis-config-accordion" id="formAccordion">
-                        
-                        <!-- Section: Settings Details -->
-                        <div class="accordion-item shadow-none mb-2 analysis-config-item">
-                            <h2 class="accordion-header" id="headingSettings">
-                                <button class="accordion-button rounded shadow-none py-2 text-uppercase fw-bold x-small analysis-config-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings" aria-expanded="true">
-                                    <i class="fas fa-sliders-h me-2"></i> Settings Details
-                                </button>
-                            </h2>
-                            <div id="collapseSettings" class="accordion-collapse collapse show" data-bs-parent="#formAccordion">
-                                <div class="accordion-body px-0 pt-3 analysis-config-body">
+                    <!-- Settings rows; each row carries its own data-stage, the wrappers stay for id lookups -->
+                    <div id="formAccordion">
+                        <div id="collapseSettings">
                                     <div id="settings-form-static" class="row g-3">
                                         {{ path_input('WD', 'Working Directory', project.config.output_folder if project else '', 'dir', 'col-md-6', 'folders') }}
                                         {{ path_input('BIDS_DIR', 'BIDS Folder', project.config.bids_folder if project else '', 'dir', 'col-md-6', 'folders') }}
@@ -134,11 +125,13 @@
                                         <details class="col-12" data-stage="folders" id="folders-advanced">
                                             <summary class="small text-muted">Advanced</summary>
                                             <div class="row g-3 mt-0">
-                                                {{ path_input('DERIVATIVES_DIR', 'Derivatives Folder', project.config.derivatives_folder if project else '', 'dir', 'col-md-6') }}
-                                        <div class="col-md-6">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Verbosity (0-3)</label>
-                                            <input type="number" class="form-control form-control-sm dynamic-input" data-key="VERBOSITY" id="input-VERBOSITY" step="1" min="0" max="3" value="{{ project.config.verbosity if project else 2 }}">
-                                        </div>
+                                                {% call path_input('DERIVATIVES_DIR', 'Derivatives Folder', project.config.derivatives_folder if project else '', 'dir', 'col-md-6') %}
+                                                    <div class="form-text x-small mt-0">Defaults to the Working Directory when empty</div>
+                                                {% endcall %}
+                                                <div class="col-md-6">
+                                                    <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Verbosity (0-3)</label>
+                                                    <input type="number" class="form-control form-control-sm dynamic-input" data-key="VERBOSITY" id="input-VERBOSITY" step="1" min="0" max="3" value="{{ project.config.verbosity if project else 2 }}">
+                                                </div>
                                             </div>
                                         </details>
                                         <!-- TASKS -->
@@ -164,11 +157,8 @@
                                             <div id="preflight-panel" class="mt-2 text-start"></div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
                         </div>
-
-                    </div> <!-- End Accordion -->
+                    </div> <!-- End settings rows -->
 
                     <div class="mt-4 pt-3 border-top" id="analysis-model-workspace-section" data-stage="model">
                         <div class="d-flex justify-content-between align-items-center mb-2">

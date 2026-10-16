@@ -4,8 +4,9 @@
 (function () {
     const STAGES = ['folders', 'model', 'options', 'run'];
     const TITLES = {folders: 'Folders', model: 'Model', options: 'Options', run: 'Review and run'};
+    // Derivatives Folder is optional: the backend defaults it to the working directory.
     const FOLDER_FIELDS = [['input-WD', 'Working Directory'], ['input-BIDS_DIR', 'BIDS Folder'],
-                           ['input-DERIVATIVES_DIR', 'Derivatives Folder'], ['input-FMRIPREP_DIR', 'fMRIPrep Folder']];
+                           ['input-FMRIPREP_DIR', 'fMRIPrep Folder']];
 
     const $ = id => document.getElementById(id);
     const val = id => ($(id)?.value || '').trim();
@@ -79,6 +80,19 @@
             div.textContent = `${TITLES[name]}: ${summary(name) || 'not set'}`;
             return div;
         });
+        const stuck = STAGES.slice(0, 3).find(s => blocker(s));
+        if (stuck) {  // reachable by deep link or programmatic goTo; nothing is disabled, the server still checks
+            const note = document.createElement('div');
+            note.className = 'text-warning-emphasis mt-1';
+            note.textContent = `${TITLES[stuck]} is not complete. ${blocker(stuck).reason} `;
+            const go = document.createElement('button');
+            go.type = 'button';
+            go.className = 'btn btn-sm btn-outline-secondary';
+            go.textContent = `Go to ${TITLES[stuck]}`;
+            go.addEventListener('click', () => goTo(stuck, {focus: true}));
+            note.append(go);
+            lines.push(note);
+        }
         box.replaceChildren(...lines);
     }
 
@@ -100,8 +114,6 @@
     function onNext() {
         const block = blocker(cur);
         if (!block) { goTo(STAGES[index(cur) + 1], {focus: true}); return; }
-        const details = block.field && block.field.closest('details');
-        if (details) details.open = true;  // the missing field may sit in a collapsed Advanced block
         if (block.field) block.field.focus();
     }
 
@@ -120,8 +132,9 @@
             btn.addEventListener('click', () => (index(btn.dataset.stageBtn) <= index(cur) ? goTo(btn.dataset.stageBtn, {focus: true}) : tryGoTo(btn.dataset.stageBtn))));
         $('stage-back').addEventListener('click', () => goTo(STAGES[index(cur) - 1], {focus: true}));
         $('stage-next').addEventListener('click', onNext);
-        document.addEventListener('input', render);
-        document.addEventListener('change', render);
+        const onEdit = e => { if (e.target.matches && e.target.matches('.dynamic-input, input[name="action"]')) render(); };
+        document.addEventListener('input', onEdit);
+        document.addEventListener('change', onEdit);
         window.addEventListener('load', render);  // values applied by loadProjectConfig without events
         cur = initialStage();
         render();

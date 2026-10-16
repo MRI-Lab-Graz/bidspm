@@ -46,48 +46,6 @@
     border-radius: 1rem;
     box-shadow: 0 12px 28px rgba(17, 77, 143, 0.08);
 }
-.analysis-config-accordion {
-    border-top-color: var(--analysis-border) !important;
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    padding-top: 0.95rem !important;
-}
-.analysis-config-item {
-    background: #ffffff;
-    border: 1px solid #cbdff3;
-    border-radius: 0.95rem;
-    box-shadow: 0 8px 16px rgba(16, 73, 134, 0.06);
-    overflow: hidden;
-    padding: 0.2rem;
-}
-.analysis-config-toggle {
-    background: linear-gradient(90deg, #eff7ff 0%, #f7fbff 100%);
-    border: 0;
-    color: var(--analysis-text-primary);
-    letter-spacing: 0.03em;
-    border-radius: 0.7rem !important;
-}
-.analysis-config-toggle.collapsed {
-    background: linear-gradient(90deg, #f5faff 0%, #fbfdff 100%);
-    color: #2f628f;
-}
-.analysis-config-accordion .accordion-button:not(.collapsed) {
-    background: linear-gradient(90deg, #e6f3ff 0%, #f1f8ff 100%);
-    color: #163f66;
-    box-shadow: none;
-}
-.analysis-config-accordion .accordion-button:focus {
-    box-shadow: 0 0 0 0.2rem rgba(24, 144, 255, 0.18);
-}
-.analysis-config-body {
-    background: #ffffff;
-    border-top: 1px solid #e3edf7;
-    border-radius: 0 0 0.68rem 0.68rem;
-    margin-top: 0.2rem;
-    padding-left: 0.2rem;
-    padding-right: 0.2rem;
-}
 .analysis-config-shell .form-label.text-muted {
     color: var(--analysis-text-muted) !important;
 }
