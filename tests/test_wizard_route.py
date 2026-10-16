@@ -179,3 +179,79 @@ def test_preflight_exception_is_json_500(tmp_path):
     with mock.patch("webapp.web_wizard_api.run_preflight_from_config", side_effect=RuntimeError("boom")):
         res = post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none")})
     assert res.status_code == 500 and "boom" in res.get_json()["error"]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_scan_cache():
+    from webapp import web_wizard_api
+    web_wizard_api._SCAN_CACHE.clear()
+
+
+def test_preview_build_without_preflight_skips_it_and_the_confound_scan(tmp_path):
+    with mock.patch("webapp.web_wizard_api.run_preflight_from_config") as pre, \
+            mock.patch("webapp.web_wizard_api._discover_confound_info") as conf:
+        res = post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False})
+    assert res.status_code == 200 and "preflight" not in res.get_json()
+    pre.assert_not_called()
+    conf.assert_not_called()
+
+
+def test_build_runs_preflight_by_default_and_on_save(tmp_path):
+    report = {"checks": []}
+    with mock.patch("webapp.web_wizard_api.run_preflight_from_config", return_value=report) as pre:
+        post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none")})
+        post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False,
+                                   "save_path": str(tmp_path / "m.json")})
+    assert pre.call_count == 2  # saving always includes the verdict
+
+
+def test_scan_is_cached_for_builds_and_bypassed_by_the_scan_route(tmp_path):
+    p = paths(tmp_path)
+    real = web_scan_events = __import__("webapp.web_wizard_api", fromlist=["scan_events"]).scan_events
+    with mock.patch("webapp.web_wizard_api.scan_events", side_effect=real) as spy:
+        body = {**p, "choices": choices(nuisance="none"), "preflight": False}
+        post("/api/wizard/build", body)
+        post("/api/wizard/build", body)
+        assert spy.call_count == 1
+        post("/api/wizard/scan", p)  # bypasses and refreshes
+        assert spy.call_count == 2
+        post("/api/wizard/build", body)
+        assert spy.call_count == 2
+
+
+def test_scan_cache_expires(tmp_path):
+    from webapp import web_wizard_api
+    p = paths(tmp_path)
+    body = {**p, "choices": choices(nuisance="none"), "preflight": False}
+    real = web_wizard_api.scan_events
+    with mock.patch("webapp.web_wizard_api.scan_events", side_effect=real) as spy:
+        post("/api/wizard/build", body)
+        with mock.patch("webapp.web_wizard_api.time.monotonic", return_value=1e9):
+            post("/api/wizard/build", body)
+    assert spy.call_count == 2
+
+
+def test_files_truncated_adds_preview_warning(tmp_path):
+    with mock.patch("webapp.web_wizard_api.scan_events", return_value={
+            "columns": {"trial_type": ["a"]}, "numeric": [], "files": 300, "truncated": [], "files_truncated": True}):
+        res = post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False})
+    assert any("only the first 300" in w for w in res.get_json()["preview"]["warnings"])
+
+
+def test_scan_response_carries_files_truncated(tmp_path):
+    assert post("/api/wizard/scan", paths(tmp_path)).get_json()["files_truncated"] is False
+
+
+def test_save_failure_is_json_400(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    res = post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none"),
+                                     "save_path": str(blocker / "sub" / "m.json")})
+    assert res.status_code == 400 and "could not save" in res.get_json()["error"]
+
+
+def test_malformed_pair_items_and_recipe_id_are_400_through_the_route(tmp_path):
+    bad_pair = {"name": "x", "positive": [{"a": 1}], "negative": ["trial_type.b"]}
+    for ch in (choices(contrasts={"auto": True, "pairs": [bad_pair]}), choices(recipes=[{"id": {}}])):
+        res = post("/api/wizard/build", {**paths(tmp_path), "choices": ch, "preflight": False})
+        assert res.status_code == 400

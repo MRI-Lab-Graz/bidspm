@@ -375,6 +375,7 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
                     truncated.add(col)
                 else:
                     seen.add(val)
-    return {"columns": {c: sorted(v) for c, v in values.items()},
+    return {"files_truncated": len(files) > max_files,
+            "columns": {c: sorted(v) for c, v in values.items()},
             "numeric": sorted(c for c, v in values.items() if v and c not in numeric_bad),
             "files": used, "truncated": sorted(truncated)}

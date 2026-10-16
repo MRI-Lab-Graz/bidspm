@@ -34,3 +34,10 @@ def test_truncation_reported(tmp_path):
     write(tmp_path, "sub-01/func/sub-01_task-x_events.tsv", ev(*[(i, 1, f"c{i}", "1") for i in range(5)]))
     r = scan_events(tmp_path, "x", max_values=3)
     assert len(r["columns"]["trial_type"]) == 3 and "trial_type" in r["truncated"] and "rt" not in r["truncated"]
+
+
+def test_files_truncated_reported(tmp_path):
+    for s in ("01", "02", "03"):
+        write(tmp_path, f"sub-{s}/func/sub-{s}_task-x_events.tsv", ev((1, 1, "a", "1")))
+    assert scan_events(tmp_path, "x", max_files=2)["files_truncated"] is True
+    assert scan_events(tmp_path, "x")["files_truncated"] is False
