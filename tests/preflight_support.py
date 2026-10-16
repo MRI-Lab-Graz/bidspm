@@ -16,8 +16,8 @@ def make_trees(tmp, subjects=("01",), task="x", space="MNI", events=EVENTS, conf
         (root / "dataset_description.json").write_text(json.dumps({"Name": "t", "BIDSVersion": "1.9.0"}))
     for s in subjects:
         b, f = bids / f"sub-{s}" / "func", fmriprep / f"sub-{s}" / "func"
-        b.mkdir(parents=True)
-        f.mkdir(parents=True)
+        b.mkdir(parents=True, exist_ok=True)
+        f.mkdir(parents=True, exist_ok=True)
         (b / f"sub-{s}_task-{task}_events.tsv").write_text(events)
         stem = f"sub-{s}_task-{task}_space-{space}_desc"
         nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, nvols), "f4"), np.eye(4)), f / f"{stem}-preproc_bold.nii.gz")

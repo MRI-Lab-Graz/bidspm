@@ -175,6 +175,26 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs=(set(), [
     return out, seen
 
 
+def check_model(model_file):
+    if not model_file:
+        return []
+    from lib import core  # lazy so tests can patch lib.core.validate_bids_model
+    result = core.validate_bids_model(Path(model_file))
+    if not result["valid"]:
+        return [_item("model", ERROR, result.get("error", "The model is invalid."),
+                      "Fix the model in the editor ('Validate JSON' shows the same message).")]
+    if result.get("warning"):
+        return [_item("model", WARN, result["warning"])]
+    return []
+
+
+def check_container(container_type):
+    if container_type in ("docker", "apptainer") and not shutil.which(container_type):
+        return [_item("container", WARN, f"{container_type} was not found on this machine",
+                      f"Install {container_type}, or pick the other container type.")]
+    return []
+
+
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="prism", container_type=""):
     checks = check_dirs(bids_dir, fmriprep_dir)
@@ -184,6 +204,7 @@ def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", sub
         if not tasks:
             checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
                                 "check the BIDS folder or set the task in the project settings"))
+        checks += check_model(model_file) + check_container(container_type)
         selected, found = check_subjects(bids_dir, fmriprep_dir, subjects)
         checks += found
         present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))

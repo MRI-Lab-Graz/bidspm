@@ -1,4 +1,5 @@
 import shutil
+from unittest.mock import patch
 
 import pytest
 
@@ -187,3 +188,24 @@ def test_no_tasks_found_blocks(tmp_path):
         f.unlink()
     result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, space="MNI", validator="skip")
     assert "no_tasks" in ids(result, "error")
+
+
+def test_invalid_model_blocks_with_the_validators_message(tmp_path):
+    with patch("lib.core.validate_bids_model", return_value={"valid": False, "error": "Empty contrast issues: x"}):
+        result = run(tmp_path, model_file=write_model(tmp_path))
+    (item,) = _only(result, "model")
+    assert item["severity"] == "error" and "Empty contrast" in item["message"]
+
+
+def test_model_warning_is_a_warn_and_valid_model_adds_nothing(tmp_path):
+    model = write_model(tmp_path)
+    with patch("lib.core.validate_bids_model", return_value={"valid": True, "warning": "Normalized model"}):
+        assert [c["severity"] for c in _only(run(tmp_path, model_file=model), "model")] == ["warn"]
+    with patch("lib.core.validate_bids_model", return_value={"valid": True}):
+        assert _only(run(tmp_path, model_file=model), "model") == []
+
+
+def test_missing_container_runtime_warns(tmp_path):
+    with patch("shutil.which", return_value=None):
+        assert "container" in ids(run(tmp_path, container_type="docker"), "warn")
+    assert "container" not in ids(run(tmp_path, container_type=""), "warn")
