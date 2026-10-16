@@ -26,6 +26,12 @@ class TestWebRoutes(unittest.TestCase):
         self.project_manager_patch = patch.object(bidspm_gui, "project_manager", self.project_manager)
         self.project_manager_patch.start()
         self.addCleanup(self.project_manager_patch.stop)
+        preflight_patch = patch(
+            "webapp.web_execution_api.run_preflight_from_config",
+            return_value={"verdict": "ready", "checks": []},
+        )
+        preflight_patch.start()
+        self.addCleanup(preflight_patch.stop)
         self.execution_registry = bidspm_gui.execution_registry
         self.original_executions = dict(self.execution_registry.executions)
         self.original_current_execution_id = self.execution_registry.current_execution_id

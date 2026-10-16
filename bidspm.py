@@ -68,6 +68,12 @@ OPTIONAL ARGUMENTS:
     --list-subjects      List available subjects and exit
     --list-tasks         List available tasks and exit
     --estimate-time      Estimate processing time and exit
+    --preflight          Run the readiness check, print a JSON report and exit
+                         (exit code 1 if blocked); needs -s
+    --validator          Dataset validator for --preflight: auto (default: prism
+                         if project.json is in the BIDS root, else bids),
+                         prism (BIDS + PRISM), bids (plain BIDS) or skip
+    --skip-validator     Same as --validator skip (shown as a warning)
 
 EXAMPLES:
     # Get help
@@ -172,6 +178,11 @@ def parse_arguments():
                        help='List available subjects and exit')
     parser.add_argument('--list-tasks', action='store_true',
                        help='List available tasks and exit')
+    parser.add_argument('--preflight', action='store_true',
+                        help='Check that BIDS, fMRIPrep and the model can run; print a JSON report, exit 1 if blocked')
+    parser.add_argument('--validator', choices=['auto', 'prism', 'bids', 'skip'], default='auto',
+                        help='Dataset validator for --preflight: auto (default: PRISM if project.json, else plain BIDS), PRISM+BIDS, plain BIDS, or skip')
+    parser.add_argument('--skip-validator', action='store_true', help='Same as --validator skip')
     parser.add_argument('--estimate-time', action='store_true',
                        help='Estimate processing time and exit')
     parser.add_argument('--check-environment', action='store_true',
@@ -239,6 +250,25 @@ def handle_estimate_time(config_file: str, actions: list):
     print(f"\n  Note: {estimate['note']}\n")
     
     sys.exit(0)
+
+
+def handle_preflight(config_file, args):
+    """Print the preflight report as JSON; exit 1 when a check blocks the run."""
+    import json
+    from lib.preflight import run_preflight_from_config
+    try:
+        with open(config_file, encoding='utf-8') as fh:
+            cfg = json.load(fh)
+        if not isinstance(cfg, dict):
+            raise ValueError('expected a JSON object')
+    except (OSError, ValueError) as exc:
+        print(f"Cannot read settings file {config_file}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    result = run_preflight_from_config(cfg, model=args.model or '',
+                                       validator='skip' if args.skip_validator else args.validator,
+                                       actions=args.action or None)
+    print(json.dumps(result, indent=2))
+    sys.exit(1 if result['verdict'] == 'blocked' else 0)
 
 
 def handle_check_environment():
@@ -381,6 +411,9 @@ def main():
     
     if args.check_environment:
         handle_check_environment()
+
+    if args.preflight:
+        handle_preflight(config_file, args)
     
     if args.estimate_time:
         if not args.action:

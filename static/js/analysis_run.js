@@ -99,13 +99,28 @@ async function startExecution(payload) {
     execStatus.className = 'badge bg-danger';
     resetRunIssues();
 
-    const res = await fetch('/run', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-    });
-    const result = await res.json();
-    if (result.error) { terminal.innerText += 'ERROR: ' + result.error; resetStatus(); return; }
+    payload.validator = validatorMode();
+    let result;
+    try {
+        const res = await fetch('/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        try { result = await res.json(); } catch (e) { result = {error: `HTTP ${res.status} (non-JSON response)`}; }
+    } catch (e) {
+        result = {error: `request failed: ${e.message}`};
+    }
+    if (result.preflight) {
+        renderPreflight(result.preflight);
+        for (const c of result.preflight.checks || []) {
+            terminal.innerText += `${c.severity === 'error' ? 'ERROR' : 'WARN'}: ${c.subject ? 'sub-' + c.subject + ': ' : ''}${c.message}\n`;
+            if (c.fix) terminal.innerText += `  -> ${c.fix}\n`;
+        }
+    } else if (!result.error) {
+        document.getElementById('preflight-panel')?.replaceChildren();  // drop a stale report next to a running job
+    }
+    if (result.error) { terminal.innerText += 'ERROR: ' + result.error + '\n'; resetStatus(); return; }
 
     if (result.log_file) {
         terminal.innerText += `--- FOLLOWING NOHUP LOG: ${result.log_file} ---\n`;

@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
+from lib.preflight import run_preflight_from_config
 from lib.project_manager import GLOBAL_CONFIG_DIR
 
 
@@ -125,6 +126,11 @@ def register_execution_routes(
         project_manager = get_project_manager()
         generated_settings_files: list[str] = []
 
+        def reject(message: str, **extra):
+            for path in generated_settings_files:
+                Path(path).unlink(missing_ok=True)
+            return jsonify({'error': message, **extra}), 400
+
         if project_id:
             project = project_manager.load_project(project_id)
             if not project:
@@ -176,11 +182,27 @@ def register_execution_routes(
         if model_file and any('stats' in action.lower() for action in actions):
             if not data.get('skip_validation'):
                 if not os.path.isfile(model_file):
-                    return jsonify({'error': f'Model file not found: {model_file}'}), 400
+                    return reject(f'Model file not found: {model_file}')
 
                 result = validate_bids_model(Path(model_file))
                 if not result['valid']:
-                    return jsonify({'error': f"Model validation failed: {result.get('error', 'Unknown error')}"}), 400
+                    return reject(f"Model validation failed: {result.get('error', 'Unknown error')}")
+
+        # No --settings: bidspm.py falls back to config/config.json (relative to cwd); gate on it if present.
+        gate_settings = data.get('settings') or 'config/config.json'
+        if (data.get('settings') or os.path.isfile(gate_settings)) and any(a in ('smooth', 'stats', 'dataset') for a in actions):
+            try:
+                with open(gate_settings, encoding='utf-8') as stream:
+                    config = json.load(stream)
+            except (OSError, ValueError) as exc:
+                return reject(f'Failed to read settings file: {exc}')
+            if not isinstance(config, dict):
+                return reject('Failed to read settings file: expected a JSON object')
+            preflight = run_preflight_from_config(
+                config, model=data.get('model') or '', validator=data.get('validator') or 'auto',
+                skip_model_validation=bool(data.get('skip_validation')), actions=actions)
+            if preflight['verdict'] == 'blocked':
+                return reject('Preflight check failed: fix the listed problems before running.', preflight=preflight)
 
         python_exe = python_exe_path if os.path.exists(python_exe_path) else 'python3'
         command = [python_exe, bidspm_script]

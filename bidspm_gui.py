@@ -31,6 +31,7 @@ import sys
 import threading
 import time
 import re
+import tomllib
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -57,6 +58,7 @@ from webapp.web_discovery_model_api import (
 )
 from webapp.web_execution_api import ExecutionRegistry, register_execution_routes
 from webapp.web_pages import register_page_routes
+from webapp.web_preflight_api import register_preflight_routes
 from webapp.web_projects_api import register_project_routes
 from webapp.web_utility_stats_api import register_utility_stats_routes
 
@@ -69,8 +71,8 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
-# Version info
-__version__ = "2.0.0"
+# Version info: single source is pyproject.toml
+__version__ = tomllib.loads((Path(__file__).parent / "pyproject.toml").read_text())["project"]["version"]
 app.config['APP_VERSION'] = __version__
 
 def resolve_python_executable() -> str:
@@ -398,6 +400,7 @@ def _normalize_subject_ids(raw: Any) -> List[str]:
 
 register_page_routes(app, get_project_manager=lambda: project_manager)
 register_project_routes(app, get_project_manager=lambda: project_manager)
+register_preflight_routes(app)
 
 
 # =============================================================================

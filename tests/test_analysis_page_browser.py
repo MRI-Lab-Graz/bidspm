@@ -21,7 +21,7 @@ GLOBAL_FUNCTIONS = [
     "validateModel", "createNewModel", "openModelEditor", "inferTransformerLaunchNodeLevel",
     "inferTransformerLaunchNodeIndex", "persistTransformerLaunchContext", "openTransformerBuilder",
     "saveModelEditor", "refreshModelTasks", "refreshSpaces", "loadLatestStudy", "normalizeSubjectLabel",
-    "resetRunIssues", "renderRunIssues", "processRunLogLine", "parseFailedSubjects", "startExecution", "resetStatus",
+    "validatorMode", "renderPreflight", "runPreflight", "resetRunIssues", "renderRunIssues", "processRunLogLine", "parseFailedSubjects", "startExecution", "resetStatus",
 ]
 
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
