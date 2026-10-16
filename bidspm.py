@@ -255,10 +255,17 @@ def handle_preflight(config_file, args):
     """Print the preflight report as JSON; exit 1 when a check blocks the run."""
     import json
     from lib.preflight import run_preflight_from_config
-    with open(config_file, encoding='utf-8') as fh:
-        cfg = json.load(fh)
+    try:
+        with open(config_file, encoding='utf-8') as fh:
+            cfg = json.load(fh)
+        if not isinstance(cfg, dict):
+            raise ValueError('expected a JSON object')
+    except (OSError, ValueError) as exc:
+        print(f"Cannot read settings file {config_file}: {exc}", file=sys.stderr)
+        sys.exit(2)
     result = run_preflight_from_config(cfg, model=args.model or '',
-                                       validator='skip' if args.skip_validator else args.validator)
+                                       validator='skip' if args.skip_validator else args.validator,
+                                       actions=args.action or None)
     print(json.dumps(result, indent=2))
     sys.exit(1 if result['verdict'] == 'blocked' else 0)
 

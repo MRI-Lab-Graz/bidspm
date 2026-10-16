@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from lib import core
-from lib.preflight import check_validator, run_preflight, _verdict
+from lib.preflight import check_validator, run_preflight, run_preflight_from_config, _model_needs, _verdict
 from tests.preflight_support import make_trees, write_model
 
 
@@ -30,6 +30,10 @@ def run(tmp_path, **kw):
     args = dict(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
     args.update(kw)
     return run_preflight(**args)
+
+
+def _only(result, id):
+    return [c for c in result["checks"] if c["id"] == id]
 
 
 def test_healthy_trees_have_no_errors(tmp_path):
@@ -81,10 +85,6 @@ def test_unset_folder_blocks_as_not_set(tmp_path, unset):
     result = run_preflight(bids_dir=bids, fmriprep_dir=unset, validator="skip")
     (item,) = [c for c in result["checks"] if c["id"] == "fmriprep_dir"]
     assert "not set" in item["message"]
-
-
-def _only(result, id):
-    return [c for c in result["checks"] if c["id"] == id]
 
 
 def test_missing_preproc_blocks_with_a_fix_hint(tmp_path):
@@ -345,3 +345,157 @@ def test_real_prism_validator_flags_an_incomplete_dataset(tmp_path):
     bids, _ = make_trees(tmp_path)  # no Authors, no sidecars -> PRISM errors
     assert any(c["severity"] == "error" for c in check_validator(bids, "prism"))
     assert not any(c["severity"] == "error" for c in check_validator(bids, "bids"))
+
+
+# ---- final fix wave ----
+def pf(tmp_path, bids, fmriprep, **kw):
+    args = dict(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip")
+    args.update(kw)
+    return run_preflight(**args)
+
+
+def test_string_intercept_is_not_a_nuisance_regressor(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.a", "trans_x", "1", "0"))
+    assert "confound_columns" not in ids(run(tmp_path, model_file=model), "error")
+
+
+@pytest.mark.parametrize("content", ["[]", '{"Model": null, "Nodes": null}', '{"Nodes": [1, "a"]}',
+                                     '{"Nodes": [{"Level": "Run", "Model": null}]}',
+                                     '{"Nodes": [{"Level": "Run", "Model": {"X": "trans_x"}}]}'])
+def test_malformed_models_do_not_crash_needs(tmp_path, content):
+    f = tmp_path / "m.json"
+    f.write_text(content)
+    assert _model_needs(f)[1] == []
+    assert run(tmp_path, model_file=f)["verdict"]
+
+
+def test_corrupt_nifti_and_null_tr_do_not_crash(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    nii = next(fmriprep.rglob("*desc-preproc_bold.nii.gz"))
+    nii.write_bytes(b"not gzip")
+    assert pf(tmp_path, bids, fmriprep)["verdict"]
+    bids, fmriprep = make_trees(tmp_path / "b", tr=2.0)
+    next(fmriprep.rglob("*desc-preproc_bold.json")).write_text('{"RepetitionTime": null}')
+    assert pf(tmp_path, bids, fmriprep)["verdict"]
+
+
+def test_non_string_validator_fields_do_not_crash(tmp_path, fake_exe):
+    rep = {"valid": False, "issues": [{"severity": "ERROR", "code": 5, "message": ["x"], "file_path": "f"},
+                                       {"severity": "WARNING", "code": 7, "message": 1}]}
+    assert check_validator(tmp_path, "prism", run=fake_run(json.dumps(rep), 1))
+
+
+def test_skip_model_validation_skips_only_the_model_check(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    model = write_model(tmp_path)
+    with patch("lib.core.validate_bids_model", return_value={"valid": False, "error": "bad"}) as v:
+        assert "model" in ids(pf(tmp_path, bids, fmriprep, model_file=model), "error")
+        result = pf(tmp_path, bids, fmriprep, model_file=model, skip_model_validation=True)
+    assert "model" not in ids(result, "error") and v.call_count == 1
+
+
+def test_smooth_only_skips_events_and_model_checks(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    for f in bids.rglob("*_events.tsv"):
+        f.unlink()
+    model = write_model(tmp_path)
+    with patch("lib.core.validate_bids_model", return_value={"valid": False, "error": "bad"}):
+        smooth = pf(tmp_path, bids, fmriprep, model_file=model, actions=["smooth"])
+        stats = pf(tmp_path, bids, fmriprep, model_file=model, actions=["stats"])
+    assert ids(smooth, "error") == set()
+    assert "events_missing" in ids(stats, "error") and "model" in ids(stats, "error")
+
+
+def test_smooth_only_still_checks_preproc(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    next(fmriprep.rglob("*desc-preproc_bold.nii.gz")).unlink()
+    assert "preproc_missing" in ids(pf(tmp_path, bids, fmriprep, actions=["smooth"]), "error")
+
+
+def test_dataset_action_runs_full_checks(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    for f in bids.rglob("*_events.tsv"):
+        f.unlink()
+    assert "events_missing" in ids(pf(tmp_path, bids, fmriprep, actions=["smooth", "dataset"]), "error")
+
+
+EV_RT = "onset\tduration\ttrial_type\tRT\n1\t1\ta\t0.5\n"
+
+
+def test_event_columns_are_not_nuisance_regressors(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, events=EV_RT)
+    model = write_model(tmp_path, x=("trial_type.a", "RT", 1))
+    assert "confound_columns" not in ids(pf(tmp_path, bids, fmriprep, model_file=model), "error")
+
+
+def test_transformation_outputs_are_not_nuisance_regressors(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.a", "rt_scaled", 1), transformations=True)
+    data = json.loads(model.read_text())
+    data["Nodes"][0]["Transformations"]["Instructions"][0]["Output"] = ["rt_scaled"]
+    model.write_text(json.dumps(data))
+    assert "confound_columns" not in ids(run(tmp_path, model_file=model), "error")
+
+
+def test_unmatched_name_with_transformations_is_only_a_warning(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.a", "mystery", 1), transformations=True)
+    result = run(tmp_path, model_file=model)
+    assert "confound_columns" not in ids(result, "error") and "confound_columns" in ids(result, "warn")
+
+
+def test_transformations_without_instructions_count_as_none(tmp_path):
+    model = write_model(tmp_path, x=("trial_type.zzz", 1))
+    data = json.loads(model.read_text())
+    data["Nodes"][0]["Transformations"] = {"Transformer": "bidspm", "Instructions": []}
+    model.write_text(json.dumps(data))
+    assert "condition_missing" in ids(run(tmp_path, model_file=model), "error")
+
+
+def test_negative_onset_only_warns(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, events="onset\tduration\ttrial_type\n-1\t1\ta\n")
+    result = pf(tmp_path, bids, fmriprep)
+    assert "events_values" not in ids(result, "error") and "events_values" in ids(result, "warn")
+
+
+def test_dataset_level_events_file_is_inherited(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    (bids / "sub-01" / "func" / "sub-01_task-x_events.tsv").rename(bids / "task-x_events.tsv")
+    result = pf(tmp_path, bids, fmriprep, model_file=write_model(tmp_path))
+    assert ids(result, "error") == set()
+    (bids / "task-x_events.tsv").write_text("onset\tduration\ttrial_type\nsoon\t1\ta\n")
+    assert "events_values" in ids(pf(tmp_path, bids, fmriprep), "error")
+
+
+def test_validator_json_tolerates_banner_braces_and_trailing_text(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "prism", run=fake_run("using {cfg}\n" + json.dumps(REPORT) + "\ndone {x}\n"))
+    assert "PRISM301" in out[0]["message"]
+
+
+def test_validator_gets_the_resolved_bids_path(tmp_path, fake_exe, monkeypatch):
+    calls = []
+    sub = tmp_path / "d"
+    sub.mkdir()
+    monkeypatch.chdir(tmp_path)
+    check_validator("d", "prism", run=fake_run(json.dumps({"issues": []}), 0, calls))
+    assert calls[0][1] == str(sub.resolve())
+
+
+def test_string_tasks_and_subjects_are_single_items(tmp_path):
+    bids, fmriprep = make_trees(tmp_path, subjects=("01", "02"))
+    cfg = {"BIDS_DIR": str(bids), "FMRIPREP_DIR": str(fmriprep), "SPACE": "MNI", "TASKS": "x", "SUBJECTS": "01"}
+    result = run_preflight_from_config(cfg, validator="skip")
+    assert ids(result, "error") == set()
+    assert run_preflight_from_config({**cfg, "TASKS": None, "SUBJECTS": None}, validator="skip")["verdict"]
+
+
+def test_validator_errors_are_grouped_by_code_and_message(tmp_path, fake_exe):
+    issues = [{"code": "PRISM301", "severity": "ERROR", "message": "'Keywords' is required\nx", "file_path": f"/d/f{n}"} for n in range(527)]
+    out = check_validator(tmp_path, "prism", run=fake_run(json.dumps({"issues": issues})))
+    assert len(out) == 1
+    assert "PRISM301 x527" in out[0]["message"] and "'Keywords' is required" in out[0]["message"] and "e.g. /d/f0" in out[0]["message"]
+    assert "--validator bids" in out[0]["fix"] and "'skip'" in out[0]["fix"]
+
+
+def test_validator_group_cap_counts_groups(tmp_path, fake_exe):
+    issues = [{"code": f"E{n % 25}", "severity": "ERROR", "message": "m", "file_path": "f"} for n in range(100)]
+    out = check_validator(tmp_path, "prism", run=fake_run(json.dumps({"issues": issues})))
+    assert len(out) == 21 and "+5 more" in out[-1]["message"]

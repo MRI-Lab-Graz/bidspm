@@ -185,10 +185,6 @@ class TestCheckDatasetNodeName(unittest.TestCase):
         self.assertEqual(core._check_dataset_node_name({"Nodes": [{"Name": "run", "Level": "Run"}]}), [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def test_validate_bids_model_skips_schema_when_offline(tmp_path):
     from unittest.mock import patch
     import requests
@@ -198,3 +194,7 @@ def test_validate_bids_model_skips_schema_when_offline(tmp_path):
     with patch("lib.core._fetch_bids_stats_schema", side_effect=requests.ConnectionError("offline")):
         result = core.validate_bids_model(model)
     assert result["valid"] is True and "schema" in result["warning"]
+
+
+if __name__ == "__main__":
+    unittest.main()

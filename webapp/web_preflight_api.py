@@ -10,6 +10,8 @@ def register_preflight_routes(app: Flask) -> None:
         data = request.get_json(silent=True)
         data = data if isinstance(data, dict) else {}
         config = data.get('config')
+        actions = data.get('actions')
         return jsonify(run_preflight_from_config(
             config if isinstance(config, dict) else {},
-            model=data.get('model') or '', validator=data.get('validator') or 'prism'))
+            model=data.get('model') or '', validator=data.get('validator') or 'prism',
+            actions=actions if isinstance(actions, list) else None))
