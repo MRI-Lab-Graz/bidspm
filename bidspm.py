@@ -182,6 +182,7 @@ def parse_arguments():
                         help='Check that BIDS, fMRIPrep and the model can run; print a JSON report, exit 1 if blocked')
     parser.add_argument('--validator', choices=['auto', 'prism', 'bids', 'skip'], default='auto',
                         help='Dataset validator for --preflight: auto (default: PRISM if project.json, else plain BIDS), PRISM+BIDS, plain BIDS, or skip')
+    parser.add_argument('--progress', action='store_true', help='With --preflight: print progress lines to stderr (stdout stays pure JSON)')
     parser.add_argument('--skip-validator', action='store_true', help='Same as --validator skip')
     parser.add_argument('--estimate-time', action='store_true',
                        help='Estimate processing time and exit')
@@ -264,9 +265,15 @@ def handle_preflight(config_file, args):
     except (OSError, ValueError) as exc:
         print(f"Cannot read settings file {config_file}: {exc}", file=sys.stderr)
         sys.exit(2)
+    def show(e):
+        if e['phase'] == 'subjects' and e['state'] == 'progress':
+            print(f"[{e['index']}/{e['total']}] sub-{e['subject']} ... {len(e['items'])} issues", file=sys.stderr, flush=True)
+        elif e['state'] != 'progress':
+            print(f"{e['phase']} {e['state']}: {e['message']}", file=sys.stderr, flush=True)
+
     result = run_preflight_from_config(cfg, model=args.model or '',
                                        validator='skip' if args.skip_validator else args.validator,
-                                       actions=args.action or None)
+                                       actions=args.action or None, progress=show if args.progress else None)
     print(json.dumps(result, indent=2))
     sys.exit(1 if result['verdict'] == 'blocked' else 0)
 
