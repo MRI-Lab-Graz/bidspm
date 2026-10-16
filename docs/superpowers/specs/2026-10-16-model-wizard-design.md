@@ -30,10 +30,8 @@ Second level: default Subject and Dataset nodes (one-sample) as today; group com
 Formats verified against bidspm 4.0.0 (`/data/local/container/bidspm/bidspm`) and the repo's own studies:
 - **Only valid/correct trials**: chain of `Filter` instructions (`trial_type==item` -> `trial_item`, `response_validity==valid` ->
   `valid_item`); X gets `valid_item.item`. Reference: `studies/141_fix_pmod.json`.
-- **Split a condition by a column**: for each value: `Filter` (condition and column value) -> named output; or per-trial split
-  via `Filter` -> `LabelIdenticalRows`(Cumulative) -> `Concatenate` -> `Replace` NaN -> `Delete` temp columns
-  (bidspm demo `demos/transformers/split_by_trials.m`). Choice: by-value (default) or per-trial.
-- **Parametric modulator**: optional mean-centering via `Scale` into `<col>_centered`; adds
+- **Split a condition by a column**: for each value: `Filter` (condition and column value) -> named output.
+- **Parametric modulator**: not mean-centred by the wizard (SPM centres modulators itself); adds
   `Model.Software.SPM.ParametricModulations: [{Name, Conditions: ["trial_type.x"], Values: ["<col>"], PolynomialExpansion}]`
   (amplitude column read from the events TSV; NaN coerced to 1 by bidspm).
 - **Merge / rename conditions**: `Replace` on `trial_type` (regex key -> value) for merging, rename = Replace with literal key.
@@ -53,4 +51,8 @@ playwright), preflight integration test on the generated model against synthetic
 
 ## Out of scope (v1)
 Editing existing models in the wizard (use the editor), group-level wizard steps, running transformers to show transformed
-TSV rows (preview shows names, not rows), recipes beyond the four, SESSION/RUN selection.
+TSV rows (preview shows names, not rows), recipes beyond the four, SESSION/RUN selection,
+per-trial split (`LabelIdenticalRows`; regressor names would depend on trial counts, which the preview cannot know).
+
+## Defaults
+The generated Run node is named `run_level`; the intercept in `X` is the integer `1`.
