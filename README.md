@@ -226,6 +226,36 @@ is shown as a warning; all other checks still run. `prism-validator` is installe
 
 The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.
 
+## Model wizard
+
+"New model" on the analysis page opens a wizard that builds a first-level BIDS Stats Model from the events files of your
+project, so common models need no hand-written JSON. Five steps:
+
+1. **Task and conditions**: pick the task; the wizard scans the events files (`trial_type` values and other columns) of all subjects.
+2. **Recipes**: shape the conditions (below). Recipes are applied in order.
+3. **Nuisance**: a confound preset (e.g. motion6) and optional exclusion of conditions (e.g. fixation).
+4. **Contrasts**: generated automatically (one per condition) plus simple pairs.
+5. **Review and save**: shows the generated names and the preflight verdict for the proposed model, then saves it.
+
+Recipes:
+
+- `valid_only`: keep only some trials, e.g. `response_validity == valid`
+- `split_by_column`: split a condition by a column, e.g. split `item` by `response_validity`
+- `merge_rename`: merge conditions, e.g. `a, b -> ab`
+- `parametric_modulator`: modulate a regressor, e.g. `RT`, polynomial order 1-3; must be the last recipe
+
+Name rules: letters, digits and underscore only; `-` is also allowed in condition and value names. Values that start with a digit
+get a `v` prefix in the generated column names (`2` becomes `v2`).
+
+The preflight verdict is shown before saving. Saving is still allowed when preflight reports data problems (for example events
+missing for one subject), so you can fix the data afterwards.
+
+Contrasts are the basics only (auto + simple pairs). For anything else (weighted, F-contrasts, ...) save the model and open it in
+the model editor, whose contrast builder is the advanced path.
+
+Out of scope: editing existing models in the wizard (use the editor), group-level steps, per-trial split, recipes beyond these
+four, SESSION/RUN selection, and showing transformed TSV rows (the preview shows names only).
+
 ## Configuration
 
 ### 1. Data configuration (`config.json`)
