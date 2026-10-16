@@ -20,7 +20,7 @@ preview + preflight, save. Transformers become a guided choice instead of a side
 
 ## Steps
 1. Task and conditions (scanned from events). 2. Recipes (all offered; the user chooses which to apply, in order).
-3. Nuisance regressors: presets none / 6 motion / 24 motion (Friston) / 6 motion + FD, existing picker as advanced.
+3. Nuisance regressors: presets none / 6 motion / 24 motion (Friston) / 6 motion + FD, a custom comma-separated list of confound columns instead of the existing picker.
 4. Contrasts: auto "condition > baseline" for every regressor + a simple pair table ("A > B", "mean(A,B) > C"); the full
    contrast builder stays available as an advanced option (the wizard writes the model, then the user can open it there).
 5. Review: preview of regressors + contrasts + the preflight panel for the proposed model; save.
@@ -40,7 +40,10 @@ Recipes compose in the order the user applies them; each declares inputs/outputs
 ## Correctness
 - Conditions produced by recipes are tracked by the engine (no re-implementation of the transformer runtime): the preview lists
   the regressors; the preflight panel (events columns/values present, confound columns, model schema) validates the result.
-- A recipe whose inputs are not present in the scanned events is disabled with the reason shown (e.g. no numeric column for pmod).
+- A recipe whose inputs are unusable (e.g. no numeric column for pmod) is not disabled up front; the error appears when building (the preview shows the engine message). Recipes with unfilled required fields are not sent and are marked incomplete.
+- Scan returns confound columns, but they are informational only (the build does not use them).
+- Unique SPM names: bidspm names an SPM condition after the part of a regressor behind its first '.', so every regressor must have a distinct name there. Splits with several values (or keep_original) add a Replace instruction that renames the kept cell values to the output column and use `<out>.<out>`; a single-value split keeps `<out>.<condition>`. build_model rejects any remaining clash.
+- The live preview skips the preflight (slow on real studies); the "Check readiness" button and Save run it. Scans are cached for 60 s per (bids, task).
 - The wizard never writes a model bidspm would silently ignore: unsupported combinations are rejected with a message.
 - Acceptance test: the "valid trials" recipe on study 141's choices reproduces the Run node `Transformations`, `X` and
   `ParametricModulations` of `studies/141_fix_pmod.json` (golden test).

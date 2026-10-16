@@ -231,21 +231,23 @@ The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.
 "New model" on the analysis page opens a wizard that builds a first-level BIDS Stats Model from the events files of your
 project, so common models need no hand-written JSON. Five steps:
 
-1. **Task and conditions**: pick the task; the wizard scans the events files (`trial_type` values and other columns) of all subjects.
+1. **Task and conditions**: pick the task; the wizard scans the events files (`trial_type` values and other columns) of all subjects. Uncheck conditions here to exclude them from the model.
 2. **Recipes**: shape the conditions (below). Recipes are applied in order.
-3. **Nuisance**: a confound preset (e.g. motion6) and optional exclusion of conditions (e.g. fixation).
+3. **Nuisance**: a confound preset (e.g. motion6) or a custom comma-separated list of confound columns.
 4. **Contrasts**: generated automatically (one per condition) plus simple pairs.
-5. **Review and save**: shows the generated names and the preflight verdict for the proposed model, then saves it.
+5. **Review and save**: shows the generated names live; "Check readiness" runs the preflight for the proposed model (it is slow on large studies, so the live preview skips it), and saving always includes it.
 
 Recipes:
 
 - `valid_only`: keep only some trials, e.g. `response_validity == valid`
 - `split_by_column`: split a condition by a column, e.g. split `item` by `response_validity`
 - `merge_rename`: merge conditions, e.g. `a, b -> ab`
-- `parametric_modulator`: modulate a regressor, e.g. `RT`, polynomial order 1-3; must be the last recipe
+- `parametric_modulator`: modulate a regressor, e.g. `RT`, polynomial order 1-3; add it last: a later recipe that would consume the modulated regressor is rejected
 
 Name rules: letters, digits and underscore only; `-` is also allowed in condition and value names. Values that start with a digit
 get a `v` prefix in the generated column names (`2` becomes `v2`).
+
+Splits with more than one value (or with the original kept) rename the split cells to the output column, so each regressor is a different condition in SPM (e.g. `valid_item.valid_item` and `invalid_item.invalid_item`); a single-value split keeps `valid_item.item`.
 
 The preflight verdict is shown before saving. Saving is still allowed when preflight reports data problems (for example events
 missing for one subject), so you can fix the data afterwards.
