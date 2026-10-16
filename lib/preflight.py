@@ -200,7 +200,7 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
             try:
                 cols = _read_header(f)
             except (OSError, UnicodeDecodeError, csv.Error) as e:
-                out.append(_item("confound_columns", ERROR, f"{f.name} cannot be read as UTF-8 text ({e})",
+                out.append(_item("confound_columns", ERROR, f"{f.name} header cannot be read as UTF-8 text ({e})",
                                  "Re-run fMRIPrep to regenerate the confounds file.", sub))
                 continue
             missing = [n for n in nuisance if not any(fnmatch.fnmatch(c, n) for c in cols)]
@@ -312,6 +312,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     needs = _model_needs(model_file)
     conditions, _, transformed, _ = needs
     listings = {}  # one directory walk per subject and root, shared by all tasks
+    # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
     for task in tasks:
         seen_by_sub = {}
         for sub in selected:
