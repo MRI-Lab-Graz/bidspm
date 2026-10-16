@@ -15,7 +15,7 @@ function renderPreflight(report) {
     verdict.className = `alert alert-${tone} py-1 mb-1 preflight-verdict`;
     verdict.append('Readiness: ');
     const strong = document.createElement('strong');
-    strong.textContent = report.verdict;
+    strong.textContent = report.verdict || 'unknown';
     verdict.append(strong);
     const list = document.createElement('ul');
     list.className = 'list-unstyled mb-0';
@@ -35,12 +35,24 @@ function renderPreflight(report) {
 }
 
 async function runPreflight() {
-    updateInternalState();
-    const res = await fetch('/api/preflight', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({config: unifiedStudyConfig, validator: validatorMode()})
-    });
-    renderPreflight(await res.json());
+    const btn = document.getElementById('btn-preflight');
+    btn.disabled = true;
+    try {
+        updateInternalState();
+        const res = await fetch('/api/preflight', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({config: unifiedStudyConfig, validator: validatorMode()})
+        });
+        let report;
+        try { report = await res.json(); } catch (e) { throw new Error(`HTTP ${res.status}`); }
+        if (!report.verdict) throw new Error(report.error || `HTTP ${res.status}`);
+        renderPreflight(report);
+    } catch (e) {
+        renderPreflight({verdict: 'blocked', checks: [{severity: 'error', subject: null,
+            message: `Readiness check failed: ${e.message}`, fix: 'Check that the server is running and try again.'}]});
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 (function () {

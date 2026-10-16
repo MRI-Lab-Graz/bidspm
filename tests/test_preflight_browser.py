@@ -53,3 +53,52 @@ class TestPreflightPanel(unittest.TestCase):
         text = page.inner_text("#preflight-panel")
         self.assertIn("<b>x</b>", text)
         self.assertIn("<i>this</i>", text)
+
+    BLOCKED = {"error": "preflight failed", "preflight": {"verdict": "blocked", "checks": [
+        {"id": "x", "severity": "error", "subject": None, "message": "no fMRIPrep <u>tree</u>", "fix": "run fMRIPrep"}]}}
+
+    def run_with_route(self, path, status, body, content_type="application/json"):
+        page = self.open_page()
+        page.route(f"**{path}", lambda r: r.fulfill(status=status, body=body, content_type=content_type))
+        return page
+
+    def test_blocked_run_explains_why_in_terminal_and_panel(self):
+        import json
+        page = self.run_with_route("/run", 400, json.dumps(self.BLOCKED))
+        page.evaluate("startExecution({actions: ['x']})")
+        page.wait_for_function("document.getElementById('exec-status').innerText === 'IDLE'")
+        term = page.evaluate("terminal.innerText")
+        self.assertIn("no fMRIPrep <u>tree</u>", term)
+        self.assertIn("run fMRIPrep", term)
+        self.assertIn("blocked", page.inner_text("#preflight-panel").lower())
+
+    def test_run_non_json_response_resets_status(self):
+        page = self.run_with_route("/run", 500, "<html>boom</html>", "text/html")
+        page.evaluate("startExecution({actions: ['x']})")
+        page.wait_for_function("document.getElementById('exec-status').innerText === 'IDLE'")
+        self.assertIn("500", page.evaluate("terminal.innerText"))
+
+    def test_preflight_non_json_response_shows_blocked_failure(self):
+        page = self.run_with_route("/api/preflight", 500, "<html>boom</html>", "text/html")
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertIn("Readiness check failed", page.inner_text("#preflight-panel"))
+        self.assertTrue(page.is_enabled("#btn-preflight"))
+
+    def test_successful_run_clears_stale_panel(self):
+        page = self.open_page()
+        page.evaluate("renderPreflight({verdict: 'blocked', checks: []})")
+        page.route("**/run", lambda r: r.fulfill(status=200, body='{"execution_id": "nope"}', content_type="application/json"))
+        page.evaluate("startExecution({actions: ['x']})")
+        page.wait_for_function("document.getElementById('preflight-panel').children.length === 0")
+
+    def test_missing_verdict_renders_unknown(self):
+        page = self.open_page()
+        page.evaluate("renderPreflight({checks: []})")
+        self.assertIn("unknown", page.inner_text("#preflight-panel"))
+
+    def test_validator_choice_is_keyed_per_project(self):
+        page = self.open_page()
+        page.select_option("#validator-mode", "skip")
+        keys = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('bidspm_validator_mode_'))")
+        self.assertEqual(keys, [f"bidspm_validator_mode_{self.project_id}"])
