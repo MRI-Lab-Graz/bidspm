@@ -113,7 +113,7 @@ def test_run_passes_validator_through(tmp_path):
         _post_run(app.test_client(), actions=["stats"], settings=str(settings), validator="skip")
         assert pf.call_args.kwargs["validator"] == "skip"
         _post_run(app.test_client(), actions=["stats"], settings=str(settings))
-        assert pf.call_args.kwargs["validator"] == "prism"
+        assert pf.call_args.kwargs["validator"] == "auto"
 
 
 def test_run_with_bogus_validator_is_blocked(tmp_path):
@@ -152,3 +152,9 @@ def test_api_preflight_accepts_actions(tmp_path):
         f.unlink()
     res = app.test_client().post("/api/preflight", json={"config": c, "validator": "skip", "actions": ["smooth"]})
     assert res.get_json()["verdict"] == "warnings"
+
+
+def test_api_preflight_defaults_validator_to_auto():
+    with patch("webapp.web_preflight_api.run_preflight_from_config", return_value=BLOCKED) as pf:
+        app.test_client().post("/api/preflight", json={"config": {}})
+    assert pf.call_args.kwargs["validator"] == "auto"

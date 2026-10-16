@@ -13,5 +13,5 @@ def register_preflight_routes(app: Flask) -> None:
         actions = data.get('actions')
         return jsonify(run_preflight_from_config(
             config if isinstance(config, dict) else {},
-            model=data.get('model') or '', validator=data.get('validator') or 'prism',
+            model=data.get('model') or '', validator=data.get('validator') or 'auto',
             actions=actions if isinstance(actions, list) else None))

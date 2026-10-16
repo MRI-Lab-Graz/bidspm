@@ -3,7 +3,7 @@
 const VALIDATOR_KEY = `bidspm_validator_mode_${currentProjectId}`;
 
 function validatorMode() {
-    return document.getElementById('validator-mode')?.value || 'prism';
+    return document.getElementById('validator-mode')?.value || 'auto';
 }
 
 // Messages come from the server and contain user paths: build DOM nodes, never innerHTML.
@@ -63,7 +63,7 @@ async function runPreflight() {
     document.getElementById('preflight-note').textContent =
         'Checks all subjects with the current form settings; Run checks the saved project settings and your subject selection.';
     const select = document.getElementById('validator-mode');
-    try { select.value = localStorage.getItem(VALIDATOR_KEY) || 'prism'; } catch (e) { /* storage unavailable */ }
+    try { select.value = localStorage.getItem(VALIDATOR_KEY) || 'auto'; } catch (e) { /* storage unavailable */ }
     select.addEventListener('change', () => { try { localStorage.setItem(VALIDATOR_KEY, select.value); } catch (e) { /* ignore */ } });
     document.getElementById('btn-preflight').addEventListener('click', runPreflight);
 })();

@@ -101,7 +101,7 @@ def _model_needs(model_file):
                 transformed = True
                 for ins in instructions:
                     out = ins.get("Output")
-                    produced |= {str(o) for o in (out if isinstance(out, list) else [out])}
+                    produced |= {str(o) for o in (out if isinstance(out, list) else [out]) if o is not None}
             xs = (node.get("Model") or {}).get("X")
             for x in xs if isinstance(xs, list) else []:  # a bare string would iterate as characters
                 if not isinstance(x, str) or x in ("0", "1"):
@@ -229,12 +229,18 @@ def _first_json_object(text):
     return None
 
 
-def check_validator(bids_dir, mode="prism", run=None):
+def check_validator(bids_dir, mode="auto", run=None):
     """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins."""
     if mode == "skip":
-        return [_item("validator", WARN, "Dataset validator skipped.", "Choose 'PRISM' or 'plain BIDS' to validate the dataset.")]
-    if mode not in ("prism", "bids"):
-        return [_item("validator", ERROR, f"unknown validator mode: {mode!r}", "Choose 'PRISM', 'plain BIDS' or 'skip'.")]
+        return [_item("validator", WARN, "Dataset validator skipped.", "Choose 'auto', 'PRISM' or 'plain BIDS' to validate the dataset.")]
+    if mode not in ("auto", "prism", "bids"):
+        return [_item("validator", ERROR, f"unknown validator mode: {mode!r}", "Choose 'auto', 'PRISM', 'plain BIDS' or 'skip'.")]
+    detected = ""
+    if mode == "auto":  # a PRISM dataset has project.json at its root
+        found = (Path(bids_dir) / "project.json").is_file()
+        mode = "prism" if found else "bids"
+        detected = (f" Validator mode was auto-detected as {'PRISM' if found else 'plain BIDS'} "
+                    f"(project.json {'found' if found else 'not found'}).")
     exe = Path(sys.executable).parent / "prism-validator"
     exe = str(exe) if exe.is_file() else shutil.which("prism-validator")
     if not exe:
@@ -257,8 +263,8 @@ def check_validator(bids_dir, mode="prism", run=None):
     for i in errors:
         first = (str(i.get("message") or "").splitlines() or [""])[0]
         groups.setdefault((str(i.get("code", "?")), first), []).append(i)
-    fix = ("Fix the dataset. If this is not a PRISM dataset, choose 'plain BIDS' in the validator select "
-           "(CLI: --validator bids); to ignore unrelated problems choose 'skip'.")
+    plain = " If this is not a PRISM dataset, choose 'plain BIDS' in the validator select (CLI: --validator bids);" if mode == "prism" else ""
+    fix = f"Fix the dataset.{plain} To ignore unrelated problems choose 'skip'.{detected}"
     out = []
     for (code, first), items in list(groups.items())[:MAX_VALIDATOR_ERRORS]:
         count = f" x{len(items)}" if len(items) > 1 else ""
@@ -275,9 +281,9 @@ def check_validator(bids_dir, mode="prism", run=None):
 
 
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
-                  validator="prism", container_type="", skip_model_validation=False, actions=None):
+                  validator="auto", container_type="", skip_model_validation=False, actions=None):
     """actions=None checks everything; without 'stats'/'dataset' only folders, subjects, preproc and validator are checked."""
-    full = actions is None or any(str(a).lower() in ("stats", "dataset") for a in actions)
+    full = not actions or any(str(a).lower() in ("stats", "dataset") for a in actions)
     checks = check_dirs(bids_dir, fmriprep_dir)
     if not checks:
         checks += check_validator(bids_dir, validator)
@@ -317,10 +323,12 @@ def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", sub
 
 
 def _as_list(value):
-    return [value] if isinstance(value, str) else list(value or [])
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value]
+    return [] if value is None or isinstance(value, dict) else [str(value)]
 
 
-def run_preflight_from_config(cfg, model="", validator="prism", skip_model_validation=False, actions=None):
+def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None):
     return run_preflight(
         bids_dir=cfg.get("BIDS_DIR", ""), fmriprep_dir=cfg.get("FMRIPREP_DIR", ""),
         model_file=model or cfg.get("MODELS_FILE", ""), tasks=_as_list(cfg.get("TASKS")),

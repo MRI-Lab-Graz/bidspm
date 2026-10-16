@@ -199,7 +199,7 @@ def register_execution_routes(
             if not isinstance(config, dict):
                 return reject('Failed to read settings file: expected a JSON object')
             preflight = run_preflight_from_config(
-                config, model=data.get('model') or '', validator=data.get('validator') or 'prism',
+                config, model=data.get('model') or '', validator=data.get('validator') or 'auto',
                 skip_model_validation=bool(data.get('skip_validation')), actions=actions)
             if preflight['verdict'] == 'blocked':
                 return reject('Preflight check failed: fix the listed problems before running.', preflight=preflight)

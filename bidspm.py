@@ -70,8 +70,9 @@ OPTIONAL ARGUMENTS:
     --estimate-time      Estimate processing time and exit
     --preflight          Run the readiness check, print a JSON report and exit
                          (exit code 1 if blocked); needs -s
-    --validator          Dataset validator for --preflight: prism (default,
-                         BIDS + PRISM), bids (plain BIDS) or skip
+    --validator          Dataset validator for --preflight: auto (default: prism
+                         if project.json is in the BIDS root, else bids),
+                         prism (BIDS + PRISM), bids (plain BIDS) or skip
     --skip-validator     Same as --validator skip (shown as a warning)
 
 EXAMPLES:
@@ -179,8 +180,8 @@ def parse_arguments():
                        help='List available tasks and exit')
     parser.add_argument('--preflight', action='store_true',
                         help='Check that BIDS, fMRIPrep and the model can run; print a JSON report, exit 1 if blocked')
-    parser.add_argument('--validator', choices=['prism', 'bids', 'skip'], default='prism',
-                        help='Dataset validator for --preflight: PRISM+BIDS (default), plain BIDS, or skip')
+    parser.add_argument('--validator', choices=['auto', 'prism', 'bids', 'skip'], default='auto',
+                        help='Dataset validator for --preflight: auto (default: PRISM if project.json, else plain BIDS), PRISM+BIDS, plain BIDS, or skip')
     parser.add_argument('--skip-validator', action='store_true', help='Same as --validator skip')
     parser.add_argument('--estimate-time', action='store_true',
                        help='Estimate processing time and exit')

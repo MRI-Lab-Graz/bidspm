@@ -215,13 +215,13 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 - the dataset validator (`validator`)
 
 ```bash
-python bidspm.py --preflight -s config/config.json [--validator prism|bids|skip | --skip-validator]
+python bidspm.py --preflight -s config/config.json [--validator auto|prism|bids|skip | --skip-validator]
 ```
 
 It prints a JSON report (`verdict`: `ready`, `warnings` or `blocked`) and exits 1 if blocked. In the GUI the analysis page has a
 "Check readiness" button and a validator select; errors block Run (smooth/stats/dataset).
 
-Validator modes: `prism` (default, PRISM + BIDS), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
+Validator modes: `auto` (default: PRISM if the BIDS root has a `project.json`, otherwise plain BIDS), `prism` (PRISM + BIDS, forced), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
 is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.
 
 The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from lib import core
-from lib.preflight import check_validator, run_preflight, run_preflight_from_config, _model_needs, _verdict
+from lib.preflight import check_validator, run_preflight, run_preflight_from_config, _model_needs, _verdict, _as_list
 from tests.preflight_support import make_trees, write_model
 
 
@@ -337,6 +337,64 @@ def test_validator_error_blocks_the_whole_preflight(tmp_path, fake_exe):
     with patch("lib.preflight.subprocess.run", fake_run(json.dumps(REPORT))):
         result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="prism")
     assert result["verdict"] == "blocked" and "validator" in ids(result, "error")
+
+
+def _auto_cmd(tmp_path, project_json, mode="auto"):
+    calls = []
+    if project_json:
+        (tmp_path / "project.json").write_text("{}")
+    check_validator(tmp_path, mode, run=fake_run(json.dumps({"issues": []}), 0, calls))
+    return calls[0]
+
+
+def test_auto_with_project_json_uses_prism(tmp_path, fake_exe):
+    assert "--no-prism" not in _auto_cmd(tmp_path, True)
+
+
+def test_auto_without_project_json_uses_plain_bids(tmp_path, fake_exe):
+    assert "--no-prism" in _auto_cmd(tmp_path, False)
+
+
+def test_explicit_prism_without_project_json_still_prism(tmp_path, fake_exe):
+    assert "--no-prism" not in _auto_cmd(tmp_path, False, "prism")
+
+
+def test_default_mode_is_auto(tmp_path, fake_exe):
+    calls = []
+    check_validator(tmp_path, run=fake_run(json.dumps({"issues": []}), 0, calls))
+    assert "--no-prism" in calls[0]
+
+
+def test_auto_error_says_which_mode_was_detected(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "auto", run=fake_run(json.dumps(REPORT)))
+    assert "auto-detected as plain BIDS (project.json not found)." in out[0]["fix"]
+    assert "choose 'plain BIDS'" not in out[0]["fix"]
+    (tmp_path / "project.json").write_text("{}")
+    out = check_validator(tmp_path, "auto", run=fake_run(json.dumps(REPORT)))
+    assert "auto-detected as PRISM (project.json found)." in out[0]["fix"] and "plain BIDS" in out[0]["fix"]
+
+
+def test_explicit_mode_has_no_autodetect_sentence(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "prism", run=fake_run(json.dumps(REPORT)))
+    assert "auto-detected" not in out[0]["fix"]
+
+
+def test_empty_actions_means_full_checks(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    (bids / "sub-01" / "func" / "sub-01_task-x_events.tsv").unlink()
+    assert "events_missing" in ids(pf(tmp_path, bids, fmriprep, actions=[]), "error")
+
+
+@pytest.mark.parametrize("value,expected", [(5, ["5"]), ({"a": 1}, []), (None, []), ((1, "b"), ["1", "b"]), ({"x"}, ["x"]), ("s", ["s"])])
+def test_as_list_never_raises(value, expected):
+    assert _as_list(value) == expected
+
+
+def test_null_transformation_output_is_not_a_produced_name(tmp_path):
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({"Nodes": [{"Level": "Run", "Transformations": {"Instructions": [
+        {"Name": "Filter", "Output": None}, {"Name": "Filter"}]}}]}))
+    assert _model_needs(path)[3] == set()
 
 
 @pytest.mark.skipif(not (Path(sys.executable).parent / "prism-validator").exists() and not shutil.which("prism-validator"),

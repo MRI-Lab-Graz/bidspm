@@ -74,3 +74,10 @@ def test_cli_preflight_uses_action_values(tmp_path):
     path.write_text(json.dumps(cfg))
     assert "events_missing" in cli("--preflight", "--skip-validator", "-s", str(path)).stdout
     assert "events_missing" not in cli("--preflight", "--skip-validator", "--action", "smooth", "-s", str(path)).stdout
+
+
+def test_cli_validator_defaults_to_auto():
+    import bidspm
+    from unittest.mock import patch
+    with patch("sys.argv", ["bidspm.py", "--preflight"]):
+        assert bidspm.parse_arguments().validator == "auto"

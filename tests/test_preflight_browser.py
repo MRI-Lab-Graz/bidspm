@@ -39,6 +39,9 @@ class TestPreflightPanel(unittest.TestCase):
         self.assertTrue(page.locator("#preflight-panel .preflight-fix").count() >= 1)
         self.assertEqual(errors, [])
 
+    def test_validator_select_defaults_to_auto(self):
+        self.assertEqual(self.open_page().input_value("#validator-mode"), "auto")
+
     def test_validator_choice_is_remembered_per_project(self):
         page = self.open_page()
         page.select_option("#validator-mode", "bids")
