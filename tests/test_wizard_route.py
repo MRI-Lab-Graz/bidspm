@@ -142,3 +142,40 @@ def test_preflight_removes_temp_model_even_when_it_raises(tmp_path):
         with pytest.raises(RuntimeError):
             _preflight({"Name": "m"}, "b", "f", "MNI", "x")
     assert list(Path(tmpdir).iterdir()) == []
+
+
+MULTI = ("onset\tduration\ttrial_type\tresponse_validity\trt\n"
+         "1\t1\titem\tvalid\t0.5\n5\t1\titem\tinvalid\t0.6\n9\t1\tb\tvalid\t0.7\n")
+
+
+def test_valid_only_and_split_build_through_real_scan(tmp_path):
+    p = paths(tmp_path, events=MULTI)
+    recipes = [{"id": "valid_only", "condition": "item", "column": "response_validity", "value": "valid"},
+               {"id": "split_by_column", "condition": "b", "column": "response_validity", "values": ["valid"]}]
+    scan = post("/api/wizard/scan", p).get_json()
+    assert scan["numeric"] == ["rt"] and scan["truncated"] == [] and scan["events_files"] == 1
+    assert "response_validity" in scan["columns"]
+    for r in recipes:
+        res = post("/api/wizard/build", {**p, "choices": choices(nuisance="none", recipes=[r])})
+        assert res.status_code == 200, res.get_json()
+
+
+def test_condition_in_one_subject_only_is_offered(tmp_path):
+    p = paths(tmp_path, subjects=("01", "02"))
+    f = tmp_path / "bids/sub-02/func/sub-02_task-x_events.tsv"
+    f.write_text(f.read_text() + "9\t1\trare\n")
+    assert "rare" in post("/api/wizard/scan", p).get_json()["columns"]["trial_type"]
+
+
+def test_truncated_trial_type_adds_preview_warning(tmp_path):
+    p = paths(tmp_path)
+    with mock.patch("webapp.web_wizard_api.scan_events",
+                    return_value={"columns": {"trial_type": ["a", "b"]}, "numeric": [], "files": 1, "truncated": ["trial_type"]}):
+        res = post("/api/wizard/build", {**p, "choices": choices(nuisance="none")})
+    assert any("trial_type has more than" in w for w in res.get_json()["preview"]["warnings"])
+
+
+def test_preflight_exception_is_json_500(tmp_path):
+    with mock.patch("webapp.web_wizard_api.run_preflight_from_config", side_effect=RuntimeError("boom")):
+        res = post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none")})
+    assert res.status_code == 500 and "boom" in res.get_json()["error"]

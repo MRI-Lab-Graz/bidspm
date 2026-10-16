@@ -7,30 +7,32 @@ from pathlib import Path
 from flask import Flask, jsonify, request
 
 from lib.core import discover_tasks
-from lib.model_wizard import NUISANCE_PRESETS, WizardError, build_model, catalog
+from lib.model_wizard import NUISANCE_PRESETS, WizardError, build_model, catalog, scan_events
 from lib.preflight import _verdict, run_preflight_from_config
-from webapp.web_discovery_model_api import _discover_confound_info, _discover_event_info
+from webapp.web_discovery_model_api import _discover_confound_info
 
 
 def _scan(bids_dir, fmriprep_dir, task):
     tasks = discover_tasks(Path(bids_dir))
     task = task if task in tasks else (tasks[0] if tasks else "")
-    events = _discover_event_info(Path(bids_dir), [task] if task else None)
+    events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": []}
     confounds = _discover_confound_info(Path(fmriprep_dir), [task] if task else None) if fmriprep_dir else {"columns": []}
-    return {"tasks": tasks, "task": task, "columns": events["sample_values"],
-            "numeric": events["numeric_columns"], "confound_columns": confounds["columns"]}
+    return {"tasks": tasks, "task": task, "columns": events["columns"],
+            "numeric": events["numeric"], "confound_columns": confounds["columns"],
+            "truncated": events["truncated"], "events_files": events["files"]}
 
 
 def _preflight(model, bids_dir, fmriprep_dir, space, task):
     """Preflight of the proposed model against the real data (the dataset validator is not model-related: dropped)."""
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
-        json.dump(model, fh)
+    fd, name = tempfile.mkstemp(suffix=".json")
     try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(model, fh)
         report = run_preflight_from_config(
             {"BIDS_DIR": bids_dir, "FMRIPREP_DIR": fmriprep_dir, "SPACE": space or "", "TASKS": [task]},
-            model=fh.name, validator="skip", actions=["stats"])
+            model=name, validator="skip", actions=["stats"])
     finally:
-        os.unlink(fh.name)
+        os.unlink(name)
     checks = [c for c in report["checks"] if c["id"] != "validator"]
     return {"verdict": _verdict(checks), "checks": checks}
 
@@ -71,10 +73,17 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
             if os.path.exists(save_path) and not data.get("overwrite"):
                 return jsonify({"error": "File already exists. Set overwrite=true to replace it."}), 409
         try:
-            result = build_model(choices, _scan(bids_dir, fmriprep_dir, choices.get("task")))
+            scan = _scan(bids_dir, fmriprep_dir, choices.get("task"))
+            result = build_model(choices, scan)
         except WizardError as exc:
             return jsonify({"error": str(exc)}), 400
-        result["preflight"] = _preflight(result["model"], bids_dir, fmriprep_dir, data.get("space"), choices["task"])
+        if "trial_type" in scan["truncated"]:
+            n = len(scan["columns"]["trial_type"])
+            result["preview"]["warnings"].append(f"trial_type has more than {n} values; only the first {n} are offered")
+        try:
+            result["preflight"] = _preflight(result["model"], bids_dir, fmriprep_dir, data.get("space"), choices["task"])
+        except Exception as exc:  # JSON instead of an HTML 500
+            return jsonify({"error": f"preflight failed: {exc}"}), 500
         if save_path:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, "w", encoding="utf-8") as fh:

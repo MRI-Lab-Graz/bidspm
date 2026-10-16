@@ -5,7 +5,9 @@ state = {"regressors": ["column.value", ...], "instructions": [...], "pmods": [.
          "columns": {column: [values]}, "numeric": {columns}}.
 """
 import copy
+import csv
 import re
+from pathlib import Path
 
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 MOTION6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
@@ -325,3 +327,37 @@ def build_model(choices, scan):
              "Nodes": [run, *second_level_nodes(names)]}
     return {"model": model, "preview": {"regressors": list(regressors), "nuisance": nuisance, "contrasts": names,
                                         "transformations": state["instructions"], "warnings": state["warnings"]}}
+
+
+def scan_events(bids_dir, task, max_files=300, max_values=200):
+    """Union of every events column and value over all subjects of a task (plus a dataset-level events file)."""
+    root = Path(bids_dir)
+    files = sorted(set(root.glob(f"sub-*/**/func/*task-{task}_*events.tsv")) | set(root.glob(f"task-{task}_events.tsv")))
+    values, numeric_bad, truncated, used = {}, set(), set(), 0
+    for path in files[:max_files]:
+        try:
+            with open(path, encoding="utf-8-sig", newline="") as fh:
+                rows = list(csv.DictReader(fh, delimiter="\t"))
+        except (OSError, UnicodeError, csv.Error):
+            continue
+        used += 1
+        for row in rows:
+            for col, val in row.items():
+                if not col or col in ("onset", "duration") or val is None:
+                    continue
+                seen = values.setdefault(col, set())
+                if val in NA:
+                    continue
+                try:
+                    float(val)
+                except ValueError:
+                    numeric_bad.add(col)
+                if val in seen:
+                    continue
+                if len(seen) >= max_values:
+                    truncated.add(col)
+                else:
+                    seen.add(val)
+    return {"columns": {c: sorted(v) for c, v in values.items()},
+            "numeric": sorted(c for c, v in values.items() if v and c not in numeric_bad),
+            "files": used, "truncated": sorted(truncated)}
