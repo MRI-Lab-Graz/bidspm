@@ -174,15 +174,17 @@ def test_valid_only_reproduces_the_141_filter_chain():
 
 def test_valid_only_can_keep_the_original_regressor():
     x = run_node(build_model(choices(recipes=[valid_only(keep_original=True)]), SCAN))["Model"]["X"]
-    assert "trial_type.item" in x and "valid_item.item" in x
+    assert "trial_type.item" in x and "valid_item.valid_item" in x
 
 
 def test_split_by_column_makes_one_regressor_per_value_with_one_shared_first_filter():
     recipe = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
     node = run_node(build_model(choices(recipes=[recipe]), SCAN))
     instr = node["Transformations"]["Instructions"]
-    assert [i["Output"] for i in instr] == ["trial_item", "valid_item", "invalid_item"]
-    assert {"valid_item.item", "invalid_item.item"} <= set(node["Model"]["X"])
+    assert [(i["Name"], i["Output"]) for i in instr] == [
+        ("Filter", "trial_item"), ("Filter", "valid_item"), ("Replace", "valid_item"),
+        ("Filter", "invalid_item"), ("Replace", "invalid_item")]
+    assert {"valid_item.valid_item", "invalid_item.invalid_item"} <= set(node["Model"]["X"])
 
 
 def test_split_by_column_respects_a_value_subset():
@@ -283,7 +285,7 @@ def test_valid_only_with_keep_original_does_not_warn():
 def test_duplicate_split_values_are_deduped():
     recipe = {**SPLIT, "values": ["valid", "valid", "invalid"]}
     instr = run_node(build_model(choices(recipes=[recipe]), SCAN))["Transformations"]["Instructions"]
-    assert [i["Output"] for i in instr] == ["trial_item", "valid_item", "invalid_item"]
+    assert [i["Output"] for i in instr if i["Name"] == "Filter"] == ["trial_item", "valid_item", "invalid_item"]
 
 
 def test_catalog_returns_a_deep_copy():
@@ -473,8 +475,8 @@ def test_digit_leading_value_gets_a_v_prefix():
 def test_split_by_column_with_digit_values():
     split = {"id": "split_by_column", "condition": "item", "column": "response_validity", "values": ["1", "2"]}
     node = run_node(build_model(choices(recipes=[split]), SCAN_DIGITS))
-    assert [i["Output"] for i in node["Transformations"]["Instructions"]] == ["trial_item", "v1_item", "v2_item"]
-    assert node["Model"]["X"] == ["trial_type.a", "trial_type.b", "v1_item.item", "v2_item.item", 1]
+    assert [i["Output"] for i in node["Transformations"]["Instructions"] if i["Name"] == "Filter"] == ["trial_item", "v1_item", "v2_item"]
+    assert node["Model"]["X"] == ["trial_type.a", "trial_type.b", "v1_item.v1_item", "v2_item.v2_item", 1]
 
 
 def test_prefixed_output_still_clashes_with_an_events_column():
@@ -523,3 +525,73 @@ def test_wizard_reproduces_the_141_run_node():
 def test_dataset_node_is_named_dataset():
     # bidspm looks the Dataset node up by exact name; preflight warns otherwise
     assert second_level_nodes(["a"])[1]["Name"] == "dataset"
+
+
+def spm_names(node):
+    """The name bidspm gives the SPM condition: everything after the first '.' of the regressor."""
+    return [r.split(".", 1)[1] for r in node["Model"]["X"] if isinstance(r, str) and "." in r]
+
+
+def test_split_regressors_are_distinct_spm_conditions_with_a_rename_per_value():
+    recipe = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
+    node = run_node(build_model(choices(recipes=[recipe]), SCAN))
+    assert {"Name": "Replace", "Input": "valid_item", "Output": "valid_item",
+            "Replace": [{"key": "^item$", "value": "valid_item"}]} in node["Transformations"]["Instructions"]
+    assert len(set(spm_names(node))) == len(spm_names(node)) == 4
+    assert [c["Name"] for c in node["Contrasts"]][-2:] == ["valid_item", "invalid_item"]
+
+
+def test_keep_original_renames_the_split_regressor():
+    node = run_node(build_model(choices(recipes=[valid_only(keep_original=True)]), SCAN))
+    assert spm_names(node) == ["a", "b", "item", "valid_item"]
+
+
+def test_single_value_split_keeps_the_141_form():
+    node = run_node(build_model(choices(recipes=[valid_only()]), SCAN))
+    assert "valid_item.item" in node["Model"]["X"]
+    assert not any(i["Name"] == "Replace" for i in node["Transformations"]["Instructions"])
+
+
+def test_hyphenated_condition_split_renames_with_an_escaped_key():
+    recipe = {"id": "split_by_column", "condition": "face-happy", "column": "response_validity"}
+    node = run_node(build_model(choices(recipes=[recipe]), HY_SCAN))
+    replace = [i for i in node["Transformations"]["Instructions"] if i["Name"] == "Replace"]
+    assert replace[0]["Replace"] == [{"key": "^face\\-happy$", "value": replace[0]["Output"]}]
+    assert len(set(spm_names(node))) == len(spm_names(node))
+
+
+def test_pmod_on_one_split_regressor_and_pair_contrast():
+    recipe = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
+    pmod = {"id": "parametric_modulator", "regressor": "valid_item.valid_item", "column": "rt"}
+    pair = {"name": "valid_gt_invalid", "positive": ["valid_item.valid_item"], "negative": ["invalid_item.invalid_item"]}
+    node = run_node(build_model(choices(recipes=[recipe, pmod], contrasts={"auto": True, "pairs": [pair]}), SCAN))
+    assert node["Model"]["Software"]["SPM"]["ParametricModulations"][0]["Conditions"] == ["valid_item.valid_item"]
+    assert node["Contrasts"][-1]["ConditionList"] == ["valid_item.valid_item", "invalid_item.invalid_item"]
+    assert "valid_item.valid_item:rt_mod^1" in [c["ConditionList"][0] for c in node["Contrasts"]]
+
+
+def test_clashing_spm_condition_names_are_rejected():
+    # a merge target equal to the renamed split regressor's SPM name would give two columns the same condition
+    with pytest.raises(WizardError, match="same name"):
+        build_model(choices(recipes=[valid_only(keep_original=True), merge(["a", "b"], "valid_item")]), SCAN)
+
+
+def test_auto_false_without_pairs_is_rejected():
+    with pytest.raises(WizardError, match="no contrasts"):
+        build_model(choices(contrasts={"auto": False, "pairs": []}), SCAN)
+
+
+@pytest.mark.parametrize("pair", [
+    {"name": "x", "positive": [["trial_type.a"]], "negative": ["trial_type.b"]},
+    {"name": "x", "positive": [{"a": 1}], "negative": ["trial_type.b"]},
+    {"name": "x", "positive": ["trial_type.a"], "negative": [5]},
+])
+def test_pair_items_must_be_strings(pair):
+    with pytest.raises(WizardError):
+        build_model(choices(contrasts={"auto": False, "pairs": [pair]}), SCAN)
+
+
+@pytest.mark.parametrize("bad", [{"id": 5}, {"id": ["valid_only"]}, {"id": {}}])
+def test_recipe_id_must_be_a_string(bad):
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), SCAN)

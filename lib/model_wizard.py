@@ -29,6 +29,9 @@ def _t_contrast(name, conditions, weights):
 
 
 def _contrast_name(ref):
+    head, _, tail = ref.partition(".")
+    if head == tail:  # renamed split regressor "<out>.<out>"
+        ref = head
     name = re.sub(r"[^A-Za-z0-9_]+", "_", ref.removeprefix("trial_type.")).strip("_")
     if not name:
         raise WizardError(f"cannot derive a contrast name from {ref!r}")
@@ -75,8 +78,8 @@ def _run_contrasts(regressors, pmods, spec):
     for pair in _expect(spec.get("pairs", []), list, "contrasts.pairs"):
         _expect(pair, dict, "contrast pair")
         name = _expect(pair.get("name") or "", str, "contrast name")
-        pos = _expect(pair.get("positive") or [], list, "contrast positive")
-        neg = _expect(pair.get("negative") or [], list, "contrast negative")
+        pos = _str_list_param("contrast positive", pair.get("positive") or [])
+        neg = _str_list_param("contrast negative", pair.get("negative") or [])
         if not NAME_RE.fullmatch(name):
             raise WizardError(f"contrast name {name!r}: use letters, digits and underscores only")
         unknown = [r for r in pos + neg if r not in regressors]
@@ -85,6 +88,8 @@ def _run_contrasts(regressors, pmods, spec):
         if len(set(pos + neg)) != len(pos + neg):
             raise WizardError(f"contrast {name!r} uses a regressor twice")
         out.append(_t_contrast(name, pos + neg, [1 / len(pos)] * len(pos) + [-1 / len(neg)] * len(neg)))
+    if not out:
+        raise WizardError("the model has no contrasts; keep the automatic contrasts or add a pair")
     names = [c["Name"] for c in out]
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
@@ -154,7 +159,7 @@ def _first_filter(state, condition):
     out = f"trial_{_coerce(condition)}"
     instruction = {"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out}
     if instruction in state["instructions"]:
-        if any(i["Name"] == "Replace" for i in state["instructions"][state["instructions"].index(instruction):]):
+        if any(i["Name"] == "Replace" and i["Input"] == "trial_type" for i in state["instructions"][state["instructions"].index(instruction):]):
             raise WizardError(f"the filter for {condition!r} predates a merge/rename and would miss the merged rows; put that recipe before the earlier one")
         return out
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
@@ -163,14 +168,19 @@ def _first_filter(state, condition):
     return out
 
 
-def _second_filter(state, source, column, value, condition):
+def _second_filter(state, source, column, value, condition, rename):
     out = f"{_coerce(value)}_{_coerce(condition)}"
     if out[0].isdigit():  # field names must not start with a digit; checked in Octave (see task-3 report)
         out = "v" + out
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
         raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
     state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})
-    return f"{out}.{condition}"
+    if not rename:
+        return f"{out}.{condition}"
+    # bidspm names the SPM condition after the part behind the first '.', so give every split regressor its own cell value
+    state["instructions"].append({"Name": "Replace", "Input": out, "Output": out,
+                                  "Replace": [{"key": f"^{re.escape(condition)}$", "value": out}]})
+    return f"{out}.{out}"
 
 
 def _split(state, condition, column, values, keep_original):
@@ -191,7 +201,8 @@ def _split(state, condition, column, values, keep_original):
     for label, v in [("condition", condition)] + [("value", v) for v in values]:
         _safe(label, v, hyphen=True)
     source = _first_filter(state, condition)
-    state["regressors"] += [_second_filter(state, source, column, v, condition) for v in values]
+    rename = keep_original or len(values) > 1
+    state["regressors"] += [_second_filter(state, source, column, v, condition, rename) for v in values]
     if not keep_original:
         _release(state, f"trial_type.{condition}")
 
@@ -301,13 +312,19 @@ def build_model(choices, scan):
     state = {"regressors": [f"trial_type.{c}" for c in conditions if c not in exclude], "instructions": [],
              "pmods": [], "warnings": [], "columns": scan["columns"], "numeric": set(scan.get("numeric", []))}
     for recipe in recipes:
-        fn = RECIPES.get(_expect(recipe, dict, "recipe").get("id"))
+        fn = RECIPES.get(_str_param("id", _expect(recipe, dict, "recipe").get("id")))
         if fn is None:
             raise WizardError(f"unknown recipe {recipe.get('id')!r}")
         fn(state, recipe)
     regressors = state["regressors"]
     if not regressors:
         raise WizardError("the model has no regressors left")
+    seen = {}
+    for r in regressors:
+        spm_name = r.split(".", 1)[1]
+        if spm_name in seen:
+            raise WizardError(f"{seen[spm_name]!r} and {r!r} would get the same name ({spm_name!r}) in SPM; rename or merge one of them")
+        seen[spm_name] = r
     nuisance = _nuisance(choices.get("nuisance", "none"))
     contrasts = _run_contrasts(regressors, state["pmods"], choices.get("contrasts", {}))
     spm = {"SerialCorrelation": "FAST"}  # lab default (as in studies/141*.json); bidspm's own default is AR(1)
