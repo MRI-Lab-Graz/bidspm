@@ -111,6 +111,18 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(got, [c[2] for c in cases])
         self.assertEqual(self.errors, [])
 
+    def test_dataset_presets_name_the_node_exactly_dataset(self):
+        # bidspm looks the Dataset node up by exact name; a second one is suffixed (and warned about)
+        page = self.open_page()
+        got = page.evaluate("""() => {
+            const mk = (nodes) => window.BidspmAnalysisModelPresets.createModelHelperApi({getModelDraft: () => ({Nodes: nodes})});
+            return [mk([]).buildNodeFromPreset('dataset_basic').node.Name,
+                    mk([]).buildNodeFromPreset('one_sample_all').node.Name,
+                    mk([{Name: 'dataset'}]).buildNodeFromPreset('dataset_basic').node.Name];
+        }""")
+        self.assertEqual(got, ["dataset", "dataset", "dataset_2"])
+        self.assertEqual(self.errors, [])
+
     def test_transformer_launch_node_inference(self):
         page = self.open_page()
         page.evaluate("openModelEditor({scrollIntoView: false, showStatus: false})")
