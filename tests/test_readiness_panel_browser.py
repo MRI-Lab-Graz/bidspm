@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.browser_support import chromium_available, make_dataset, post_json, start_server, sync_playwright
+from tests.browser_support import (chromium_available, make_dataset, post_json, start_server, sync_playwright, go_to_stage)
 from tests.preflight_support import make_trees, write_model
 
 START = "**/api/preflight/start"
@@ -117,6 +117,7 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.route(CANCEL, lambda r: (self.requests.append(r.request.url), r.fulfill(
             status=200, body='{"status": "cancelling"}', content_type=JSON)))
         page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="load")
+        go_to_stage(page, "run")
         return page
 
     def panel(self, page):
@@ -533,6 +534,7 @@ class TestReadinessPanelRealServer(unittest.TestCase):
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="load")
+            go_to_stage(page, "run")
             page.select_option("#validator-mode", "skip")
             page.click("#btn-preflight")
             page.wait_for_selector("#preflight-panel .preflight-verdict", timeout=60000)

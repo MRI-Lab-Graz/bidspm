@@ -8,7 +8,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from tests.browser_support import (chromium_available, make_dataset, start_server, sync_playwright)
+from tests.browser_support import (chromium_available, go_to_stage, make_dataset, start_server, sync_playwright)
 
 # Every function the page defines globally; the refactor must keep each one reachable from window.
 GLOBAL_FUNCTIONS = [
@@ -70,6 +70,8 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
 
     def test_form_round_trips_and_controls_work(self):
         page = self.open_page()
+        go_to_stage(page, "options")
+        page.click("#options-advanced > summary")  # container settings sit in the Advanced block
         page.select_option("#estimation_engine", "standalone")
         page.check("#run_results")
         page.click("#suggest_workers")
@@ -84,6 +86,7 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
 
     def test_toolbar_buttons_are_wired(self):
         page = self.open_page()
+        go_to_stage(page, "run")
         # onclick handlers exist for every toolbar button (they are attached at load by analysis_buttons.js)
         wired = page.evaluate(
             "ids => ids.filter(id => typeof document.getElementById(id).onclick !== 'function')",
@@ -158,6 +161,7 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         page = self.open_page()
         bids = str(Path(self.tmp.name) / "bids")
         # folder mode (working directory)
+        go_to_stage(page, "folders")
         page.fill("#input-WD", bids)
         page.click('.btn-browse[data-key="WD"]')
         page.wait_for_selector("#browseModal.show")
@@ -174,6 +178,7 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         page.wait_for_selector("#browseModal", state="hidden")
         self.assertEqual(page.input_value("#input-WD"), bids)
         # file mode (models file): files are listed and clicking one selects it
+        go_to_stage(page, "model")
         page.click('.btn-browse[data-key="MODELS_FILE"]')
         page.wait_for_selector("#browseModal.show")
         page.wait_for_function("document.querySelectorAll('#browse-list > *').length > 0")

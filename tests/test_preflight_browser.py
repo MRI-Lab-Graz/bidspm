@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.browser_support import chromium_available, make_dataset, start_server, sync_playwright
+from tests.browser_support import (chromium_available, make_dataset, start_server, sync_playwright, go_to_stage)
 
 
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
@@ -26,6 +26,7 @@ class TestPreflightPanel(unittest.TestCase):
     def open_page(self):
         page = self.browser.new_page()
         page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="networkidle")
+        go_to_stage(page, "run")  # readiness controls, terminal and Run live in the last stage
         return page
 
     def test_button_renders_a_blocked_report_with_fix_hints(self):

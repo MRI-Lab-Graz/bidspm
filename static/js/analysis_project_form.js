@@ -261,7 +261,7 @@ function setupStaticListeners() {
         advancedToggle.checked = showModelAdvancedFields;
         advancedToggle.addEventListener('change', (e) => {
             showModelAdvancedFields = e.target.checked;
-            localStorage.setItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY, showModelAdvancedFields ? '1' : '0');
+            try { localStorage.setItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY, showModelAdvancedFields ? '1' : '0'); } catch (err) { /* storage blocked */ }
             if (modelEditorDraft) renderModelAccordionEditor();
         });
     }

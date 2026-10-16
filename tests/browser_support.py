@@ -77,3 +77,10 @@ def start_server(tmp: Path):
         "bids_folder": str(tmp / "bids"), "derivatives_folder": str(tmp / "derivs"),
         "models_file": str(tmp / "model.json"), "tasks": ["motor"]}})["project"]["id"]
     return proc, base, project_id
+
+
+def go_to_stage(page, name: str) -> None:
+    """Show one analysis stage (folders|model|options|run) and wait until it is the current one."""
+    page.wait_for_function("window.analysisStages !== undefined")
+    page.evaluate("name => window.analysisStages.goTo(name)", name)
+    page.wait_for_function("name => window.analysisStages.current() === name", arg=name)
