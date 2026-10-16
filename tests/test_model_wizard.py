@@ -237,7 +237,8 @@ def _scan_cols(**cols):
 @pytest.mark.parametrize("bad, cols", [
     (valid_only(value="0.5"), {"response_validity": ["0.5", "x"]}),          # '.' corrupts column.value names
     (valid_only(condition="a.b"), {}),
-    (valid_only(value="a-b"), {"response_validity": ["a-b", "x"]}),          # coerce_fieldname strips it
+    (valid_only(column="a-b"), {"a-b": ["x", "y"]}),                         # '-' is not allowed in a column
+    (valid_only(value="-"), {"response_validity": ["-", "x"]}),              # nothing left after coercion
     (valid_only(value="a<b"), {"response_validity": ["a<b", "x"]}),          # Filter query operators
     (valid_only(value="a~b"), {"response_validity": ["a~b", "x"]}),
     (valid_only(value="a|b"), {"response_validity": ["a|b", "x"]}),          # right side is a regex
@@ -290,3 +291,28 @@ def test_catalog_returns_a_deep_copy():
     c[0]["params"][0]["name"] = "mutated"
     c.append("x")
     assert catalog()[0]["params"][0]["name"] != "mutated" and len(catalog()) == len(RECIPE_CATALOG)
+
+
+HY_SCAN = {**SCAN, "columns": {**SCAN["columns"], "trial_type": ["a", "face-happy"],
+                               "response_validity": ["valid-trial", "invalid"]}}
+
+
+def test_hyphenated_names_keep_raw_query_and_coerced_outputs():
+    result = build_model(choices(recipes=[valid_only(condition="face-happy", value="valid-trial")]), HY_SCAN)
+    node = run_node(result)
+    assert node["Transformations"]["Instructions"] == [
+        {"Name": "Filter", "Input": "trial_type", "Query": "trial_type==face-happy", "Output": "trial_facehappy"},
+        {"Name": "Filter", "Input": "trial_facehappy", "Query": "response_validity==valid-trial",
+         "Output": "validtrial_facehappy"},
+    ]
+    assert node["Model"]["X"][:2] == ["trial_type.a", "validtrial_facehappy.face-happy"]
+    assert [c["Name"] for c in node["Contrasts"]] == ["a", "validtrial_facehappy_face_happy"]
+    assert result["preview"]["contrasts"] == ["a", "validtrial_facehappy_face_happy"]
+
+
+def test_names_that_collide_after_coercion_are_rejected():
+    scan = {**HY_SCAN, "columns": {**HY_SCAN["columns"], "trial_type": ["face-happy", "facehappy"]}}
+    recipes = [valid_only(condition="face-happy", value="valid-trial", keep_original=True),
+               valid_only(condition="facehappy", value="valid-trial")]
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=recipes), scan)

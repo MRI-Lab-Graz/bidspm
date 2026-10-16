@@ -93,8 +93,14 @@ RECIPE_CATALOG = []
 NA = {"n/a", "N/A", "nan", "NaN", ""}
 # Names end up in Filter queries (bids-matlab get_query splits on ==, ~=, <, >, >=, <=; the right side is an
 # anchored regex) and in output field names (coerce_fieldname strips everything but [A-Za-z0-9_]); '.' would
-# also corrupt the "<column>.<value>" regressor name. So only word characters are allowed.
+# also corrupt the "<column>.<value>" regressor name. So only word characters are allowed, plus '-' in
+# conditions and values (a literal in the regex; the query keeps it, output names are coerced like bids-matlab).
 UNSAFE = re.compile(r"[^A-Za-z0-9_]")
+UNSAFE_HYPHEN_OK = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _coerce(name):
+    return re.sub(r"[^A-Za-z0-9_]", "", name)
 
 
 def catalog():
@@ -124,9 +130,10 @@ def _bool_param(label, value):
     return _expect(False if value is None else value, bool, f"recipe {label}")
 
 
-def _safe(label, value):
-    if not value or UNSAFE.search(str(value)):
-        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (only letters, digits and underscores are supported); rename it in the events first")
+def _safe(label, value, hyphen=False):
+    if not value or (UNSAFE_HYPHEN_OK if hyphen else UNSAFE).search(value) or not _coerce(value):
+        allowed = "letters, digits, underscores and hyphens" if hyphen else "letters, digits and underscores"
+        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (only {allowed} are supported); rename it in the events first")
 
 
 def _need_condition(state, condition):
@@ -135,7 +142,7 @@ def _need_condition(state, condition):
 
 
 def _first_filter(state, condition):
-    out = f"trial_{condition}"
+    out = f"trial_{_coerce(condition)}"
     instruction = {"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out}
     if instruction in state["instructions"]:
         return out
@@ -146,7 +153,7 @@ def _first_filter(state, condition):
 
 
 def _second_filter(state, source, column, value, condition):
-    out = f"{value}_{condition}"
+    out = f"{_coerce(value)}_{_coerce(condition)}"
     if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
         raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
     state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})
@@ -167,8 +174,9 @@ def _split(state, condition, column, values, keep_original):
     unknown = [v for v in values if v not in state["columns"][column]]
     if unknown:
         raise WizardError(f"column {column!r} has no value {', '.join(map(repr, unknown))}")
-    for label, v in [("condition", condition), ("column", column)] + [("value", v) for v in values]:
-        _safe(label, v)
+    _safe("column", column)
+    for label, v in [("condition", condition)] + [("value", v) for v in values]:
+        _safe(label, v, hyphen=True)
     source = _first_filter(state, condition)
     state["regressors"] += [_second_filter(state, source, column, v, condition) for v in values]
     if not keep_original:
