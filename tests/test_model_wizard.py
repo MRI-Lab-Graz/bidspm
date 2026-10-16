@@ -1,7 +1,7 @@
 # tests/test_model_wizard.py
 import pytest
 
-from lib.model_wizard import NUISANCE_PRESETS, WizardError, build_model, second_level_nodes
+from lib.model_wizard import NUISANCE_PRESETS, RECIPE_CATALOG, WizardError, build_model, second_level_nodes
 
 SCAN = {
     "tasks": ["x"],
@@ -147,3 +147,84 @@ def test_auto_contrast_names_are_sanitized():
 def test_auto_contrast_names_colliding_or_empty_are_rejected(values):
     with pytest.raises(WizardError):
         build_model(choices(), _scan_with(values))
+
+
+def test_catalog_lists_the_recipes_with_param_kinds():
+    ids = [r["id"] for r in RECIPE_CATALOG]
+    assert "valid_only" in ids and "split_by_column" in ids
+    valid = next(r for r in RECIPE_CATALOG if r["id"] == "valid_only")
+    assert [p["name"] for p in valid["params"]][:3] == ["condition", "column", "value"]
+
+
+def valid_only(**over):
+    return {"id": "valid_only", "condition": "item", "column": "response_validity", "value": "valid", **over}
+
+
+def test_valid_only_reproduces_the_141_filter_chain():
+    result = build_model(choices(recipes=[valid_only()]), SCAN)
+    node = run_node(result)
+    assert node["Transformations"]["Instructions"] == [
+        {"Name": "Filter", "Input": "trial_type", "Query": "trial_type==item", "Output": "trial_item"},
+        {"Name": "Filter", "Input": "trial_item", "Query": "response_validity==valid", "Output": "valid_item"},
+    ]
+    assert node["Model"]["X"][:3] == ["trial_type.a", "trial_type.b", "valid_item.item"]
+    assert "trial_type.item" not in node["Model"]["X"]
+    assert any("invalid" in w for w in result["preview"]["warnings"])  # the dropped trials are announced
+
+
+def test_valid_only_can_keep_the_original_regressor():
+    x = run_node(build_model(choices(recipes=[valid_only(keep_original=True)]), SCAN))["Model"]["X"]
+    assert "trial_type.item" in x and "valid_item.item" in x
+
+
+def test_split_by_column_makes_one_regressor_per_value_with_one_shared_first_filter():
+    recipe = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
+    node = run_node(build_model(choices(recipes=[recipe]), SCAN))
+    instr = node["Transformations"]["Instructions"]
+    assert [i["Output"] for i in instr] == ["trial_item", "valid_item", "invalid_item"]
+    assert {"valid_item.item", "invalid_item.item"} <= set(node["Model"]["X"])
+
+
+def test_split_by_column_respects_a_value_subset():
+    recipe = {"id": "split_by_column", "condition": "item", "column": "response_validity", "values": ["invalid"]}
+    x = run_node(build_model(choices(recipes=[recipe]), SCAN))["Model"]["X"]
+    assert "invalid_item.item" in x and "valid_item.item" not in x
+
+
+@pytest.mark.parametrize("bad", [
+    valid_only(condition="nope"),                      # unknown condition
+    valid_only(column="nope"),                         # unknown column
+    valid_only(column="trial_type"),                   # trial_type itself
+    valid_only(value="maybe"),                         # value not in the column
+    valid_only(value="va lid"),                        # unsafe in a query
+    {"id": "no_such_recipe"},
+])
+def test_invalid_recipe_params_raise(bad):
+    scan = {**SCAN, "columns": {**SCAN["columns"], "response_validity": ["valid", "invalid", "va lid"]}}
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), scan)
+
+
+def test_a_condition_used_by_an_earlier_recipe_is_no_longer_available():
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[valid_only(), valid_only(value="invalid")]), SCAN)
+
+
+SPLIT = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
+
+
+@pytest.mark.parametrize("bad", [
+    valid_only(condition=5), valid_only(condition=["item"]), valid_only(column=5), valid_only(column=["x"]),
+    valid_only(value=1), valid_only(value=["valid"]),
+    valid_only(keep_original="yes"), valid_only(keep_original=1),
+    {**SPLIT, "values": "valid"}, {**SPLIT, "values": [1]}, {**SPLIT, "values": {"a": 1}},
+    {**SPLIT, "condition": 5}, {**SPLIT, "column": 5}, {**SPLIT, "keep_original": "no"},
+])
+def test_wrongly_typed_recipe_params_raise_wizard_error(bad):
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), SCAN)
+
+
+def test_missing_or_none_keep_original_means_false():
+    x = run_node(build_model(choices(recipes=[valid_only(keep_original=None)]), SCAN))["Model"]["X"]
+    assert "trial_type.item" not in x

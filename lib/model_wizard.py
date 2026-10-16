@@ -88,6 +88,106 @@ def _run_contrasts(regressors, pmods, spec):
         raise WizardError(f"duplicate contrast names: {', '.join(dupes)}")
     return out
 
+RECIPE_CATALOG = []
+NA = {"n/a", "N/A", "nan", "NaN", ""}
+UNSAFE = re.compile(r"[\s'\"=]")
+
+
+def recipe(id, title, description, params):
+    def register(fn):
+        RECIPES[id] = fn
+        RECIPE_CATALOG.append({"id": id, "title": title, "description": description, "params": params})
+        return fn
+    return register
+
+
+def _str_param(label, value):
+    return _expect(value, str, f"recipe {label}")
+
+
+def _str_list_param(label, value):
+    _expect(value, list, f"recipe {label}")
+    for v in value:
+        _str_param(label, v)
+    return value
+
+
+def _bool_param(label, value):
+    return _expect(False if value is None else value, bool, f"recipe {label}")
+
+
+def _safe(label, value):
+    if not value or UNSAFE.search(str(value)):
+        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (spaces, quotes and '=' are not supported); rename it in the events first")
+
+
+def _need_condition(state, condition):
+    if f"trial_type.{condition}" not in state["regressors"]:
+        raise WizardError(f"condition {condition!r} is not available (unknown, excluded, or already used by an earlier recipe)")
+
+
+def _first_filter(state, condition):
+    out = f"trial_{condition}"
+    if not any(i.get("Output") == out for i in state["instructions"]):
+        state["instructions"].append({"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out})
+    return out
+
+
+def _second_filter(state, source, column, value, condition):
+    out = f"{value}_{condition}"
+    if any(i.get("Output") == out for i in state["instructions"]):
+        raise WizardError(f"the output name {out!r} is already used by another recipe")
+    state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})
+    return f"{out}.{condition}"
+
+
+def _split(state, condition, column, values, keep_original):
+    _str_param("condition", condition)
+    _str_param("column", column)
+    _str_list_param("values", values)
+    keep_original = _bool_param("keep_original", keep_original)
+    _need_condition(state, condition)
+    if column == "trial_type" or column not in state["columns"]:
+        raise WizardError(f"column {column!r} is not an events column that can split a condition")
+    if not values:
+        raise WizardError(f"column {column!r} has no values to split by")
+    unknown = [v for v in values if v not in state["columns"][column]]
+    if unknown:
+        raise WizardError(f"column {column!r} has no value {', '.join(map(repr, unknown))}")
+    for label, v in [("condition", condition), ("column", column)] + [("value", v) for v in values]:
+        _safe(label, v)
+    source = _first_filter(state, condition)
+    state["regressors"] += [_second_filter(state, source, column, v, condition) for v in values]
+    if not keep_original:
+        state["regressors"].remove(f"trial_type.{condition}")
+
+
+@recipe("valid_only", "Only valid/correct trials",
+        "Model only the trials of one condition where a column has a given value (e.g. response_validity == valid).",
+        [{"name": "condition", "kind": "condition", "label": "Condition", "required": True},
+         {"name": "column", "kind": "column", "label": "Column", "required": True},
+         {"name": "value", "kind": "value", "label": "Keep rows where it equals", "required": True},
+         {"name": "keep_original", "kind": "bool", "label": "Keep the original condition too", "required": False}])
+def valid_only(state, p):
+    _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"))
+    others = [v for v in state["columns"][p["column"]] if v != p["value"] and v not in NA]
+    if others:
+        state["warnings"].append(f"{p['condition']}: trials with {p['column']} = {', '.join(others)} are not modelled")
+
+
+@recipe("split_by_column", "Split a condition by a column",
+        "One regressor per value of a column (e.g. item -> valid_item / invalid_item).",
+        [{"name": "condition", "kind": "condition", "label": "Condition", "required": True},
+         {"name": "column", "kind": "column", "label": "Column", "required": True},
+         {"name": "values", "kind": "values", "label": "Values (default: all)", "required": False},
+         {"name": "keep_original", "kind": "bool", "label": "Keep the original condition too", "required": False}])
+def split_by_column(state, p):
+    column = _str_param("column", p.get("column"))
+    values = p.get("values")
+    if values is None:
+        values = [v for v in state["columns"].get(column, []) if v not in NA]
+    _split(state, p.get("condition"), column, values, p.get("keep_original"))
+
 
 def build_model(choices, scan):
     _expect(choices, dict, "choices")
