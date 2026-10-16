@@ -61,6 +61,7 @@ from webapp.web_pages import register_page_routes
 from webapp.web_preflight_api import register_preflight_routes
 from webapp.web_projects_api import register_project_routes
 from webapp.web_utility_stats_api import register_utility_stats_routes
+from webapp.web_wizard_api import register_wizard_routes
 
 
 # =============================================================================
@@ -425,6 +426,10 @@ register_discovery_model_routes(
     app,
     resolve_fs_path=_resolve_fs_path,
     app_root=APP_ROOT,
+)
+register_wizard_routes(
+    app,
+    resolve_fs_path=_resolve_fs_path,
 )
 register_utility_stats_routes(
     app,
