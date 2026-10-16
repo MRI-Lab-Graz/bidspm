@@ -53,8 +53,17 @@ def stream(client, job_id, query=""):
     return res, parse(res.get_data(as_text=True))
 
 
+def job_of(job_id):
+    with api._JOBS_LOCK:
+        return api._JOBS[job_id]
+
+
 def finished(job_id):
-    return api._JOBS[job_id].done_event.wait(WAIT)
+    """Terminal state reached AND the worker's registry bookkeeping (eviction) is done."""
+    job = job_of(job_id)
+    assert job.done_event.wait(WAIT)
+    job.thread.join(WAIT)
+    return not job.thread.is_alive()
 
 
 def test_stream_ends_with_done_report_equal_to_sync_endpoint(tmp_path):
@@ -174,8 +183,8 @@ def test_registry_keeps_at_most_20_finished_jobs():
         for _ in range(25):
             job = start(client, {"config": {}})
             assert finished(job)
-    assert len(api._JOBS) == 20
-    assert job in api._JOBS
+    with api._JOBS_LOCK:
+        assert len(api._JOBS) == 20 and job in api._JOBS
 
 
 def test_running_job_is_never_evicted():
@@ -196,18 +205,21 @@ def test_running_job_is_never_evicted():
     with patch(RUNNER, return_value=ok):
         for _ in range(25):
             assert finished(start(client, {"config": {}}))
-    assert running in api._JOBS and not api._JOBS[running].done_event.is_set()
-    assert len(api._JOBS) == 21  # 20 finished + the running one
+    with api._JOBS_LOCK:
+        assert running in api._JOBS and not api._JOBS[running].done_event.is_set()
+        assert len(api._JOBS) == 21  # 20 finished + the running one
     release.set()
 
 
 def test_runner_exception_ends_stream_with_error_event():
     client = app.test_client()
     with patch(RUNNER, side_effect=RuntimeError("validator exploded")):
-        _, events = stream(client, start(client, {"config": {}}))
+        job = start(client, {"config": {}})
+        _, events = stream(client, job)
     last = events[-1][1]
     assert last["phase"] == "error" and last["state"] == "done" and "validator exploded" in last["message"]
-    assert client.post(f"/api/preflight/cancel/{events and next(iter(api._JOBS))}").get_json() == {"status": "finished"}
+    assert finished(job)
+    assert client.post(f"/api/preflight/cancel/{job}").get_json() == {"status": "finished"}
 
 
 def test_empty_config_still_ends_with_blocked_verdict():
@@ -267,7 +279,84 @@ def test_client_disconnect_does_not_stop_job_or_leak_threads():
         res.close()  # GeneratorExit inside the generator
         release.set()
         assert finished(job)
-    api._JOBS[job].thread.join(WAIT)
+    job_of(job).thread.join(WAIT)
     _, events = stream(client, job)  # a new client can still read the whole history
     assert events[-1][1]["phase"] == "done"
     assert threading.active_count() <= before
+
+
+def test_finished_job_with_from_past_the_end_ends_silently():
+    client = app.test_client()
+    with patch(RUNNER, return_value={"verdict": "ok", "checks": []}):
+        job = start(client, {"config": {}})
+        assert finished(job)
+    for value in ("9999", "99999999999999999999"):
+        res, events = stream(client, job, f"?from={value}")
+        assert res.status_code == 200 and events == []
+
+
+def test_runner_raising_systemexit_still_ends_the_stream():
+    client = app.test_client()
+    with patch(RUNNER, side_effect=SystemExit(3)):
+        job = start(client, {"config": {}})
+        _, events = stream(client, job)
+        assert finished(job)
+    assert events[-1][1]["phase"] == "error" and events[-1][1]["state"] == "done"
+
+
+def test_cancel_after_terminal_event_says_finished_immediately():
+    client = app.test_client()
+    with patch(RUNNER, return_value={"verdict": "ok", "checks": []}):
+        job = start(client, {"config": {}})
+        _, events = stream(client, job)  # saw the terminal event
+        assert events[-1][1]["phase"] == "done"
+        assert client.post(f"/api/preflight/cancel/{job}").get_json() == {"status": "finished"}
+
+
+def test_too_many_running_jobs_is_429_json():
+    release = threading.Event()
+    entered = threading.Semaphore(0)
+
+    def blocker(config, **kw):
+        entered.release()
+        release.wait(WAIT)
+        return {"verdict": "ok", "checks": []}
+
+    client = app.test_client()
+    with patch(RUNNER, side_effect=blocker):
+        ids = [start(client, {"config": {}}) for _ in range(api.MAX_RUNNING_JOBS)]
+        for _ in ids:
+            assert entered.acquire(timeout=WAIT)
+        res = client.post("/api/preflight/start", json={"config": {}})
+        assert res.status_code == 429 and "too many readiness checks" in res.get_json()["error"]
+        release.set()
+        assert all(finished(i) for i in ids)
+        assert client.post("/api/preflight/start", json={"config": {}}).status_code == 200
+
+
+def test_stream_has_a_maximum_lifetime():
+    release = threading.Event()
+    entered = threading.Event()
+
+    def blocker(config, **kw):
+        entered.set()
+        release.wait(WAIT)
+        return {"verdict": "ok", "checks": []}
+
+    client = app.test_client()
+    with patch(RUNNER, side_effect=blocker), patch.object(api, "STREAM_MAX_SECONDS", 0.05):
+        job = start(client, {"config": {}})
+        assert entered.wait(WAIT)
+        _, events = stream(client, job)
+        release.set()
+        assert finished(job)
+    assert events[-1][1] == {"phase": "error", "state": "done", "message": "stream timed out"}
+
+
+def test_thread_start_failure_leaves_no_job_behind():
+    client = app.test_client()
+    with patch.object(api.threading.Thread, "start", side_effect=RuntimeError("no threads")):
+        res = client.post("/api/preflight/start", json={"config": {}})
+    assert res.status_code == 500 and res.is_json and "no threads" in res.get_json()["error"]
+    with api._JOBS_LOCK:
+        assert not api._JOBS

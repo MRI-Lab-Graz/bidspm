@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import uuid
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -19,6 +20,8 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 from lib.preflight import run_preflight_from_config
 
 MAX_FINISHED_JOBS = 20
+MAX_RUNNING_JOBS = 3
+STREAM_MAX_SECONDS = 1900  # just above the validator's 1800 s timeout
 _JOBS = {}  # insertion-ordered: oldest first
 _JOBS_LOCK = threading.Lock()  # guards _JOBS only; never held while running a check or yielding
 
@@ -32,9 +35,11 @@ class _Job:
         self.thread = None
         self.final = None  # runner's own `done` event, merged into the terminal one
 
-    def add_event(self, event):
+    def add_event(self, event, terminal=False):
         with self.cond:
             self.events.append({**event, "seq": len(self.events)})
+            if terminal:  # same critical section: "finished" is visible exactly with the terminal event
+                self.done_event.set()
             self.cond.notify_all()
 
 
@@ -46,6 +51,7 @@ def _evict_finished():
 
 
 def _work(job, config, kwargs, model_path):
+    # ponytail: the model temp file is removed right after the runner returns/raises (BaseException caught below)
     def progress(event):
         if event.get("phase") == "done":
             job.final = event  # held back: the terminal event also carries the report
@@ -54,18 +60,17 @@ def _work(job, config, kwargs, model_path):
 
     try:
         report = run_preflight_from_config(config, progress=progress, cancelled=job.cancel_event.is_set, **kwargs)
-        job.add_event({"phase": "done", "state": "done", **(job.final or {}), "report": report})
-    except Exception as exc:  # noqa: BLE001 - a stream must always get a terminal event
-        job.add_event({"phase": "error", "state": "done", "message": f"{type(exc).__name__}: {exc}"})
-    finally:
-        if model_path:
-            try:
-                os.remove(model_path)
-            except OSError:
-                pass
-        job.done_event.set()
-        with _JOBS_LOCK:
-            _evict_finished()
+        terminal = {"phase": "done", "state": "done", **(job.final or {}), "report": report}
+    except BaseException as exc:  # noqa: BLE001 - a stream must always get a terminal event (incl. SystemExit)
+        terminal = {"phase": "error", "state": "done", "message": f"{type(exc).__name__}: {exc}"}
+    if model_path:  # before the terminal event: a client seeing it may rely on the file being gone
+        try:
+            os.remove(model_path)
+        except OSError:
+            pass
+    with _JOBS_LOCK:
+        job.add_event(terminal, terminal=True)
+        _evict_finished()
 
 
 def _bad(message):
@@ -122,23 +127,27 @@ def register_preflight_routes(app: Flask) -> None:
         if error:
             return _bad(error)
         config, kwargs = parsed
+        job, job_id = _Job(), uuid.uuid4().hex
+        with _JOBS_LOCK:
+            if sum(not j.done_event.is_set() for j in _JOBS.values()) >= MAX_RUNNING_JOBS:
+                return jsonify({"error": "too many readiness checks are running; "
+                                         "wait for one to finish or cancel it"}), 429
+            _JOBS[job_id] = job
         model_path = None
         try:
-            if model_json is not None:
+            if model_json is not None:  # overrides `model`
                 handle, model_path = tempfile.mkstemp(suffix='.json', prefix='bidspm_model_')
                 with os.fdopen(handle, 'w', encoding='utf-8') as out:
                     json.dump(model_json, out)
                 kwargs["model"] = model_path
-            job, job_id = _Job(), uuid.uuid4().hex
             job.thread = threading.Thread(target=_work, args=(job, config, kwargs, model_path), daemon=True)
-            with _JOBS_LOCK:
-                _evict_finished()
-                _JOBS[job_id] = job
             job.thread.start()
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - never leave a job that will not run, never an HTML 500
+            with _JOBS_LOCK:
+                _JOBS.pop(job_id, None)
             if model_path and os.path.exists(model_path):
                 os.remove(model_path)
-            raise
+            return jsonify({"error": f"could not start the check: {exc}"}), 500
         return jsonify({"id": job_id})
 
     @app.route('/api/preflight/stream/<job_id>')
@@ -152,19 +161,24 @@ def register_preflight_routes(app: Flask) -> None:
                 yield 'data: {"phase": "error", "message": "job not found"}\n\n'
                 return
             sent = start
+            deadline = time.monotonic() + STREAM_MAX_SECONDS
             while True:
                 with job.cond:
-                    if sent >= len(job.events):
-                        job.cond.wait(timeout=1)
+                    remaining = deadline - time.monotonic()
+                    if sent >= len(job.events) and remaining > 0 and not job.done_event.is_set():
+                        job.cond.wait(timeout=min(1, remaining))
                     batch = job.events[sent:]
-                if not batch:
-                    yield ': keepalive\n\n'
-                    continue
+                    finished = job.done_event.is_set()
                 for event in batch:
                     yield f"id: {event['seq']}\ndata: {json.dumps(event)}\n\n"
                     sent = event['seq'] + 1
-                    if event.get('state') == 'done' and event.get('phase') in ('done', 'error'):
+                if finished and not batch:
+                    return  # e.g. reconnect after the terminal event, or `from` past the end
+                if not batch:
+                    if time.monotonic() >= deadline:
+                        yield 'data: {"phase": "error", "state": "done", "message": "stream timed out"}\n\n'
                         return
+                    yield ': keepalive\n\n'
 
         response = Response(stream_with_context(generate()), mimetype='text/event-stream')
         response.headers['Cache-Control'] = 'no-cache'
