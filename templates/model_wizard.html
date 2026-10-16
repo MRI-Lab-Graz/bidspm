@@ -66,13 +66,11 @@
     </div></section>
 
     <section data-wiz-step="nuisance" class="card shadow-sm mb-3"><div class="card-body">
-      <div id="wiz-nuisance" role="radiogroup" aria-label="Nuisance regressors"></div>
+      <fieldset id="wiz-nuisance" class="border-0 p-0 m-0">
+        <legend class="h6 fw-bold">Nuisance regressors</legend>
+      </fieldset>
       <details id="wiz-nuisance-details" class="mt-2"><summary class="small">Advanced</summary>
-        <div class="form-check small mt-2">
-          <input class="form-check-input" type="radio" name="wiz-nuisance" id="wiz-nuisance-radio-custom" value="custom">
-          <label class="form-check-label" for="wiz-nuisance-radio-custom">Custom list</label>
-        </div>
-        <input id="wiz-nuisance-custom" aria-label="Custom confound columns" class="form-control form-control-sm" placeholder="comma-separated confound columns">
+        <input id="wiz-nuisance-custom" aria-label="Custom confound columns" class="form-control form-control-sm mt-2" placeholder="comma-separated confound columns (select Custom list above)">
       </details>
     </div></section>
 

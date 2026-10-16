@@ -16,6 +16,7 @@ STEPS = ["task", "recipes", "nuisance", "contrasts", "review"]
 
 def wizard_go_to(page, step):
     """Click the strip button of a step (every earlier step must be complete) and wait until it is current."""
+    page.wait_for_function("wiz.edit === wiz.built")  # moving on is refused while the preview is updating
     page.click(f"[data-wiz-btn={step}]")
     page.wait_for_selector(f"[data-wiz-btn={step}][aria-current=step]")
 
@@ -209,7 +210,7 @@ class TestWizardPage(unittest.TestCase):
         page = self.open_wizard()
         wizard_go_to(page, "nuisance")
         page.click("#wiz-nuisance-details > summary")
-        page.check("#wiz-nuisance-details input[value=custom]")
+        page.check("#wiz-nuisance input[value=custom]")
         page.fill("#wiz-nuisance-custom", "trans_x, trans_y")
         page.press("#wiz-nuisance-custom", "Tab")
         page.wait_for_function("document.getElementById('wiz-review').innerText.includes('2 columns')")
@@ -395,6 +396,7 @@ class TestWizardPage(unittest.TestCase):
         self.assertIn("incomplete", page.inner_text("#wiz-hint"))
         page.click("#wiz-next", force=True)  # aria-disabled keeps it focusable and clickable
         self.assertEqual(self.visible_steps(page), ["recipes"])
+        page.wait_for_function("wiz.edit === wiz.built")
         page.click("[data-wiz-btn=review]")  # a forward jump is refused with a reason too
         self.assertEqual(self.visible_steps(page), ["recipes"])
         self.assertIn("incomplete", page.inner_text("#wiz-hint"))
@@ -504,3 +506,122 @@ class TestWizardPage(unittest.TestCase):
         page.locator("#wiz-gallery .wiz-card").first.click()
         self.assertIn("<b>x</b>", page.inner_text("#wiz-gallery"))
         self.assertEqual(page.locator("#wiz-gallery b, #wiz-recipes b, #wiz-rail i, #wiz-rail b, [data-wiz-btn] i").count(), 0)
+
+    # ---- review round fixes -----------------------------------------------------------------------------
+    def two_task_page(self):
+        page = self.browser.new_page()
+
+        def scan(route):
+            body = route.request.post_data_json
+            data = route.fetch(post_data=json.dumps({**body, "task": "x"})).json()
+            data["tasks"] = ["x", "y"]
+            data["task"] = body.get("task") or "x"
+            route.fulfill(status=200, body=json.dumps(data), content_type="application/json")
+        def build(route):  # the server only knows task x
+            body = route.request.post_data_json
+            body["choices"]["task"] = "x"
+            route.continue_(post_data=json.dumps(body))
+        page.route("**/api/wizard/scan", scan)
+        page.route("**/api/wizard/build", build)
+        bodies = self.build_bodies(page)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        return page, bodies
+
+    def test_custom_nuisance_survives_a_task_change(self):
+        page, bodies = self.two_task_page()
+        wizard_go_to(page, "nuisance")
+        page.click("#wiz-nuisance-details > summary")
+        page.fill("#wiz-nuisance-custom", "trans_x, trans_y")
+        page.press("#wiz-nuisance-custom", "Tab")
+        page.wait_for_function("document.getElementById('wiz-review').innerText.includes('2 columns')")
+        wizard_go_to(page, "task")
+        page.select_option("#wiz-task", "y")
+        page.wait_for_function("wiz.scan && wiz.scan.task === 'y' && wiz.edit === wiz.built")
+        wizard_go_to(page, "nuisance")
+        self.assertTrue(page.is_checked("#wiz-nuisance input[value=custom]"))
+        self.assertEqual(page.input_value("#wiz-nuisance-custom"), "trans_x, trans_y")
+        self.assertTrue(page.evaluate("document.getElementById('wiz-nuisance-details').open"))
+        self.assertEqual(bodies[-1]["choices"]["nuisance"], ["trans_x", "trans_y"])
+
+    def test_nuisance_radios_form_one_group_with_arrow_keys(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "nuisance")
+        self.assertEqual(page.locator("#wiz-nuisance legend").inner_text().strip(), "Nuisance regressors")
+        radios = page.locator("#wiz-nuisance input[type=radio]")
+        n = radios.count()
+        self.assertEqual(page.locator("input[name=wiz-nuisance]").count(), n)
+        page.focus("#wiz-nuisance input:checked")
+        for _ in range(n):
+            page.keyboard.press("ArrowDown")
+        self.assertTrue(page.evaluate("document.activeElement.name === 'wiz-nuisance'"))
+
+    def rejecting_route(self, page):
+        page.route("**/api/wizard/build", lambda r: r.fulfill(
+            status=400, body=json.dumps({"error": "bad recipe"}), content_type="application/json")
+            if r.request.post_data_json["choices"]["recipes"] else r.continue_())
+
+    def test_next_is_blocked_while_the_build_fails(self):
+        page = self.open_wizard()
+        self.rejecting_route(page)
+        self.valid_item_then_pmod_first_only(page)
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'true'")
+        self.assertIn("do not build", page.inner_text("#wiz-hint"))
+        page.click("#wiz-next", force=True)
+        self.assertEqual(self.visible_steps(page), ["recipes"])
+        page.unroute("**/api/wizard/build")
+        page.locator("#wiz-recipes .wiz-recipe").get_by_label("Remove recipe").click()
+        page.wait_for_function("document.getElementById('wiz-next').getAttribute('aria-disabled') === 'false'")
+
+    def valid_item_then_pmod_first_only(self, page):
+        self.add_recipe(page, "valid_only")
+        card = page.locator("#wiz-recipes .wiz-recipe").nth(0)
+        card.locator("[data-param=condition]").select_option("item")
+        card.locator("[data-param=column]").select_option("response_validity")
+        card.locator("[data-param=value]").select_option("valid")
+
+    def test_next_is_refused_while_the_preview_is_stale(self):
+        page = self.open_wizard()
+        held = []
+        page.route("**/api/wizard/build", lambda r: held.append(r))
+        with page.expect_request("**/api/wizard/build"):
+            page.uncheck("#wiz-conditions input[value=b]")
+        self.assertEqual(page.get_attribute("#wiz-next", "aria-disabled"), "false")  # no flash during the debounce
+        page.click("#wiz-next")
+        self.assertEqual(self.visible_steps(page), ["task"])
+        self.assertIn("Updating the preview", page.inner_text("#wiz-hint"))
+        page.click("[data-wiz-btn=review]")
+        self.assertEqual(self.visible_steps(page), ["task"])
+        held.pop().continue_()
+        page.wait_for_function("wiz.edit === wiz.built")
+        page.click("#wiz-next")
+        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")
+
+    def test_back_then_incomplete_recipe_refuses_a_strip_jump(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "nuisance")
+        page.click("#wiz-back")
+        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")
+        page.click("#wiz-gallery .wiz-card[data-recipe=merge_rename]")
+        page.wait_for_function("wiz.edit === wiz.built")
+        page.click("[data-wiz-btn=review]")
+        self.assertEqual(self.visible_steps(page), ["recipes"])
+        self.assertIn("incomplete", page.inner_text("#wiz-hint"))
+
+    def test_recipe_values_survive_leaving_and_returning(self):
+        page = self.open_wizard()
+        self.valid_item_then_pmod_first_only(page)
+        wizard_go_to(page, "task")
+        wizard_go_to(page, "recipes")
+        card = page.locator("#wiz-recipes .wiz-recipe").nth(0)
+        self.assertEqual(card.locator("[data-param=condition]").input_value(), "item")
+        self.assertEqual(card.locator("[data-param=value]").input_value(), "valid")
+
+    def test_gallery_cards_are_named_for_screen_readers_and_focus_the_new_form(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "recipes")
+        for c in page.evaluate("wiz.scan.catalog"):
+            self.assertEqual(page.get_attribute(f"#wiz-gallery [data-recipe={c['id']}]", "aria-label"), f"Add recipe: {c['title']}")
+        page.get_by_role("button", name="Add recipe: " + page.evaluate("wiz.scan.catalog[0].title")).click()
+        self.assertTrue(page.evaluate("!!document.activeElement.closest('#wiz-recipes .wiz-recipe')"))
+        self.assertEqual(page.get_attribute("#wiz-recipes .wiz-recipe", "tabindex"), "-1")

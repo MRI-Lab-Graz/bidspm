@@ -1,7 +1,7 @@
 // model_wizard.js -- renders the wizard form and collects choices. All logic lives in lib/model_wizard.py
 // (/api/wizard/scan, /api/wizard/build). Server strings go in via textContent/DOM nodes, never innerHTML.
 const WIZ = window.BIDSPM_WIZARD_CONTEXT;
-const wiz = {step: 'task', scanError: false, scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
+const wiz = {step: 'task', scanError: false, buildError: false, edit: 0, built: 0, scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...kids) {
@@ -73,7 +73,8 @@ function setEnabled(on) {
 }
 
 function scheduleBuild() {
-    renderStage();  // gating reacts at once; the preview follows after the debounce
+    wiz.edit++;
+    WizardSteps.render();  // gating reacts at once; the preview follows after the debounce
     clearTimeout(wiz.timer);
     wiz.timer = setTimeout(() => build(), 300);
 }
@@ -96,18 +97,25 @@ function refreshOptions() {
 async function build(withPreflight = false) {
     if (!wiz.scan) return;
     const seq = ++wiz.seq;
+    const edit = wiz.edit;
     markIncomplete();
     try {
         const {status, data} = await postJson('/api/wizard/build', requestBody({preflight: withPreflight === true}));
         if (seq !== wiz.seq) return;  // a newer request is in flight
-        if (status !== 200) return showError(data.error || `HTTP ${status}`);
+        wiz.built = edit;
+        wiz.buildError = status !== 200;
+        if (status !== 200) { WizardSteps.render(); return showError(data.error || `HTTP ${status}`); }
         showError('');
         wiz.preview = data.preview;
         renderReview(data.preview, data.preflight);
         refreshOptions();
-        renderStage();
+        WizardSteps.render();
     } catch (e) {
-        if (seq === wiz.seq) showError(`Preview failed: ${e.message}`);
+        if (seq !== wiz.seq) return;
+        wiz.built = edit;
+        wiz.buildError = true;
+        WizardSteps.render();
+        showError(`Preview failed: ${e.message}`);
     }
 }
 
@@ -247,7 +255,7 @@ function renderRecipes() {
             ? [el('div', {className: 'small text-muted', textContent: 'Add this last: recipes after it cannot use its regressor.'})] : [];
         const incomplete = el('div', {className: 'small text-warning wiz-incomplete-note', hidden: true,
             textContent: 'incomplete \u2014 fill in the required fields'});
-        return el('div', {className: 'border rounded p-2 mb-2 wiz-recipe'},
+        return el('div', {className: 'border rounded p-2 mb-2 wiz-recipe', tabIndex: -1},
             el('div', {className: 'd-flex justify-content-between'}, el('strong', {className: 'small', textContent: def.title}), tools),
             incomplete, ...note, ...def.params.map((spec) => paramField(recipe, spec)));
     }).filter(Boolean);
@@ -260,11 +268,13 @@ function renderGallery() {
     $('wiz-gallery').replaceChildren(...wiz.scan.catalog.map((c) => {
         const card = el('button', {type: 'button', className: 'btn btn-outline-secondary btn-sm wiz-card', dataset: {recipe: c.id}},
             el('strong', {textContent: c.title}), el('small', {className: 'text-muted', textContent: c.description || ''}));
+        card.setAttribute('aria-label', `Add recipe: ${c.title}`);
         card.addEventListener('click', () => {
             wiz.recipes.push({id: c.id, uid: ++wiz.uid, params: {}});
             renderRecipes();
             scheduleBuild();
-            $('wiz-recipes').lastElementChild?.querySelector('[data-param]')?.focus();  // opens the form
+            const form = $('wiz-recipes').lastElementChild;  // opens the form: first control, or the card when it has none
+            (form?.querySelector('[data-param]') || form)?.focus();
         });
         return el('div', {className: 'col-md-6'}, card);
     }));
@@ -317,12 +327,14 @@ async function loadScan(task) {
         showError(`Scan failed: ${e.message}`);
         setEnabled(false);
         $('wiz-task').disabled = false;  // allow retrying another task
-        renderStage();
+        WizardSteps.render();
         return;
     }
     showError('');
     setEnabled(true);
     wiz.scanError = false;
+    wiz.buildError = false;
+    wiz.edit++;
     wiz.scan = data;
     wiz.recipes = [];
     wiz.pairs = [];
@@ -337,17 +349,20 @@ async function loadScan(task) {
     }));
     if (!wiz.nameEdited) $('wiz-name').value = `${data.task}_model`;
     if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath();
-    const current = nuisanceChoice();
-    $('wiz-nuisance').replaceChildren(...Object.keys(data.nuisance_presets).map((n) => {
-        const input = el('input', {type: 'radio', name: 'wiz-nuisance', value: n, id: `wiz-nuisance-radio-${n}`, className: 'form-check-input',
-            checked: n === (typeof current === 'string' ? current : 'none')});
-        return el('div', {className: 'form-check small'}, input, el('label', {className: 'form-check-label', htmlFor: input.id, textContent: n}));
-    }));
-    if (current === 'custom') $('wiz-nuisance-radio-custom').checked = true;
+    const current = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
+    const radio = (n, label) => {
+        const input = el('input', {type: 'radio', name: 'wiz-nuisance', value: n, id: `wiz-nuisance-radio-${n}`, className: 'form-check-input'});
+        return el('div', {className: 'form-check small'}, input, el('label', {className: 'form-check-label', htmlFor: input.id, textContent: label}));
+    };
+    $('wiz-nuisance').replaceChildren($('wiz-nuisance').querySelector('legend'),
+        ...Object.keys(data.nuisance_presets).map((n) => radio(n, n)), radio('custom', 'Custom list'));
+    const keep = $('wiz-nuisance').querySelector(`input[value="${current}"]`) || $('wiz-nuisance').querySelector('input[value=none]');
+    keep.checked = true;
+    if (keep.value === 'custom') $('wiz-nuisance-details').open = true;
     renderGallery();
     renderRecipes();
     renderPairs();
-    renderStage();
+    WizardSteps.render();
     build();
 }
 
@@ -392,7 +407,7 @@ function init() {
     for (const id of ['wiz-recipes', 'wiz-pair-table']) {
         $(id).addEventListener('focusout', () => setTimeout(refreshOptions, 0));
     }
-    initStages();
+    WizardSteps.init();
     loadScan('');
 }
 
