@@ -17,7 +17,7 @@ import uuid
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from lib.preflight import run_preflight_from_config
+from lib.preflight import remember, run_preflight_from_config, signature
 
 MAX_FINISHED_JOBS = 20
 MAX_RUNNING_JOBS = 3
@@ -61,6 +61,8 @@ def _work(job, config, kwargs, model_path):
     try:
         report = run_preflight_from_config(config, progress=progress, cancelled=job.cancel_event.is_set, **kwargs)
         terminal = {"phase": "done", "state": "done", **(job.final or {}), "report": report}
+        remember(signature(config, kwargs.get("model", ""), kwargs.get("validator", "auto"), kwargs.get("actions"),
+                           kwargs.get("skip_model_validation", False)), report)  # only ready/warnings are kept
     except BaseException as exc:  # noqa: BLE001 - a stream must always get a terminal event (incl. SystemExit)
         terminal = {"phase": "error", "state": "done", "message": f"{type(exc).__name__}: {exc}"}
     if model_path:  # before the terminal event: a client seeing it may rely on the file being gone

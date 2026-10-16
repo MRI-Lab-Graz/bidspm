@@ -4,13 +4,16 @@ Pure functions, no Flask. Every check returns a list of items
 {"id", "severity": "error"|"warn", "subject", "message", "fix"}; run_preflight() returns {"verdict", "checks"}.
 """
 import concurrent.futures
+import copy
 import csv
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -462,3 +465,43 @@ def run_preflight_from_config(cfg, model="", validator="auto", skip_model_valida
         validator=validator, container_type=cfg.get("container_type", ""),
         skip_model_validation=skip_model_validation, actions=actions,
         progress=progress, cancelled=cancelled)
+
+
+# --- recent passing results, reused by the /run gate ---
+RECENT_TTL, RECENT_MAX = 600, 20
+_RECENT = {}  # signature -> (monotonic timestamp, report); insertion order = age
+_RECENT_LOCK = threading.Lock()
+
+
+def signature(cfg, model, validator, actions, skip_model_validation):
+    """Hash of everything that can change a verdict; the model file is covered by path + mtime + size."""
+    path = model or cfg.get("MODELS_FILE", "")
+    try:
+        st = os.stat(path)
+        stat = [st.st_mtime_ns, st.st_size]
+    except (OSError, TypeError, ValueError):
+        stat = None  # sentinel: missing/unreadable model file
+    payload = [cfg, str(path), stat, validator, sorted(str(a) for a in actions or []), bool(skip_model_validation)]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def remember(sig, report):
+    if report.get("verdict") not in ("ready", "warnings"):
+        return
+    with _RECENT_LOCK:
+        _RECENT.pop(sig, None)
+        _RECENT[sig] = (time.monotonic(), copy.deepcopy(report))
+        while len(_RECENT) > RECENT_MAX:
+            del _RECENT[next(iter(_RECENT))]
+
+
+def recent(sig, ttl=RECENT_TTL):
+    # ponytail: dataset edits made within the TTL (10 min) are not noticed; fine for a local single-user tool
+    with _RECENT_LOCK:
+        entry = _RECENT.get(sig)
+        if entry is None:
+            return None
+        if time.monotonic() - entry[0] > ttl:
+            del _RECENT[sig]
+            return None
+        return copy.deepcopy(entry[1])
