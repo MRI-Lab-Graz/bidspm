@@ -58,11 +58,21 @@ def _work(job, config, kwargs, model_path):
         else:
             job.add_event(event)
 
+    sig = None
+    try:
+        # before the run: the temp model file is deleted below, and the signature hashes its content
+        sig = signature(config, kwargs.get("model", ""), kwargs.get("validator", "auto"), kwargs.get("actions"),
+                        kwargs.get("skip_model_validation", False))
+    except Exception:  # noqa: BLE001 - reuse is an optimisation, never a failure
+        pass
     try:
         report = run_preflight_from_config(config, progress=progress, cancelled=job.cancel_event.is_set, **kwargs)
         terminal = {"phase": "done", "state": "done", **(job.final or {}), "report": report}
-        remember(signature(config, kwargs.get("model", ""), kwargs.get("validator", "auto"), kwargs.get("actions"),
-                           kwargs.get("skip_model_validation", False)), report)  # only ready/warnings are kept
+        if sig is not None:
+            try:
+                remember(sig, report)  # only ready/warnings are kept
+            except Exception:  # noqa: BLE001
+                pass
     except BaseException as exc:  # noqa: BLE001 - a stream must always get a terminal event (incl. SystemExit)
         terminal = {"phase": "error", "state": "done", "message": f"{type(exc).__name__}: {exc}"}
     if model_path:  # before the terminal event: a client seeing it may rely on the file being gone

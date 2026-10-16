@@ -32,7 +32,7 @@ def test_signature_is_stable_and_key_order_independent():
 
 
 @pytest.mark.parametrize("other", [
-    dict(cfg={"A": 2}), dict(validator="skip"), dict(actions=["stats"]), dict(skip=True),
+    dict(cfg={"BIDS_DIR": "/other"}), dict(validator="skip"), dict(actions=["stats"]), dict(skip=True),
 ])
 def test_signature_changes_with_each_input(other):
     assert sig() != sig(**other)
@@ -43,7 +43,7 @@ def test_signature_actions_order_irrelevant_and_none_equals_empty():
     assert sig(actions=None) == sig(actions=[])
 
 
-def test_signature_changes_with_model_edit(tmp_path):
+def test_signature_changes_with_model_content(tmp_path):
     model = tmp_path / "m.json"
     model.write_text("{}")
     before = sig(model=str(model))
@@ -51,30 +51,59 @@ def test_signature_changes_with_model_edit(tmp_path):
     assert sig(model=str(model)) != before
 
 
-def test_signature_changes_with_model_mtime_only(tmp_path):
-    model = tmp_path / "m.json"
-    model.write_text("{}")
-    before = sig(model=str(model))
-    os.utime(model, ns=(1, 1))
-    assert sig(model=str(model)) != before
+def test_signature_ignores_model_touch_and_path(tmp_path):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text("{}")
+    b.write_text("{}")
+    before = sig(model=str(a))
+    os.utime(a, ns=(1, 1))
+    assert sig(model=str(a)) == before == sig(model=str(b))
+
+
+def test_signature_model_json_key_order_and_whitespace_irrelevant(tmp_path):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text('{"x": 1, "y": [1, 2]}')
+    b.write_text('{\n "y": [1, 2],\n "x": 1}')
+    assert sig(model=str(a)) == sig(model=str(b))
+
+
+def test_signature_non_json_model_still_hashes_content(tmp_path):
+    a = tmp_path / "a.txt"
+    a.write_text("not json")
+    before = sig(model=str(a))
+    a.write_text("not json!")
+    assert sig(model=str(a)) != before
 
 
 def test_signature_missing_model_does_not_raise(tmp_path):
     assert sig(model=str(tmp_path / "nope.json"))
 
 
-def test_signature_uses_effective_model_path(tmp_path):
+def test_signature_uses_effective_model(tmp_path):
     a, b = tmp_path / "a.json", tmp_path / "b.json"
     a.write_text("{}")
-    b.write_text("{}")
-    os.utime(b, ns=(os.stat(a).st_atime_ns, os.stat(a).st_mtime_ns))
-    # explicit model wins over MODELS_FILE: configs differing only in an overridden MODELS_FILE ...
-    assert sig({"MODELS_FILE": str(a)}, model=str(b)) != sig({"MODELS_FILE": str(a)}, model=str(a))
-    # ... and with no model argument the MODELS_FILE file is what is stat'ed
-    os.utime(a, ns=(1, 1))
-    s1 = sig({"MODELS_FILE": str(a)})
-    os.utime(a, ns=(2, 2))
-    assert sig({"MODELS_FILE": str(a)}) != s1
+    b.write_text('{"b": 1}')
+    assert sig({"MODELS_FILE": str(a)}, model=str(b)) == sig({}, model=str(b))
+    assert sig({"MODELS_FILE": str(a)}) == sig({}, model=str(a))
+    assert sig({"MODELS_FILE": str(a)}) != sig({"MODELS_FILE": str(b)})
+
+
+def test_signature_normalises_tasks_and_subjects():
+    assert sig({"TASKS": "x"}) == sig({"TASKS": ["x"]})
+    assert sig({"SUBJECTS": []}) == sig({}) == sig({"SUBJECTS": None})
+    assert sig({"SUBJECTS": ["sub-01", "02"]}) == sig({"SUBJECTS": ["02", "01"]})
+    assert sig({"SUBJECTS": "01"}) == sig({"SUBJECTS": ["sub-01"]})
+    assert sig({"SUBJECTS": ["01"]}) != sig({"SUBJECTS": ["01", "02"]})
+    assert sig({"SPACE": None}) == sig({"SPACE": ""}) == sig({})
+
+
+def test_signature_ignores_irrelevant_keys_and_tracks_relevant_ones():
+    base = {"BIDS_DIR": "/b", "TASKS": ["x"]}
+    junk = {**base, "FWHM": 6, "WD": "/w", "NODE_NAME": "n", "VERBOSITY": 3, "docker_image": "i", "unifiedStudyConfig": {"a": 1}}
+    assert sig(base) == sig(junk)
+    for key, value in (("BIDS_DIR", "/c"), ("FMRIPREP_DIR", "/f"), ("TASKS", ["y"]), ("SPACE", "T1w"),
+                       ("container_type", "docker")):
+        assert sig(base) != sig({**base, key: value}), key
 
 
 def test_remember_then_recent_returns_report():
@@ -222,9 +251,103 @@ def test_blocked_run_still_blocks_and_is_not_remembered(tmp_path):
     assert not preflight._RECENT
 
 
-def test_passing_run_check_is_not_remembered_by_the_run_gate(tmp_path):
-    # only the readiness job remembers; /run stays as it was
+def test_remember_failure_never_turns_a_good_result_into_an_error():
+    job = MagicMock()
+    job.final = None
+    job.cancel_event.is_set.return_value = False
+    with patch.object(api, "run_preflight_from_config", return_value=READY), \
+         patch.object(api, "remember", side_effect=RuntimeError("boom")):
+        api._work(job, {"A": 1}, KW, None)
+    terminal = job.add_event.call_args.args[0]
+    assert terminal["phase"] == "done" and terminal["report"] == READY
+
+
+def test_run_gate_remembers_a_passing_check_so_the_second_run_skips_it(tmp_path):
     settings, _ = _settings(tmp_path)
-    with patch(RUN_PF, return_value=READY):
+    with patch(RUN_PF, return_value=READY) as pf:
         _post(settings)
-    assert not preflight._RECENT
+        _post(settings)
+    assert pf.call_count == 1
+
+
+def test_run_gate_remembers_warnings_too(tmp_path):
+    settings, _ = _settings(tmp_path)
+    with patch(RUN_PF, return_value={"verdict": "warnings", "checks": []}) as pf:
+        _post(settings)
+        _post(settings)
+    assert pf.call_count == 1
+
+
+# --- end to end: readiness job with a form-like config, then /run with an export-like settings file ---
+
+MODEL = {"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"]}, "Nodes": []}
+
+
+def _form_job(client, tmp_path, model_body, **cfg_over):
+    bids, fmriprep = make_trees(tmp_path)
+    form = {"BIDS_DIR": str(bids), "FMRIPREP_DIR": str(fmriprep), "SPACE": "MNI", "TASKS": "x",
+            "FWHM": 6, "VERBOSITY": 3, "WD": "/w", "docker_image": "img", "unifiedStudyConfig": {"k": [1]},
+            **cfg_over}
+    res = client.post("/api/preflight/start", json={"config": form, "model_json": model_body, "validator": "skip",
+                                                    "actions": ["stats"], "skip_model_validation": True})
+    assert res.status_code == 200, res.data
+    with api._JOBS_LOCK:
+        job = api._JOBS[res.get_json()["id"]]
+    assert job.done_event.wait(20)
+    return bids, fmriprep
+
+
+def _export_run(client, tmp_path, bids, fmriprep, model_path, **over):
+    cfg = {"BIDS_DIR": str(bids), "FMRIPREP_DIR": str(fmriprep), "SPACE": "MNI", "TASKS": ["x"],
+           "NODE_NAME": "n", "MODELS_FILE": str(model_path), **over}
+    settings = tmp_path / "export.json"
+    settings.write_text(json.dumps(cfg))
+    with patch(RUN_PF, return_value=READY) as pf, \
+         patch("webapp.web_execution_api.subprocess.Popen", return_value=MagicMock(pid=4242)), \
+         patch("webapp.web_execution_api.threading.Thread"):
+        res = client.post("/run", json={"actions": ["stats"], "settings": str(settings), "model": str(model_path),
+                                        "validator": "skip", "skip_validation": True})
+    assert res.status_code == 200, res.data
+    return pf
+
+
+def _saved_model(tmp_path, body=MODEL):
+    path = tmp_path / "saved_model.json"
+    path.write_text(json.dumps(body))
+    return path
+
+
+def _passing_job(tmp_path):
+    client = app.test_client()
+    bids, fmriprep = _form_job(client, tmp_path, MODEL)
+    assert preflight._RECENT, "job did not remember a passing result"
+    return client, bids, fmriprep
+
+
+def test_form_job_then_export_run_reuses_the_result(tmp_path):
+    client, bids, fmriprep = _passing_job(tmp_path)
+    pf = _export_run(client, tmp_path, bids, fmriprep, _saved_model(tmp_path))
+    pf.assert_not_called()
+
+
+def test_touched_model_is_still_a_hit(tmp_path):
+    client, bids, fmriprep = _passing_job(tmp_path)
+    model = _saved_model(tmp_path)
+    os.utime(model, ns=(5, 5))
+    _export_run(client, tmp_path, bids, fmriprep, model).assert_not_called()
+
+
+def test_changed_bids_dir_is_a_miss(tmp_path):
+    client, bids, fmriprep = _passing_job(tmp_path)
+    _export_run(client, tmp_path, tmp_path / "other", fmriprep, _saved_model(tmp_path)).assert_called_once()
+
+
+def test_different_subject_selection_is_a_miss(tmp_path):
+    client, bids, fmriprep = _passing_job(tmp_path)
+    _export_run(client, tmp_path, bids, fmriprep, _saved_model(tmp_path), SUBJECTS=["01"]).assert_called_once()
+
+
+def test_changed_model_content_is_a_miss(tmp_path):
+    client, bids, fmriprep = _passing_job(tmp_path)
+    model = _saved_model(tmp_path, {**MODEL, "Name": "edited"})
+    _export_run(client, tmp_path, bids, fmriprep, model).assert_called_once()

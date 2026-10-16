@@ -474,18 +474,29 @@ _RECENT_LOCK = threading.Lock()
 
 
 def signature(cfg, model, validator, actions, skip_model_validation):
-    """Hash of everything that can change a verdict; the model file is covered by path + mtime + size."""
-    path = model or cfg.get("MODELS_FILE", "")
+    """Hash of exactly what run_preflight_from_config reads, normalised; the model by file content, not path."""
+    path = model or cfg.get("MODELS_FILE") or ""
     try:
-        st = os.stat(path)
-        stat = [st.st_mtime_ns, st.st_size]
+        raw = Path(path).read_bytes()
     except (OSError, TypeError, ValueError):
-        stat = None  # sentinel: missing/unreadable model file
-    payload = [cfg, str(path), stat, validator, sorted(str(a) for a in actions or []), bool(skip_model_validation)]
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+        raw = None  # sentinel: missing/unreadable model file
+    try:  # canonical JSON: key order/whitespace differ between the browser's model_json and the saved file
+        raw = json.dumps(json.loads(raw), sort_keys=True).encode()
+    except (TypeError, ValueError):
+        pass
+    content = None if raw is None else hashlib.sha256(raw).hexdigest()
+    payload = [
+        str(cfg.get("BIDS_DIR") or ""), str(cfg.get("FMRIPREP_DIR") or ""), content,
+        _as_list(cfg.get("TASKS")), str(cfg.get("SPACE") or ""),
+        sorted(s[4:] if s.startswith("sub-") else s for s in _as_list(cfg.get("SUBJECTS"))),
+        str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),
+        bool(skip_model_validation),
+    ]
+    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 
 def remember(sig, report):
+    # ponytail: dataset edits made within the TTL (10 min) are not noticed; fine for a local single-user tool
     if report.get("verdict") not in ("ready", "warnings"):
         return
     with _RECENT_LOCK:
