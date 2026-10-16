@@ -346,7 +346,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     if not tasks:
         checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
                             "check the BIDS folder or set the task in the project settings"))
-        prog.add(checks)
+        prog.add(checks)  # no_tasks rides on the next event (model or subjects start)
     if full and not skip_model_validation and not prog.stop():
         prog.emit("model", "start", "checking the model")
         found = check_model(model_file)
@@ -359,7 +359,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     prog.add(found + missing)  # these ride on the subjects start event
     present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))
     total = len(tasks) * sum(1 for sub in selected if sub in present)  # only subjects that are really checked
-    prog.emit("subjects", "start", "checking subjects", index=0, total=total)
+    prog.emit("subjects", "start", f"checking {total} subject/task pairs", index=0, total=total)
     needs = _model_needs(model_file)
     conditions, _, transformed, _ = needs
     listings = {}  # one directory walk per subject and root, shared by all tasks
@@ -418,8 +418,11 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
     try:
         checks += _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects,
                                   container_type, skip_model_validation, full, prog)
+        while pool and not prog.future.done() and not prog.stop():  # cancel stays responsive while waiting
+            concurrent.futures.wait([prog.future], timeout=0.2)
     finally:
         if pool:  # on cancel do not wait: the validator subprocess finishes in the background
+            # ponytail: the abandoned subprocess runs on (workers are joined at interpreter exit); killing it needs a handle from check_validator
             pool.shutdown(wait=not prog.is_cancelled, cancel_futures=prog.is_cancelled)
     if prog.is_cancelled:
         prog.poll_validator()  # only if it already finished

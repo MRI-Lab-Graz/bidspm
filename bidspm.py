@@ -268,8 +268,10 @@ def handle_preflight(config_file, args):
     def show(e):
         if e['phase'] == 'subjects' and e['state'] == 'progress':
             print(f"[{e['index']}/{e['total']}] sub-{e['subject']} ... {len(e['items'])} issues", file=sys.stderr, flush=True)
+        elif e['phase'] == 'done':
+            print(f"verdict: {e['verdict']}", file=sys.stderr, flush=True)
         elif e['state'] != 'progress':
-            print(f"{e['phase']} {e['state']}: {e['message']}", file=sys.stderr, flush=True)
+            print(f"{e['message']}{' ...' if e['state'] == 'start' else ''}", file=sys.stderr, flush=True)
 
     result = run_preflight_from_config(cfg, model=args.model or '',
                                        validator='skip' if args.skip_validator else args.validator,
@@ -409,6 +411,9 @@ def main():
     # Config file
     config_file = args.settings or CONFIG_FILE
     
+    if args.progress and not args.preflight:
+        print("Warning: --progress only applies with --preflight; ignored.", file=sys.stderr)
+
     # Handle discovery commands (don't need actions)
     if args.list_subjects:
         handle_list_subjects(config_file)
