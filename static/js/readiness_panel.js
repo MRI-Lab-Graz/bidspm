@@ -43,37 +43,51 @@ window.ReadinessPanel = (function () {
     function post(url, body) {
         return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
     }
+    const cancelUrl = (id) => `/api/preflight/cancel/${encodeURIComponent(id)}`;
+    const MAX_LIVE_ITEMS = 200;
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
     function run({target, body, onDone}) {
         if (current) current.cancel();
         const mine = ++runSeq;
-        const live = () => mine === runSeq && !stopped;
         let stopped = false, jobId = null, source = null, lastSeq = -1, finished = false, subjectsTotal = 0;
-        let errors = 0, warnings = 0;
+        let errors = 0, warnings = 0, shown = 0;
         const collected = [];
+        const live = () => mine === runSeq && !stopped;
 
-        const phaseEls = {};
+        // One persistent live region: verdict, failure and connection notices are announced from inside it.
+        target.setAttribute('role', 'status');
+        target.setAttribute('aria-live', 'polite');
+        const phaseEls = new Map();
         const phaseList = el('ul', 'list-unstyled mb-1 small rp-phases');
+        phaseList.setAttribute('aria-live', 'off');
         for (const [key, label] of PHASES) {
             const li = el('li', 'rp-phase');
             li.dataset.phase = key;
-            li.append(el('span', 'rp-glyph me-1'), label);
+            const glyph = el('span', 'rp-glyph me-1');
+            glyph.setAttribute('aria-hidden', 'true');
+            li.append(glyph, label, el('span', 'visually-hidden rp-state'));
             li.hidden = key === 'validator';  // shown once the validator actually runs
             phaseList.append(li);
-            phaseEls[key] = li;
+            phaseEls.set(key, li);
             setPhase(key, 'pending');
         }
         const status = el('div', 'small text-muted rp-status', 'Checking readiness...');
-        status.setAttribute('role', 'status');
         const bar = el('div', 'progress mb-1 rp-bar');
         bar.hidden = true;
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-label', 'Readiness check progress');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
         const barFill = el('div', 'progress-bar');
-        barFill.setAttribute('role', 'progressbar');
-        barFill.setAttribute('aria-label', 'Readiness check progress');
         bar.append(barFill);
         const count = el('div', 'small rp-count');
+        count.title = 'One check per subject and task: subjects x tasks';
         const counts = el('div', 'small fw-semibold rp-counts');
         const items = el('ul', 'list-unstyled mb-1 rp-items');
+        items.style.cssText = 'max-height: 12rem; overflow-y: auto;';
+        items.setAttribute('aria-live', 'off');
+        const more = el('li', 'small text-muted rp-more');
         const cancelBtn = el('button', 'btn btn-sm btn-outline-secondary rp-cancel', 'Cancel');
         cancelBtn.type = 'button';
         const notice = el('div', 'rp-notice');
@@ -82,28 +96,34 @@ window.ReadinessPanel = (function () {
         target.replaceChildren(root);
 
         function setPhase(key, state) {
-            phaseEls[key].dataset.state = state;
-            phaseEls[key].firstChild.textContent = GLYPH[state];
-            if (state !== 'pending') phaseEls[key].hidden = false;
+            const li = phaseEls.get(key);
+            li.dataset.state = state;
+            li.querySelector('.rp-glyph').textContent = GLYPH[state];
+            li.querySelector('.rp-state').textContent = ` (${state})`;
+            if (state !== 'pending') li.hidden = false;
         }
 
         function setBar(mode, pct) {
             bar.hidden = mode === 'hidden';
             barFill.classList.toggle('progress-bar-striped', mode === 'indeterminate');
             barFill.classList.toggle('progress-bar-animated', mode === 'indeterminate');
-            barFill.style.width = mode === 'indeterminate' ? '100%' : `${pct || 0}%`;
-            if (mode === 'determinate') barFill.setAttribute('aria-valuenow', String(Math.round(pct)));
-            else barFill.removeAttribute('aria-valuenow');
+            const clamped = Math.max(0, Math.min(100, pct || 0));
+            barFill.style.width = mode === 'indeterminate' ? '100%' : `${clamped}%`;
+            if (mode === 'determinate') bar.setAttribute('aria-valuenow', String(Math.round(clamped)));
+            else bar.removeAttribute('aria-valuenow');
         }
 
         function addItems(list) {
             for (const c of list || []) {
                 collected.push(c);
                 if (c.severity === 'error') errors++; else warnings++;
-                items.append(itemNode(c));
+                if (shown < MAX_LIVE_ITEMS) { items.append(itemNode(c)); shown++; }
             }
-            const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
             counts.textContent = collected.length ? `${plural(errors, 'error')}, ${plural(warnings, 'warning')}` : '';
+            if (collected.length > shown) {
+                more.textContent = `+${collected.length - shown} more (see the final report)`;
+                items.append(more);
+            }
         }
 
         function end() {
@@ -114,22 +134,43 @@ window.ReadinessPanel = (function () {
 
         function showFailure(message, fix) {
             end();
+            if (jobId) post(cancelUrl(jobId)).catch(() => {});  // free the server slot of a job that errored
             renderReport(target, failure(message, fix));
         }
 
+        function showLost() {
+            if (source) source.close();
+            source = null;
+            const retry = el('button', 'btn btn-sm btn-outline-primary ms-2 rp-retry', 'Retry');
+            retry.type = 'button';
+            retry.addEventListener('click', () => { if (live()) connect(); });
+            const lost = el('div', 'alert alert-warning py-1 mb-1 rp-lost', 'Lost connection to the server.');
+            lost.append(retry);
+            notice.replaceChildren(lost);
+        }
+
         function handle(ev) {
-            if (typeof ev.seq === 'number') lastSeq = ev.seq;
-            if (ev.phase === 'error') return showFailure(ev.message || 'unknown error');
+            if (typeof ev.seq === 'number') {
+                if (ev.seq <= lastSeq) return;  // replay overlap after a reconnect
+                lastSeq = ev.seq;
+            }
+            if (ev.phase === 'error') {
+                // A stream-lifetime timeout has state "done" but no seq: the job may still run, so offer Retry.
+                if (ev.state === 'done' && typeof ev.seq !== 'number') return showLost();
+                return showFailure(ev.message || 'unknown error');
+            }
             if (ev.phase === 'done') return finish(ev);
-            if (!phaseEls[ev.phase]) return;
+            if (!phaseEls.has(ev.phase)) return;
             if (ev.phase === 'subjects') {
                 subjectsTotal = ev.total || subjectsTotal;
-                if (ev.index) count.textContent = `${ev.index} / ${subjectsTotal} subjects`;
+                if (ev.index) count.textContent = `${ev.index} / ${subjectsTotal} subject checks`;
             }
             if (ev.state === 'done') setPhase(ev.phase, 'done');
             else if (ev.state === 'start' || ev.state === 'progress') setPhase(ev.phase, 'running');
-            if (subjectsTotal) setBar('determinate', 100 * (ev.index || 0) / subjectsTotal);
-            else if (phaseEls.validator.dataset.state === 'running') setBar('indeterminate');
+            if (subjectsTotal) {
+                if (ev.index != null) setBar('determinate', 100 * ev.index / subjectsTotal);
+                else if (ev.phase === 'subjects' && ev.state === 'done') setBar('determinate', 100);
+            } else if (phaseEls.get('validator').dataset.state === 'running') setBar('indeterminate');
             else setBar('hidden');
             addItems(ev.items);
         }
@@ -137,10 +178,12 @@ window.ReadinessPanel = (function () {
         function finish(ev) {
             end();
             const report = ev.report || {verdict: ev.verdict, checks: collected};
-            for (const key in phaseEls) { if (phaseEls[key].hidden) phaseEls[key].remove(); else setPhase(key, 'done'); }
+            for (const [key, li] of phaseEls) { if (li.hidden) li.remove(); else setPhase(key, 'done'); }
             status.remove(); bar.remove(); counts.remove(); items.remove(); notice.remove(); cancelBtn.remove();
             root.append(...reportNodes(report));
-            if (onDone) onDone(report);
+            if (onDone) {
+                try { onDone(report); } catch (e) { console.error('ReadinessPanel onDone failed', e); }
+            }
         }
 
         function connect() {
@@ -149,20 +192,14 @@ window.ReadinessPanel = (function () {
             source = new EventSource(url);
             source.onmessage = (m) => {
                 if (!live() || finished) return;
+                if (!target.isConnected) { stopped = true; return end(); }  // the page moved on: stop streaming
                 let ev;
                 try { ev = JSON.parse(m.data); } catch (e) { return; }
                 handle(ev);
             };
             source.onerror = () => {
                 if (!live() || finished) return;
-                if (source) source.close();
-                source = null;
-                const retry = el('button', 'btn btn-sm btn-outline-primary ms-2 rp-retry', 'Retry');
-                retry.type = 'button';
-                retry.addEventListener('click', () => { if (live()) connect(); });
-                const lost = el('div', 'alert alert-warning py-1 mb-1 rp-lost', 'Lost connection to the server.');
-                lost.append(retry);
-                notice.replaceChildren(lost);
+                showLost();
             };
         }
 
@@ -171,11 +208,16 @@ window.ReadinessPanel = (function () {
             stopped = true;
             if (source) source.close();
             source = null;
-            if (jobId) post(`/api/preflight/cancel/${encodeURIComponent(jobId)}`).catch(() => {});
-            if (mine === runSeq) {
-                cancelBtn.remove(); bar.remove();
-                status.textContent = 'Cancelled';
-            }
+            notice.replaceChildren();
+            cancelBtn.remove(); bar.remove();
+            status.textContent = 'Cancelled';
+            if (jobId) postCancel(jobId);
+        }
+
+        function postCancel(id) {
+            post(cancelUrl(id)).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch(() => {
+                if (mine === runSeq) status.textContent = 'Could not cancel the check on the server';
+            });
         }
         cancelBtn.addEventListener('click', cancel);
         const handle_ = {cancel};
@@ -186,8 +228,10 @@ window.ReadinessPanel = (function () {
                 const res = await post('/api/preflight/start', body);
                 let data = null;
                 try { data = await res.json(); } catch (e) { /* non-JSON body */ }
-                if (stopped) { if (data && data.id) post(`/api/preflight/cancel/${encodeURIComponent(data.id)}`).catch(() => {}); return; }
-                if (mine !== runSeq) return;
+                if (!live()) {  // cancelled or superseded while the start request was in flight
+                    if (data && data.id) { jobId = data.id; postCancel(data.id); }
+                    return;
+                }
                 if (!res.ok || !data || !data.id) {
                     return showFailure((data && data.error) || `HTTP ${res.status}`, data && data.error ? '' : TRY_AGAIN);
                 }

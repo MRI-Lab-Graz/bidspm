@@ -37,6 +37,42 @@ def done(checks=(), verdict="ready"):
     return ev("done", "done", verdict=verdict, report={"verdict": verdict, "checks": list(checks)})
 
 
+class _Pacer:
+    """Tiny local SSE server: sends one group of events per released gate, so tests control pacing."""
+
+    def __init__(self, groups):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        self.gates = [threading.Event() for _ in groups]
+        self.gates[0].set()
+        gates = self.gates
+
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                for gate, body in zip(gates, groups):
+                    if not gate.wait(30):
+                        return
+                    self.wfile.write(body.encode())
+                    self.wfile.flush()
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/stream"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        for g in self.gates:
+            g.set()
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
 class TestReadinessPanelMocked(unittest.TestCase):
     @classmethod
@@ -98,7 +134,7 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page = self.open_page([sse(HEAD + [subject_step(1), subject_step(2)])])  # cut before the terminal event
         page.click("#btn-preflight")
         page.wait_for_selector("#preflight-panel .rp-lost")
-        self.assertIn("2 / 3 subjects", self.panel(page))
+        self.assertIn("2 / 3 subject checks", self.panel(page))
         state = page.eval_on_selector("#preflight-panel [data-phase=subjects]", "e => e.dataset.state")
         self.assertEqual(state, "running")
 
@@ -130,11 +166,10 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.wait_for_selector("#preflight-panel .preflight-verdict")
         text = self.panel(page)
         self.assertIn("blocked", text)
-        self.assertIn("3 / 3 subjects", text)
+        self.assertIn("3 / 3 subject checks", text)
         self.assertIn("sub-01 broke", text)
         self.assertEqual(page.locator("#preflight-panel .rp-cancel").count(), 0)
-        page.wait_for_function("true")
-        self.assertEqual(calls, ["blocked"])
+        self.assertEqual(calls, ["blocked"])  # onDone ran before the verdict became visible to the test
 
     def test_cancel_posts_to_the_job_and_shows_cancelled(self):
         page = self.open_page([sse(HEAD + [subject_step(1)])])
@@ -155,7 +190,7 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.click("#preflight-panel .rp-retry")
         page.wait_for_selector("#preflight-panel .preflight-verdict")
         self.assertTrue(self.requests[-1].endswith("from=8"), self.requests)
-        self.assertIn("3 / 3 subjects", self.panel(page))
+        self.assertIn("3 / 3 subject checks", self.panel(page))
         self.assertEqual(page.locator("#preflight-panel .rp-lost").count(), 0)
 
     def test_retry_on_vanished_job_shows_its_message(self):
@@ -171,6 +206,7 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.click("#btn-preflight")
         page.wait_for_function("document.getElementById('preflight-panel').innerText.includes('RuntimeError: boom')")
         self.assertEqual(page.locator("#preflight-panel .rp-lost").count(), 0)
+        self.assertTrue(any(u.endswith("/cancel/j1") for u in self.requests), self.requests)  # frees the server slot
 
     def test_non_json_500_on_start_shows_a_message(self):
         page = self.open_page([sse([])], start={"status": 500, "body": "<html>boom</html>", "content_type": "text/html"})
@@ -202,9 +238,9 @@ class TestReadinessPanelMocked(unittest.TestCase):
             window.EventSource = class { constructor(url) { this.url = url; this.closed = false; window.sources.push(this); }
                 close() { this.closed = true; } };
         }""")
-        for _ in range(2):
+        for n in (1, 2):
             page.click("#btn-preflight")
-            page.wait_for_function(f"window.sources.length === {_ + 1}")
+            page.wait_for_function(f"window.sources.length === {n}")
         page.evaluate("""() => window.sources[0].onmessage({data: JSON.stringify(
             {phase: 'subjects', state: 'progress', index: 2, total: 9, subject: '02', seq: 0,
              items: [{severity: 'error', message: 'STALE', subject: null}]})})""")
@@ -213,7 +249,7 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.evaluate("""() => window.sources[0].onmessage({data: JSON.stringify(
             {phase: 'error', state: 'done', message: 'STALE failure'})})""")
         text = self.panel(page)
-        self.assertIn("1 / 3 subjects", text)  # the older run's late terminal event did not replace the panel
+        self.assertIn("1 / 3 subject checks", text)  # the older run's late terminal event did not replace the panel
         self.assertNotIn("STALE", text)
         self.assertTrue(page.evaluate("window.sources[0].closed"))
 
@@ -227,6 +263,205 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.wait_for_function("window.sources.length === 2")
         self.assertTrue(page.evaluate("window.sources[0].closed"))
         self.assertTrue(any("/cancel/j1" in u for u in self.requests))
+
+
+    # --- review fixes -------------------------------------------------------------------------------------------
+
+    FAKES = """() => {
+        window.sources = []; window.cancels = []; window.starts = []; const realFetch = window.fetch;
+        window.EventSource = class { constructor(url) { this.url = url; this.closed = false; window.sources.push(this); }
+            close() { this.closed = true; } };
+        window.fetch = function (url) {
+            if (String(url).endsWith('/start')) {
+                return new Promise((resolve) => { window.starts.push(() => resolve(
+                    new Response(JSON.stringify({id: 'j' + window.starts.length}), {status: 200}))); });
+            }
+            if (!String(url).includes('/api/preflight/cancel/')) return realFetch.apply(window, arguments);
+            window.cancels.push(String(url));
+            return Promise.resolve(new Response('{"status":"cancelling"}', {status: window.cancelStatus || 200}));
+        };
+    }"""
+    SEND = "(args) => window.sources[args[0]].onmessage({data: JSON.stringify(args[1])})"
+
+    def fake_page(self):
+        page = self.open_page([sse([])])
+        page.evaluate(self.FAKES)
+        return page
+
+    def test_a11y_live_region_progressbar_and_glyphs(self):
+        page = self.open_page([sse(HEAD + [subject_step(1)])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.get_attribute("#preflight-panel", "aria-live"), "polite")
+        self.assertEqual(page.get_attribute("#preflight-panel", "role"), "status")
+        bar = page.locator("#preflight-panel .progress")
+        self.assertEqual(bar.get_attribute("role"), "progressbar")
+        self.assertEqual([bar.get_attribute(a) for a in ("aria-valuemin", "aria-valuemax", "aria-valuenow")], ["0", "100", "33"])
+        self.assertTrue(bar.get_attribute("aria-label"))
+        self.assertEqual(page.locator("#preflight-panel .rp-glyph[aria-hidden=true]").count(), 4)
+        self.assertIn("(done)", page.text_content("#preflight-panel [data-phase=folders]"))
+        self.assertIn("(running)", page.text_content("#preflight-panel [data-phase=subjects]"))
+
+    def test_verdict_and_notices_land_inside_the_live_region(self):
+        page = self.open_page([sse(HEAD), sse([done()], first_seq=7)])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.locator("#preflight-panel[aria-live=polite] .rp-lost").count(), 1)
+        page.click("#preflight-panel .rp-retry")
+        page.wait_for_selector("#preflight-panel[aria-live=polite] .preflight-verdict")
+
+    def test_progress_bar_value_is_clamped(self):
+        page = self.open_page([sse(HEAD + [subject_step(9)])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.get_attribute("#preflight-panel .progress", "aria-valuenow"), "100")
+
+    def test_counter_counts_subject_checks_with_explanation(self):
+        steps = [ev("subjects", "start", total=4), ev("subjects", index=3, total=4, subject="02")]
+        page = self.open_page([sse(HEAD[:6] + steps)])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.inner_text("#preflight-panel .rp-count"), "3 / 4 subject checks")
+        self.assertIn("tasks", page.get_attribute("#preflight-panel .rp-count", "title"))
+
+    def test_stream_lifetime_event_is_a_lost_connection_not_a_verdict(self):
+        timeout = 'data: {"phase": "error", "state": "done", "message": "stream timed out"}\n\n'
+        page = self.open_page([sse(HEAD) + timeout])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-retry")
+        self.assertEqual(page.locator("#preflight-panel .preflight-verdict").count(), 0)
+        self.assertFalse(any("/cancel/" in u for u in self.requests))  # the job may still be running
+
+    def test_overlapping_replay_is_deduplicated_by_seq(self):
+        first = sse(HEAD + [subject_step(1, [item("dup")])])  # seq 0..7
+        replay = sse([subject_step(1, [item("dup")])], first_seq=7)
+        page = self.open_page([first, replay])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-retry")
+        page.click("#preflight-panel .rp-retry")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertIn("1 error,", self.panel(page))
+        self.assertEqual(page.locator("#preflight-panel .rp-items li").count(), 1)
+
+    def test_live_items_are_capped_but_counts_and_final_report_are_complete(self):
+        many = [item(f"bad {i}") for i in range(500)]
+        first = sse(HEAD + [subject_step(1, many)])
+        rest = sse([done(many, "blocked")], first_seq=8)
+        page = self.open_page([first, rest])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertLessEqual(page.locator("#preflight-panel .rp-items li").count(), 201)
+        text = self.panel(page)
+        self.assertIn("500 errors", text)
+        self.assertIn("+300 more (see the final report)", text)
+        self.assertIn("overflow-y: auto", page.get_attribute("#preflight-panel .rp-items", "style"))
+        page.click("#preflight-panel .rp-retry")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertEqual(page.locator("#preflight-panel ul li.text-danger").count(), 500)
+
+    def test_cancel_clears_the_lost_notice(self):
+        page = self.open_page([sse(HEAD)])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        page.click("#preflight-panel .rp-cancel")
+        page.wait_for_function("document.getElementById('preflight-panel').innerText.includes('Cancelled')")
+        self.assertEqual(page.locator("#preflight-panel .rp-retry").count(), 0)
+
+    def test_failed_cancel_is_reported_not_silent(self):
+        page = self.open_page([sse(HEAD)])
+        page.route(CANCEL, lambda r: r.fulfill(status=500, body="boom", content_type="text/plain"))
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        page.click("#preflight-panel .rp-cancel")
+        page.wait_for_function("document.getElementById('preflight-panel').innerText.includes('Could not cancel the check on the server')")
+
+    def test_subjects_done_without_index_keeps_the_bar(self):
+        page = self.open_page([sse(HEAD + [subject_step(2), ev("subjects", "done")])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertGreater(int(page.get_attribute("#preflight-panel .progress", "aria-valuenow")), 0)
+
+    def test_unknown_phase_names_are_ignored(self):
+        page = self.open_page([sse(HEAD + [ev("constructor", "start"), ev("toString", "done"), subject_step(1)])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertIn("1 / 3 subject checks", self.panel(page))
+        self.assertEqual(self.errors, [])
+
+    def test_total_zero_has_no_nan_and_finishes(self):
+        page = self.open_page([sse(HEAD[:6] + [ev("subjects", "start", total=0), done()])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertNotIn("NaN", self.panel(page))
+
+    def test_a_throwing_onDone_does_not_break_the_panel(self):
+        page = self.open_page([sse(HEAD + [done()])])
+        page.evaluate("""() => ReadinessPanel.run({target: document.getElementById('preflight-panel'), body: {},
+            onDone: () => { throw new Error('caller bug'); }})""")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertEqual(self.errors, [])
+
+    def test_stream_is_closed_when_the_target_leaves_the_document(self):
+        page = self.fake_page()
+        page.evaluate("""() => { const t = document.createElement('div'); document.body.append(t); window.t = t;
+            ReadinessPanel.run({target: t, body: {}}); window.starts[0](); }""")
+        page.wait_for_function("window.sources.length === 1")
+        page.evaluate("() => window.t.remove()")
+        page.evaluate(self.SEND, [0, {"phase": "folders", "state": "start", "seq": 0}])
+        self.assertTrue(page.evaluate("window.sources[0].closed"))
+
+    def test_cancel_before_start_returns_cancels_the_late_job(self):
+        page = self.fake_page()
+        page.click("#btn-preflight")
+        page.wait_for_function("window.starts.length === 1")
+        page.click("#preflight-panel .rp-cancel")
+        page.evaluate("window.starts[0]()")
+        page.wait_for_function("window.cancels.length === 1")
+        self.assertTrue(page.evaluate("window.cancels[0]").endswith("/cancel/j1"))
+        self.assertEqual(page.evaluate("window.sources.length"), 0)  # never streamed
+
+    def test_second_click_racing_an_inflight_start_wins(self):
+        page = self.fake_page()
+        page.click("#btn-preflight")
+        page.click("#btn-preflight")
+        page.wait_for_function("window.starts.length === 2")
+        page.evaluate("window.starts[0]()")  # the older start answers first
+        page.wait_for_function("window.cancels.length === 1")
+        self.assertEqual(page.evaluate("window.sources.length"), 0)
+        page.evaluate("window.starts[1]()")
+        page.wait_for_function("window.sources.length === 1")
+        self.assertTrue(page.evaluate("window.sources[0].url").endswith("/stream/j2"))
+
+    def test_cancel_after_finish_is_a_noop(self):
+        page = self.fake_page()
+        page.evaluate("""() => { window.h = ReadinessPanel.run({target: document.getElementById('preflight-panel'), body: {}});
+            window.starts[0](); }""")
+        page.wait_for_function("window.sources.length === 1")
+        page.evaluate(self.SEND, [0, {"phase": "done", "state": "done", "seq": 0, "report": {"verdict": "ready", "checks": []}}])
+        page.evaluate("window.h.cancel()")
+        self.assertEqual(page.evaluate("window.cancels.length"), 0)
+        self.assertNotIn("Cancelled", self.panel(page))
+        self.assertTrue(page.evaluate("window.sources[0].closed"))
+
+    def test_events_render_as_they_arrive_not_at_the_end(self):
+        e = [HEAD + [subject_step(1)], [subject_step(2)], [subject_step(3), done()]]
+        groups, seq = [], 0
+        for grp in e:
+            groups.append(sse(grp, first_seq=seq))
+            seq += len(grp)
+        pacer = _Pacer(groups)
+        self.addCleanup(pacer.close)
+        page = self.open_page([sse([])])
+        page.route(STREAM, lambda r: r.continue_(url=pacer.url))
+        page.click("#btn-preflight")
+        page.wait_for_function("document.querySelector('#preflight-panel .rp-count')?.innerText === '1 / 3 subject checks'")
+        self.assertEqual(page.locator("#preflight-panel .preflight-verdict").count(), 0)
+        pacer.gates[1].set()
+        page.wait_for_function("document.querySelector('#preflight-panel .rp-count')?.innerText === '2 / 3 subject checks'")
+        self.assertEqual(page.locator("#preflight-panel .preflight-verdict").count(), 0)
+        pacer.gates[2].set()
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertIn("3 / 3 subject checks", self.panel(page))
 
 
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
@@ -263,7 +498,7 @@ class TestReadinessPanelRealServer(unittest.TestCase):
             page.click("#btn-preflight")
             page.wait_for_selector("#preflight-panel .preflight-verdict", timeout=60000)
             text = page.inner_text("#preflight-panel")
-            self.assertIn("5 / 5 subjects", text)
+            self.assertIn("5 / 5 subject checks", text)
             states = page.eval_on_selector_all("#preflight-panel [data-phase]", "els => els.map(e => e.dataset.state)")
             self.assertTrue(states and set(states) == {"done"}, states)
             self.assertNotIn("blocked", text.lower())
