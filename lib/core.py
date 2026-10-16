@@ -748,11 +748,16 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
 
     # Schema validation
     try:
+        import requests
         from jsonschema import validate, ValidationError
 
         if skip_cache:
             _fetch_bids_stats_schema.cache_clear()
-        schema = _fetch_bids_stats_schema()
+        try:
+            schema = _fetch_bids_stats_schema()
+        except (requests.RequestException, ValueError):
+            warnings.append("Could not fetch the BIDS stats-model schema (offline?); schema validation skipped")
+            return {"valid": True, "warning": "; ".join(warnings)}
         validate(instance=model_content, schema=schema)
         if warnings:
             return {"valid": True, "warning": "; ".join(warnings)}

@@ -187,3 +187,14 @@ class TestCheckDatasetNodeName(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_validate_bids_model_skips_schema_when_offline(tmp_path):
+    from unittest.mock import patch
+    import requests
+    from lib import core
+    model = tmp_path / "m.json"
+    model.write_text('{"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"]}, "Nodes": []}')
+    with patch("lib.core._fetch_bids_stats_schema", side_effect=requests.ConnectionError("offline")):
+        result = core.validate_bids_model(model)
+    assert result["valid"] is True and "schema" in result["warning"]

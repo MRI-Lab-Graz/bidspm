@@ -3,8 +3,18 @@ from unittest.mock import patch
 
 import pytest
 
+from lib import core
 from lib.preflight import run_preflight, _verdict
 from tests.preflight_support import make_trees, write_model
+
+
+_real_validate = core.validate_bids_model
+
+
+@pytest.fixture(autouse=True)
+def _no_network_validation():
+    with patch("lib.core.validate_bids_model", return_value={"valid": True}):
+        yield
 
 
 def ids(result, severity):
@@ -209,3 +219,12 @@ def test_missing_container_runtime_warns(tmp_path):
     with patch("shutil.which", return_value=None):
         assert "container" in ids(run(tmp_path, container_type="docker"), "warn")
     assert "container" not in ids(run(tmp_path, container_type=""), "warn")
+
+
+def test_offline_schema_fetch_is_a_warning_not_an_error(tmp_path):
+    import requests
+    with patch("lib.core.validate_bids_model", _real_validate), \
+            patch("lib.core._fetch_bids_stats_schema", side_effect=requests.ConnectionError("offline")):
+        result = run(tmp_path, model_file=write_model(tmp_path))
+    (item,) = _only(result, "model")
+    assert item["severity"] == "warn" and "schema" in item["message"]
