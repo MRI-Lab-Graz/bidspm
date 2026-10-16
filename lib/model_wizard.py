@@ -141,6 +141,13 @@ def _need_condition(state, condition):
         raise WizardError(f"condition {condition!r} is not available (unknown, excluded, or already used by an earlier recipe)")
 
 
+def _release(state, ref):
+    """Drop a regressor consumed by a recipe; a parametric modulator on it would be left dangling."""
+    if any(ref in pm["Conditions"] for pm in state["pmods"]):
+        raise WizardError(f"{ref!r} has a parametric modulator, so it cannot be merged, renamed or split away afterwards; add the modulator last")
+    state["regressors"].remove(ref)
+
+
 def _first_filter(state, condition):
     out = f"trial_{_coerce(condition)}"
     instruction = {"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out}
@@ -180,7 +187,7 @@ def _split(state, condition, column, values, keep_original):
     source = _first_filter(state, condition)
     state["regressors"] += [_second_filter(state, source, column, v, condition) for v in values]
     if not keep_original:
-        state["regressors"].remove(f"trial_type.{condition}")
+        _release(state, f"trial_type.{condition}")
 
 
 @recipe("valid_only", "Only valid/correct trials",
@@ -210,6 +217,54 @@ def split_by_column(state, p):
             raise WizardError(f"column {column!r} is numeric; choose the values to split by explicitly (or use the parametric modulator recipe)")
         values = [v for v in state["columns"].get(column, []) if v not in NA]
     _split(state, p.get("condition"), column, values, p.get("keep_original"))
+
+
+@recipe("merge_rename", "Merge or rename conditions",
+        "Combine several trial_type values into one regressor, or rename a single one.",
+        [{"name": "sources", "kind": "conditions", "label": "Conditions", "required": True},
+         {"name": "target", "kind": "text", "label": "New name", "required": True}])
+def merge_rename(state, p):
+    sources = list(dict.fromkeys(_str_list_param("sources", p.get("sources"))))
+    target = _str_param("target", p.get("target"))
+    if not sources:
+        raise WizardError("pick at least one condition to merge or rename")
+    for s in sources:
+        _need_condition(state, s)
+        _safe("condition", s, hyphen=True)
+    _safe("new name", target, hyphen=True)
+    state["instructions"].append({"Name": "Replace", "Input": "trial_type", "Output": "trial_type",
+                                  "Replace": [{"key": f"^{re.escape(s)}$", "value": target} for s in sources]})
+    for s in sources:
+        _release(state, f"trial_type.{s}")
+    if f"trial_type.{target}" not in state["regressors"]:
+        state["regressors"].append(f"trial_type.{target}")
+
+
+@recipe("parametric_modulator", "Parametric modulator",
+        "Modulate a regressor by a numeric events column (e.g. RT or a rating); SPM mean-centres it.",
+        [{"name": "regressor", "kind": "regressor", "label": "Regressor", "required": True},
+         {"name": "column", "kind": "numeric_column", "label": "Numeric column", "required": True},
+         {"name": "polynomial", "kind": "int", "label": "Polynomial order (1-3)", "required": False}])
+def parametric_modulator(state, p):
+    ref = _str_param("regressor", p.get("regressor"))
+    column = _str_param("column", p.get("column"))
+    poly = 1 if p.get("polynomial") is None else p["polynomial"]  # 0 must be rejected, not defaulted
+    if ref not in state["regressors"]:
+        raise WizardError(f"regressor {ref!r} is not available (unknown, or removed by an earlier recipe)")
+    if column not in state["numeric"]:
+        raise WizardError(f"column {column!r} is not a numeric events column")
+    if UNSAFE.search(column):
+        raise WizardError(f"column {column!r}: bidspm reads the modulator by its field name, so only letters, digits and underscores work; rename the column in the events first")
+    if not isinstance(poly, int) or isinstance(poly, bool) or not 1 <= poly <= 3:
+        raise WizardError("polynomial order must be 1, 2 or 3")
+    name, n = f"{column}_mod", 1
+    while any(m["Name"] == name for m in state["pmods"]):
+        n += 1
+        name = f"{column}_mod{n}"
+    pm = {"Name": name, "Conditions": [ref], "Values": [column]}
+    if poly > 1:
+        pm["PolynomialExpansion"] = poly
+    state["pmods"].append(pm)
 
 
 def build_model(choices, scan):

@@ -316,3 +316,108 @@ def test_names_that_collide_after_coercion_are_rejected():
                valid_only(condition="facehappy", value="valid-trial")]
     with pytest.raises(WizardError):
         build_model(choices(recipes=recipes), scan)
+
+
+def test_merge_rename_emits_a_replace_and_swaps_the_regressors():
+    recipe = {"id": "merge_rename", "sources": ["a", "b"], "target": "ab"}
+    node = run_node(build_model(choices(recipes=[recipe]), SCAN))
+    assert node["Transformations"]["Instructions"] == [
+        {"Name": "Replace", "Input": "trial_type", "Output": "trial_type",
+         "Replace": [{"key": "^a$", "value": "ab"}, {"key": "^b$", "value": "ab"}]}]
+    assert node["Model"]["X"] == ["trial_type.item", "trial_type.ab", 1]
+
+
+def test_rename_a_single_condition():
+    recipe = {"id": "merge_rename", "sources": ["item"], "target": "word"}
+    x = run_node(build_model(choices(recipes=[recipe]), SCAN))["Model"]["X"]
+    assert "trial_type.word" in x and "trial_type.item" not in x
+
+
+def test_filter_after_merge_uses_the_new_name():
+    recipes = [{"id": "merge_rename", "sources": ["item"], "target": "word"}, valid_only(condition="word")]
+    instr = run_node(build_model(choices(recipes=recipes), SCAN))["Transformations"]["Instructions"]
+    assert instr[1]["Query"] == "trial_type==word"
+
+
+def test_merge_dedupes_sources_and_allows_hyphens():
+    recipe = {"id": "merge_rename", "sources": ["a", "a"], "target": "a-b"}
+    node = run_node(build_model(choices(recipes=[recipe]), SCAN))
+    assert node["Transformations"]["Instructions"][0]["Replace"] == [{"key": "^a$", "value": "a-b"}]
+
+
+@pytest.mark.parametrize("bad", [
+    {"id": "merge_rename", "sources": [], "target": "x"},
+    {"id": "merge_rename", "sources": ["nope"], "target": "x"},
+    {"id": "merge_rename", "sources": ["a"], "target": "bad name"},
+    {"id": "merge_rename", "sources": ["a"], "target": "a.b"},
+    {"id": "merge_rename", "sources": ["a"], "target": ""},
+    {"id": "merge_rename", "sources": ["a"], "target": 5},
+    {"id": "merge_rename", "sources": ["a"], "target": None},
+    {"id": "merge_rename", "sources": "a", "target": "x"},
+    {"id": "merge_rename", "sources": None, "target": "x"},
+    {"id": "merge_rename", "sources": [1], "target": "x"},
+])
+def test_invalid_merge_raises(bad):
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), SCAN)
+
+
+def pmod(**over):
+    return {"id": "parametric_modulator", "regressor": "trial_type.item", "column": "ai_rating", **over}
+
+
+def test_parametric_modulator_matches_the_141_format_and_adds_contrasts():
+    recipes = [valid_only(), pmod(regressor="valid_item.item", polynomial=2)]
+    result = build_model(choices(recipes=recipes), SCAN)
+    node = run_node(result)
+    assert node["Model"]["Software"]["SPM"]["ParametricModulations"] == [
+        {"Name": "ai_rating_mod", "Conditions": ["valid_item.item"], "Values": ["ai_rating"], "PolynomialExpansion": 2}]
+    by_name = {c["Name"]: c for c in node["Contrasts"]}
+    assert by_name["valid_item_item_ai_rating_mod_1"]["ConditionList"] == ["valid_item.item:ai_rating_mod^1"]
+    assert by_name["valid_item_item_ai_rating_mod_2"]["ConditionList"] == ["valid_item.item:ai_rating_mod^2"]
+
+
+def test_polynomial_one_omits_the_expansion_key():
+    node = run_node(build_model(choices(recipes=[pmod()]), SCAN))
+    assert "PolynomialExpansion" not in node["Model"]["Software"]["SPM"]["ParametricModulations"][0]
+
+
+SCAN_HYPHEN_COLUMN = {**SCAN, "columns": {**SCAN["columns"], "ai-rating": ["1", "2"]},
+                      "numeric": ["rt", "ai_rating", "ai-rating"]}
+
+
+@pytest.mark.parametrize("bad", [
+    pmod(regressor="trial_type.nope"),          # not a current regressor
+    pmod(column="response_validity"),           # not numeric
+    pmod(polynomial=0), pmod(polynomial=4),     # out of range 1..3
+    pmod(polynomial=True), pmod(polynomial="2"), pmod(polynomial=1.5),
+    pmod(regressor=None), pmod(regressor=["trial_type.item"]),
+    pmod(column=None), pmod(column=3), pmod(column=["rt"]),
+])
+def test_invalid_pmod_raises(bad):
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), SCAN)
+
+
+def test_pmod_column_with_non_word_characters_is_rejected():
+    with pytest.raises(WizardError, match="rename"):
+        build_model(choices(recipes=[pmod(column="ai-rating")]), SCAN_HYPHEN_COLUMN)
+
+
+def test_two_pmods_on_the_same_column_get_unique_names():
+    recipes = [pmod(), pmod(regressor="trial_type.a")]
+    names = [m["Name"] for m in run_node(build_model(choices(recipes=recipes), SCAN))["Model"]["Software"]["SPM"]["ParametricModulations"]]
+    assert len(set(names)) == 2
+
+
+def test_merge_consuming_a_pmod_regressor_is_rejected():
+    recipes = [pmod(), {"id": "merge_rename", "sources": ["item"], "target": "word"}]
+    with pytest.raises(WizardError, match="parametric"):
+        build_model(choices(recipes=recipes), SCAN)
+
+
+def test_split_dropping_a_pmod_regressor_is_rejected_unless_kept():
+    split = {"id": "split_by_column", "condition": "item", "column": "response_validity"}
+    with pytest.raises(WizardError, match="parametric"):
+        build_model(choices(recipes=[pmod(), split]), SCAN)
+    build_model(choices(recipes=[pmod(), {**split, "keep_original": True}]), SCAN)
