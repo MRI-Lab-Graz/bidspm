@@ -37,3 +37,8 @@ def test_cli_preflight_exits_1_when_blocked(tmp_path):
     _, path = settings(tmp_path, SPACE="T1w")
     proc = cli("--preflight", "--skip-validator", "-s", str(path))
     assert proc.returncode == 1 and json.loads(proc.stdout)["verdict"] == "blocked"
+
+
+def test_help_mentions_preflight_options():
+    out = subprocess.run([sys.executable, str(ROOT / "bidspm.py"), "--help"], capture_output=True, text=True).stdout
+    assert all(opt in out for opt in ("--preflight", "--validator", "--skip-validator"))

@@ -68,6 +68,11 @@ OPTIONAL ARGUMENTS:
     --list-subjects      List available subjects and exit
     --list-tasks         List available tasks and exit
     --estimate-time      Estimate processing time and exit
+    --preflight          Run the readiness check, print a JSON report and exit
+                         (exit code 1 if blocked); needs -s
+    --validator          Dataset validator for --preflight: prism (default,
+                         BIDS + PRISM), bids (plain BIDS) or skip
+    --skip-validator     Same as --validator skip (shown as a warning)
 
 EXAMPLES:
     # Get help

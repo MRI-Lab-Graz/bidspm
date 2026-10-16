@@ -201,6 +201,31 @@ Notes:
 - Add tests for each new feature under `tests/`.
 - Keep tests deterministic and independent from external services.
 
+## Readiness check (preflight)
+
+Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and the model fit together. It checks:
+
+- BIDS and fMRIPrep folders exist, have `dataset_description.json` and `sub-*` folders (`bids_dir`, `fmriprep_dir`)
+- selected subjects exist in both trees (`subject_missing`); tasks are found (`no_tasks`)
+- preprocessed BOLD exists for each task and `SPACE` (`preproc_missing`)
+- events files exist, have valid `onset`/`duration` (and `trial_type` if the model uses it), and the model's conditions occur in them
+  (`events_missing`, `events_columns`, `events_values`, `events_trial_type`, `condition_missing`, `scan_length` warning)
+- confounds files exist and contain the model's nuisance regressors (`confounds_missing`, `confound_columns`)
+- the model is valid (`model`), and the chosen container tool is installed (`container`, warning)
+- the dataset validator (`validator`)
+
+```bash
+python bidspm.py --preflight -s config/config.json [--validator prism|bids|skip | --skip-validator]
+```
+
+It prints a JSON report (`verdict`: `ready`, `warnings` or `blocked`) and exits 1 if blocked. In the GUI the analysis page has a
+"Check readiness" button and a validator select; errors block Run (smooth/stats/dataset).
+
+Validator modes: `prism` (default, PRISM + BIDS), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
+is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.
+
+The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.
+
 ## Configuration
 
 ### 1. Data configuration (`config.json`)
