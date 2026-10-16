@@ -101,3 +101,114 @@ class TestWizardPage(unittest.TestCase):
         page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="load")
         page.evaluate("createNewModel()")
         page.wait_for_url(f"**/model-wizard/{self.project_id}")
+
+    def add_recipe(self, page, rid):
+        page.select_option("#wiz-recipe-add", rid)
+        page.click("#wiz-add-recipe")
+
+    def valid_item_then_pmod(self, page):
+        self.add_recipe(page, "valid_only")
+        card = page.locator("#wiz-recipes .wiz-recipe").nth(0)
+        card.locator("[data-param=condition]").select_option("item")
+        card.locator("[data-param=column]").select_option("response_validity")
+        card.locator("[data-param=value]").select_option("valid")
+        page.wait_for_function("document.getElementById('wiz-review').innerText.includes('valid_item.item')")
+        self.add_recipe(page, "parametric_modulator")
+        pm = page.locator("#wiz-recipes .wiz-recipe").nth(1)
+        pm.locator("[data-param=regressor]").select_option("valid_item.item")
+        pm.locator("[data-param=column]").select_option("rt")
+        page.wait_for_function("document.getElementById('wiz-review').innerText.includes('rt_mod')"
+                               " || document.getElementById('wiz-review').innerText.includes('valid_item_rt_mod')")
+
+    def test_scan_failures_are_shown_and_disable_the_form(self):
+        for status, body, ctype, expect in [(500, "<html>boom</html>", "text/html", "500"),
+                                            (404, json.dumps({"error": "gone <b>x</b>"}), "application/json", "gone <b>x</b>")]:
+            page = self.browser.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("**/api/wizard/scan", lambda r: r.fulfill(status=status, body=body, content_type=ctype))
+            page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+            page.wait_for_function("document.getElementById('wiz-error').innerText !== ''")
+            self.assertIn(expect, page.inner_text("#wiz-error"))
+            self.assertEqual(page.locator("#wiz-error b").count(), 0)
+            self.assertTrue(page.is_disabled("#wiz-save"))
+            self.assertTrue(page.is_disabled("#wiz-add-recipe"))
+            self.assertEqual(errors, [])
+
+    def test_recipe_order_can_be_changed_and_pmod_must_be_last(self):
+        page = self.open_wizard()
+        self.valid_item_then_pmod(page)
+        self.assertIn("Recipes run in this order", page.inner_text("body"))
+        self.assertTrue(page.locator("#wiz-recipes .wiz-recipe").nth(0).get_by_label("Move recipe up").is_disabled())
+        self.assertTrue(page.locator("#wiz-recipes .wiz-recipe").nth(1).get_by_label("Move recipe down").is_disabled())
+        page.locator("#wiz-recipes .wiz-recipe").nth(1).get_by_label("Move recipe up").click()
+        page.wait_for_function("document.getElementById('wiz-error').innerText !== ''")
+        self.assertIn("valid_item.item", page.inner_text("#wiz-review"))  # previous preview stays
+        page.locator("#wiz-recipes .wiz-recipe").nth(0).get_by_label("Move recipe down").click()
+        page.wait_for_function("document.getElementById('wiz-error').innerText === ''")
+        page.locator("#wiz-recipes .wiz-recipe").nth(1).get_by_label("Remove recipe").click()
+        self.assertEqual(page.locator("#wiz-recipes .wiz-recipe").count(), 1)
+        self.assertEqual(self.errors, [])
+
+    def test_a_late_build_response_does_not_wipe_typing(self):
+        import time
+        page = self.open_wizard()
+        page.click("#wiz-add-pair")
+        page.route("**/api/wizard/build", lambda r: (time.sleep(0.6), r.continue_()))
+        page.uncheck("#wiz-conditions input[value=b]")
+        box = page.locator("#wiz-pair-table input")
+        box.click()
+        box.press_sequentially("a_vs")
+        page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
+        self.assertEqual(box.input_value(), "a_vs")
+        self.assertTrue(box.evaluate("e => e === document.activeElement"))
+
+    def test_overwrite_flow_on_409(self):
+        page = self.open_wizard()
+        seen = []
+
+        def handler(route):
+            body = route.request.post_data_json
+            if body.get("save_path") and not seen:
+                seen.append(1)
+                return route.fulfill(status=409, body=json.dumps({"error": "exists"}), content_type="application/json")
+            route.continue_()
+        page.route("**/api/wizard/build", handler)
+        page.on("dialog", lambda d: d.accept())
+        page.fill("#wiz-save-path", str(self.root / "o409" / "m.json"))
+        page.click("#wiz-save")
+        page.wait_for_url(f"**/analysis/{self.project_id}")
+        self.assertTrue((self.root / "o409" / "m.json").exists())
+
+    def test_custom_nuisance_list(self):
+        page = self.open_wizard()
+        page.select_option("#wiz-nuisance", "custom")
+        page.fill("#wiz-nuisance-custom", "trans_x, trans_y")
+        page.press("#wiz-nuisance-custom", "Tab")
+        page.wait_for_function("document.getElementById('wiz-review').innerText.includes('2 columns')")
+
+    def test_pair_table_adds_a_contrast(self):
+        page = self.open_wizard()
+        page.click("#wiz-add-pair")
+        page.fill("#wiz-pair-table input", "a_vs_b")
+        page.locator("#wiz-pair-table select").nth(0).select_option("trial_type.a")
+        page.locator("#wiz-pair-table select").nth(1).select_option("trial_type.b")
+        page.wait_for_function("document.getElementById('wiz-review').innerText.includes('a_vs_b')")
+        self.assertEqual(self.errors, [])
+
+    def test_event_values_in_options_are_text(self):
+        page = self.browser.new_page()
+
+        def patch(route):
+            data = route.fetch().json()
+            data["columns"]["response_validity"].append("<b>x</b>")
+            data["columns"]["trial_type"].append("<i>q</i>")
+            route.fulfill(status=200, body=json.dumps(data), content_type="application/json")
+        page.route("**/api/wizard/scan", patch)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-conditions input")
+        self.add_recipe(page, "valid_only")
+        self.assertEqual(page.locator("#wiz-conditions i, #wiz-recipes b").count(), 0)
+        self.assertIn("<i>q</i>", page.inner_text("#wiz-conditions"))
+        labels = page.locator("#wiz-recipes [data-param=value] option").all_text_contents()
+        self.assertIn("<b>x</b>", labels)

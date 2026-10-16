@@ -1,11 +1,13 @@
 // model_wizard.js -- renders the wizard form and collects choices. All logic lives in lib/model_wizard.py
 // (/api/wizard/scan, /api/wizard/build). Server strings go in via textContent/DOM nodes, never innerHTML.
 const WIZ = window.BIDSPM_WIZARD_CONTEXT;
-const wiz = {scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, pathEdited: false};
+const wiz = {scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...kids) {
-    const node = Object.assign(document.createElement(tag), props);
+    const {dataset, ...rest} = props;
+    const node = Object.assign(document.createElement(tag), rest);
+    Object.assign(node.dataset, dataset);
     node.append(...kids);
     return node;
 }
@@ -49,12 +51,21 @@ function requestBody(extra = {}) {
 }
 
 // ---- build / preview ----------------------------------------------------------------------------
+function setEnabled(on) {
+    document.querySelectorAll('#wiz-form input, #wiz-form select, #wiz-form button').forEach((n) => { n.disabled = !on; });
+}
+
 function scheduleBuild() {
     clearTimeout(wiz.timer);
     wiz.timer = setTimeout(build, 300);
 }
 
+function focusInside(id) {
+    return $(id).contains(document.activeElement);
+}
+
 async function build() {
+    if (!wiz.scan) return;
     const seq = ++wiz.seq;
     try {
         const {status, data} = await postJson('/api/wizard/build', requestBody());
@@ -63,8 +74,13 @@ async function build() {
         showError('');
         wiz.preview = data.preview;
         renderReview(data.preview, data.preflight);
-        renderRecipes();
-        renderPairs();
+        // Option lists only change when the offered regressors do; never replace what the user is typing in.
+        const key = JSON.stringify(data.preview.regressors);
+        if (key !== wiz.optKey && !focusInside('wiz-recipes') && !focusInside('wiz-pair-table')) {
+            wiz.optKey = key;
+            renderRecipes();
+            renderPairs();
+        }
     } catch (e) {
         if (seq === wiz.seq) showError(`Preview failed: ${e.message}`);
     }
@@ -123,22 +139,24 @@ function paramOptions(kind, recipe, current) {
 
 function paramField(recipe, spec) {
     const {name, kind} = spec;
+    const id = `wiz-r${recipe.uid}-${name}`;
     const set = (v) => { recipe.params[name] = v; scheduleBuild(); };
-    const common = {className: 'form-control form-control-sm'};
+    const common = {id, className: 'form-control form-control-sm'};
     let input;
     if (kind === 'bool') {
-        input = el('input', {type: 'checkbox', className: 'form-check-input', checked: !!recipe.params[name]});
+        input = el('input', {id, type: 'checkbox', className: 'form-check-input', checked: !!recipe.params[name]});
         input.addEventListener('change', () => set(input.checked));
     } else if (kind === 'int') {
-        input = el('input', {...common, type: 'number', min: 1, max: 3, value: recipe.params[name] ?? ''});
+        const bounds = {min: spec.min ?? (name === 'polynomial' ? 1 : undefined), max: spec.max ?? (name === 'polynomial' ? 3 : undefined)};
+        input = el('input', {...common, type: 'number', ...bounds, value: recipe.params[name] ?? ''});
         input.addEventListener('change', () => set(input.value === '' ? undefined : Number(input.value)));
     } else if (kind === 'text') {
         input = el('input', {...common, type: 'text', value: recipe.params[name] ?? ''});
-        input.addEventListener('change', () => set(input.value.trim()));
+        input.addEventListener('change', () => set(input.value.trim() || undefined));
     } else {
         const multi = kind === 'conditions' || kind === 'values';
         const opts = paramOptions(kind, recipe, recipe.params[name]);
-        input = el('select', {className: 'form-select form-select-sm', multiple: multi}, ...opts.map((o) => option(o)));
+        input = el('select', {id, className: 'form-select form-select-sm', multiple: multi}, ...opts.map((o) => option(o)));
         if (multi) {
             for (const o of input.options) o.selected = (recipe.params[name] || []).includes(o.value);
             input.addEventListener('change', () => set([...input.selectedOptions].map((o) => o.value)));
@@ -147,34 +165,68 @@ function paramField(recipe, spec) {
             input.value = recipe.params[name] ?? '';
             input.addEventListener('change', () => {
                 recipe.params[name] = input.value;
-                if (kind === 'column') delete recipe.params.value, delete recipe.params.values;
+                if (kind === 'column') {
+                    delete recipe.params.value;
+                    delete recipe.params.values;
+                    refreshDependents(input.closest('.wiz-recipe'), recipe);
+                }
                 scheduleBuild();
-                if (kind === 'column') renderRecipes();
             });
         }
     }
     input.dataset.param = name;
-    const label = el('label', {className: 'form-label small mb-0', textContent: spec.label + (spec.required ? ' *' : '')});
-    return el('div', {className: kind === 'bool' ? 'form-check mb-1' : 'mb-1'}, ...(kind === 'bool' ? [input, label] : [label, input]));
+    const label = el('label', {className: 'form-label small mb-0', htmlFor: id, textContent: spec.label + (spec.required ? ' *' : '')});
+    return el('div', {className: kind === 'bool' ? 'form-check mb-1' : 'mb-1', dataset: {kind}},
+        ...(kind === 'bool' ? [input, label] : [label, input]));
+}
+
+// A new column changes the offered values: replace just those fields, not the focused column select.
+function refreshDependents(card, recipe) {
+    const def = wiz.scan.catalog.find((c) => c.id === recipe.id);
+    card.querySelectorAll('[data-kind=value], [data-kind=values]').forEach((node) => {
+        const spec = def.params.find((p) => p.name === node.querySelector('[data-param]').dataset.param);
+        node.replaceWith(paramField(recipe, spec));
+    });
+}
+
+function iconButton(icon, label, onClick, disabled = false) {
+    const b = el('button', {type: 'button', className: 'btn btn-sm btn-outline-secondary ms-1', disabled},
+        el('i', {className: `fas ${icon}`}));
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    b.addEventListener('click', onClick);
+    return b;
+}
+
+function move(list, i, d) {
+    [list[i], list[i + d]] = [list[i + d], list[i]];
+    renderRecipes();
+    scheduleBuild();
 }
 
 function renderRecipes() {
+    if (!wiz.scan) return;
     const nodes = wiz.recipes.map((recipe, i) => {
         const def = wiz.scan.catalog.find((c) => c.id === recipe.id);
-        const remove = el('button', {type: 'button', className: 'btn btn-sm btn-outline-danger', title: 'Remove'},
-            el('i', {className: 'fas fa-times'}));
-        remove.addEventListener('click', () => { wiz.recipes.splice(i, 1); renderRecipes(); scheduleBuild(); });
+        if (!def) return null;
+        const tools = el('div', {},
+            iconButton('fa-arrow-up', 'Move recipe up', () => move(wiz.recipes, i, -1), i === 0),
+            iconButton('fa-arrow-down', 'Move recipe down', () => move(wiz.recipes, i, 1), i === wiz.recipes.length - 1),
+            iconButton('fa-times', 'Remove recipe', () => { wiz.recipes.splice(i, 1); renderRecipes(); scheduleBuild(); }));
+        const note = recipe.id === 'parametric_modulator'
+            ? [el('div', {className: 'small text-muted', textContent: 'Add this last: recipes after it cannot use its regressor.'})] : [];
         return el('div', {className: 'border rounded p-2 mb-2 wiz-recipe'},
-            el('div', {className: 'd-flex justify-content-between'}, el('strong', {className: 'small', textContent: def.title}), remove),
-            ...def.params.map((spec) => paramField(recipe, spec)));
-    });
+            el('div', {className: 'd-flex justify-content-between'}, el('strong', {className: 'small', textContent: def.title}), tools),
+            ...note, ...def.params.map((spec) => paramField(recipe, spec)));
+    }).filter(Boolean);
     $('wiz-recipes').replaceChildren(...nodes);
 }
 
 // ---- contrast pairs -----------------------------------------------------------------------------
-function multiSelect(selected, onChange) {
+function multiSelect(selected, label, onChange) {
     const sel = el('select', {className: 'form-select form-select-sm', multiple: true},
         ...[...new Set([...(wiz.preview?.regressors || []), ...selected])].map((r) => option(r)));
+    sel.setAttribute('aria-label', label);
     for (const o of sel.options) o.selected = selected.includes(o.value);
     sel.addEventListener('change', () => onChange([...sel.selectedOptions].map((o) => o.value)));
     return sel;
@@ -183,13 +235,14 @@ function multiSelect(selected, onChange) {
 function renderPairs() {
     const rows = wiz.pairs.map((pair, i) => {
         const name = el('input', {className: 'form-control form-control-sm', value: pair.name});
-        name.addEventListener('change', () => { pair.name = name.value.trim(); scheduleBuild(); });
-        const remove = el('button', {type: 'button', className: 'btn btn-sm btn-outline-danger'}, el('i', {className: 'fas fa-times'}));
-        remove.addEventListener('click', () => { wiz.pairs.splice(i, 1); renderPairs(); scheduleBuild(); });
+        name.setAttribute('aria-label', 'Contrast name');
+        name.addEventListener('input', () => { pair.name = name.value.trim(); });
+        name.addEventListener('change', scheduleBuild);
+        const remove = iconButton('fa-times', 'Remove contrast', () => { wiz.pairs.splice(i, 1); renderPairs(); scheduleBuild(); });
         const cell = (n) => el('td', {}, n);
         return el('tr', {}, cell(name),
-            cell(multiSelect(pair.positive, (v) => { pair.positive = v; scheduleBuild(); })),
-            cell(multiSelect(pair.negative, (v) => { pair.negative = v; scheduleBuild(); })), cell(remove));
+            cell(multiSelect(pair.positive, 'Positive regressors', (v) => { pair.positive = v; scheduleBuild(); })),
+            cell(multiSelect(pair.negative, 'Negative regressors', (v) => { pair.negative = v; scheduleBuild(); })), cell(remove));
     });
     $('wiz-pair-table').tBodies[0].replaceChildren(...rows);
 }
@@ -201,11 +254,26 @@ function defaultSavePath() {
 }
 
 async function loadScan(task) {
-    const {status, data} = await postJson('/api/wizard/scan', {bids_dir: WIZ.bidsDir, fmriprep_dir: WIZ.fmriprepDir, task});
-    if (status !== 200) return showError(data.error || `HTTP ${status}`);
+    const seq = ++wiz.scanSeq;
+    let data;
+    try {
+        const res = await postJson('/api/wizard/scan', {bids_dir: WIZ.bidsDir, fmriprep_dir: WIZ.fmriprepDir, task});
+        if (seq !== wiz.scanSeq) return;  // a newer scan was requested
+        if (res.status !== 200) throw new Error(res.data.error || `HTTP ${res.status}`);
+        data = res.data;
+    } catch (e) {
+        if (seq !== wiz.scanSeq) return;
+        wiz.scan = null;
+        showError(`Scan failed: ${e.message}`);
+        return setEnabled(false);
+    }
+    showError('');
+    setEnabled(true);
     wiz.scan = data;
     wiz.recipes = [];
+    wiz.pairs = [];
     wiz.preview = null;
+    wiz.optKey = null;
     $('wiz-task').replaceChildren(...data.tasks.map((t) => option(t)));
     $('wiz-task').value = data.task;
     $('wiz-conditions').replaceChildren(...(data.columns.trial_type || []).map((c) => {
@@ -213,7 +281,7 @@ async function loadScan(task) {
         input.addEventListener('change', scheduleBuild);
         return el('label', {className: 'form-check small'}, input, ' ', c);
     }));
-    $('wiz-name').value = `${data.task}_model`;
+    if (!wiz.nameEdited) $('wiz-name').value = `${data.task}_model`;
     if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath();
     $('wiz-recipe-add').replaceChildren(...data.catalog.map((c) => option(c.id, c.title)));
     $('wiz-recipe-add').dispatchEvent(new Event('change'));
@@ -221,10 +289,12 @@ async function loadScan(task) {
     $('wiz-nuisance').replaceChildren(...Object.keys(data.nuisance_presets).map((n) => option(n)), option('custom', 'custom...'));
     $('wiz-nuisance').value = current || 'none';
     renderRecipes();
+    renderPairs();
     build();
 }
 
 async function save(overwrite = false) {
+    $('wiz-save').disabled = true;
     try {
         const {status, data} = await postJson('/api/wizard/build', requestBody({save_path: $('wiz-save-path').value.trim(), overwrite}));
         if (status === 409 && !overwrite) {
@@ -238,6 +308,8 @@ async function save(overwrite = false) {
         window.location.href = `/analysis/${WIZ.projectId}`;
     } catch (e) {
         showError(`Save failed: ${e.message}`);
+    } finally {
+        $('wiz-save').disabled = !wiz.scan;
     }
 }
 
@@ -245,18 +317,20 @@ function init() {
     const nuisance = $('wiz-nuisance');
     $('wiz-task').addEventListener('change', () => loadScan($('wiz-task').value));
     $('wiz-add-recipe').addEventListener('click', () => {
-        wiz.recipes.push({id: $('wiz-recipe-add').value, params: {}});
+        if (!$('wiz-recipe-add').value) return;
+        wiz.recipes.push({id: $('wiz-recipe-add').value, uid: ++wiz.uid, params: {}});
         renderRecipes();
         scheduleBuild();
     });
     $('wiz-recipe-add').addEventListener('change', () => {
-        $('wiz-recipe-help').textContent = wiz.scan.catalog.find((c) => c.id === $('wiz-recipe-add').value)?.description || '';
+        $('wiz-recipe-help').textContent = wiz.scan?.catalog.find((c) => c.id === $('wiz-recipe-add').value)?.description || '';
     });
     nuisance.addEventListener('change', () => { $('wiz-nuisance-custom').hidden = nuisance.value !== 'custom'; scheduleBuild(); });
     $('wiz-nuisance-custom').addEventListener('change', scheduleBuild);
     $('wiz-auto-contrasts').addEventListener('change', scheduleBuild);
     $('wiz-add-pair').addEventListener('click', () => { wiz.pairs.push({name: '', positive: [], negative: []}); renderPairs(); });
-    $('wiz-name').addEventListener('change', () => { if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath(); scheduleBuild(); });
+    $('wiz-name').addEventListener('change', () => {
+        wiz.nameEdited = true; if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath(); scheduleBuild(); });
     $('wiz-save-path').addEventListener('input', () => { wiz.pathEdited = true; });
     $('wiz-save').addEventListener('click', () => save());
     loadScan('');

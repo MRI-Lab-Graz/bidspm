@@ -12,7 +12,7 @@
 
 <div id="wiz-error" class="alert alert-danger py-2 small" role="alert" hidden></div>
 
-<div class="row g-3">
+<div class="row g-3" id="wiz-form">
   <div class="col-lg-7">
     <div class="card shadow-sm mb-3"><div class="card-body">
       <h6 class="fw-bold">1. Task and conditions</h6>
@@ -25,17 +25,18 @@
     <div class="card shadow-sm mb-3"><div class="card-body">
       <h6 class="fw-bold">2. Refine conditions</h6>
       <div class="input-group input-group-sm mb-2">
-        <select id="wiz-recipe-add" class="form-select"></select>
+        <select id="wiz-recipe-add" class="form-select" aria-label="Recipe to add"></select>
         <button type="button" id="wiz-add-recipe" class="btn btn-outline-primary"><i class="fas fa-plus me-1"></i>Add</button>
       </div>
       <div id="wiz-recipe-help" class="small text-muted mb-2"></div>
+      <div class="small text-muted mb-1">Recipes run in this order.</div>
       <div id="wiz-recipes"></div>
     </div></div>
 
     <div class="card shadow-sm mb-3"><div class="card-body">
       <h6 class="fw-bold">3. Nuisance regressors</h6>
-      <select id="wiz-nuisance" class="form-select form-select-sm mb-2"></select>
-      <input id="wiz-nuisance-custom" class="form-control form-control-sm" placeholder="comma-separated confound columns" hidden>
+      <select id="wiz-nuisance" class="form-select form-select-sm mb-2" aria-label="Nuisance regressors"></select>
+      <input id="wiz-nuisance-custom" aria-label="Custom confound columns" class="form-control form-control-sm" placeholder="comma-separated confound columns" hidden>
     </div></div>
 
     <div class="card shadow-sm mb-3"><div class="card-body">
@@ -50,7 +51,7 @@
       </table>
       <button type="button" id="wiz-add-pair" class="btn btn-outline-secondary btn-sm"><i class="fas fa-plus me-1"></i>Add contrast</button>
       <details class="small text-muted mt-2"><summary>Advanced</summary>
-        Open the saved model in the editor for custom contrasts.
+        <a href="{{ url_for('analysis_page', project_id=current_project_id) }}">Open the saved model in the editor</a> / contrast builder for custom contrasts.
       </details>
     </div></div>
   </div>
