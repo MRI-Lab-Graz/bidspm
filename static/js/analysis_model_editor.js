@@ -179,7 +179,8 @@ const { openBrowser } = window.BidspmAnalysisBrowser.createBrowserController({
         const input = document.getElementById(`input-${targetKey}`);
         if (!input) return;
         input.value = path;
-        input.dispatchEvent(new Event('change'));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 });
 

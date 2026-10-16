@@ -153,6 +153,34 @@ class TestAnalysisStages(unittest.TestCase):
         self.assertEqual(self.current(page), "folders")
         self.assertEqual(page.evaluate("document.activeElement.id"), "stage-heading")
 
+    def test_non_bubbling_change_events_update_the_gate_and_summary(self):
+        page = self.open_page(self.partial_id)
+        page.evaluate("""() => { for (const [id, v] of [['input-WD', '/w/wd'], ['input-FMRIPREP_DIR', '/w/fp']]) {
+            const f = document.getElementById(id); f.value = v; f.dispatchEvent(new Event('change')); } }""")
+        page.wait_for_function("document.getElementById('stage-next').getAttribute('aria-disabled') === 'false'")
+        self.assertEqual(page.inner_text("#stage-hint").strip(), "")
+        page.evaluate("""() => { const f = document.getElementById('input-BIDS_DIR'); f.value = '/w/newbids';
+            f.dispatchEvent(new Event('input')); }""")
+        go_to_stage(page, "run")
+        self.assertIn("newbids", page.inner_text("#stage-summary"))
+
+    def test_browse_dialog_selection_updates_the_gate(self):
+        page = self.open_page(self.partial_id)
+        for key in ("WD", "FMRIPREP_DIR"):
+            page.click(f'.btn-browse[data-key="{key}"]')
+            page.wait_for_selector("#browseModal.show")
+            page.wait_for_function("document.querySelectorAll('#browse-list > *').length > 0")
+            page.click("#btn-confirm-browse")
+            page.wait_for_selector("#browseModal", state="hidden")
+        page.wait_for_function("document.getElementById('stage-next').getAttribute('aria-disabled') === 'false'")
+
+    def test_values_assigned_by_the_async_config_load_reach_the_gate(self):
+        page = self.open_page(self.partial_id)
+        self.assertFalse(page.is_enabled("#stage-next"))
+        page.evaluate("""async () => { unifiedStudyConfig = {...unifiedStudyConfig, WD: '/w/wd', FMRIPREP_DIR: '/w/fp'};
+            await syncInternalToForm(); }""")
+        self.assertTrue(page.is_enabled("#stage-next"))
+
     def test_model_and_options_gate_next(self):
         page = self.open_page()
         go_to_stage(page, "model")

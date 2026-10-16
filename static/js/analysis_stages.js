@@ -133,13 +133,14 @@
         $('stage-back').addEventListener('click', () => goTo(STAGES[index(cur) - 1], {focus: true}));
         $('stage-next').addEventListener('click', onNext);
         const onEdit = e => { if (e.target.matches && e.target.matches('.dynamic-input, input[name="action"]')) render(); };
-        document.addEventListener('input', onEdit);
-        document.addEventListener('change', onEdit);
+        // capture phase: also sees non-bubbling events dispatched on the inputs
+        document.addEventListener('input', onEdit, true);
+        document.addEventListener('change', onEdit, true);
         window.addEventListener('load', render);  // values applied by loadProjectConfig without events
         cur = initialStage();
         render();
     }
 
-    window.analysisStages = {goTo, current: () => cur, isValid: name => !blocker(name)};
+    window.analysisStages = {goTo, current: () => cur, isValid: name => !blocker(name), refresh: render};
     init();
 })();
