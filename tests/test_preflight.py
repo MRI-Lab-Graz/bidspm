@@ -1,10 +1,14 @@
+import json
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from lib import core
-from lib.preflight import run_preflight, _verdict
+from lib.preflight import check_validator, run_preflight, _verdict
 from tests.preflight_support import make_trees, write_model
 
 
@@ -31,7 +35,7 @@ def run(tmp_path, **kw):
 def test_healthy_trees_have_no_errors(tmp_path):
     result = run(tmp_path)
     assert ids(result, "error") == set()
-    assert result["verdict"] in ("ready", "warnings")  # strict "warnings" restored in Task 6 (skipped validator warns)
+    assert result["verdict"] == "warnings"
 
 
 def test_verdict_levels():
@@ -228,3 +232,58 @@ def test_offline_schema_fetch_is_a_warning_not_an_error(tmp_path):
         result = run(tmp_path, model_file=write_model(tmp_path))
     (item,) = _only(result, "model")
     assert item["severity"] == "warn" and "schema" in item["message"]
+
+
+REPORT = {"valid": False, "issues": [
+    {"code": "PRISM301", "severity": "ERROR", "message": "schema error: 'Authors' is a required property\nmore", "file_path": "/d/dataset_description.json"},
+    {"code": "BIDS_NO_AUTHORS", "severity": "WARNING", "message": "[BIDS] NO_AUTHORS", "file_path": "/d/x"},
+    {"code": "BIDS_README_FILE_MISSING", "severity": "WARNING", "message": "[BIDS] README", "file_path": "/d/y"}]}
+
+
+def fake_run(stdout, returncode=1, calls=None):
+    def run(cmd, **kw):
+        if calls is not None:
+            calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+    return run
+
+
+def test_validator_errors_block_and_warnings_are_summarised(tmp_path):
+    out = check_validator(tmp_path, "prism", run=fake_run("banner\n" + json.dumps(REPORT)))
+    assert [(c["severity"], c["id"]) for c in out] == [("error", "validator"), ("warn", "validator")]
+    assert "PRISM301" in out[0]["message"] and "more" not in out[0]["message"]
+    assert "2 validator warning" in out[1]["message"]
+
+
+def test_plain_bids_mode_passes_no_prism_and_never_fix_or_plugins(tmp_path):
+    calls = []
+    check_validator(tmp_path, "bids", run=fake_run(json.dumps({"issues": []}), 0, calls))
+    cmd = calls[0]
+    assert "--no-prism" in cmd and "--json" in cmd
+    assert not {"--fix", "--plugins"} & set(cmd)
+
+
+def test_skip_mode_warns_and_does_not_run(tmp_path):
+    calls = []
+    out = check_validator(tmp_path, "skip", run=fake_run("", 0, calls))
+    assert [c["severity"] for c in out] == ["warn"] and calls == []
+
+
+def test_unparseable_validator_output_degrades_to_a_warning(tmp_path):
+    out = check_validator(tmp_path, "prism", run=fake_run("Traceback ..."))
+    assert [c["severity"] for c in out] == ["warn"]
+
+
+def test_validator_error_blocks_the_whole_preflight(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    with patch("lib.preflight.subprocess.run", fake_run(json.dumps(REPORT))):
+        result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="prism")
+    assert result["verdict"] == "blocked" and "validator" in ids(result, "error")
+
+
+@pytest.mark.skipif(not (Path(sys.executable).parent / "prism-validator").exists() and not shutil.which("prism-validator"),
+                    reason="prism-validator not installed")
+def test_real_prism_validator_flags_an_incomplete_dataset(tmp_path):
+    bids, _ = make_trees(tmp_path)  # no Authors, no sidecars -> PRISM errors
+    assert any(c["severity"] == "error" for c in check_validator(bids, "prism"))
+    assert not any(c["severity"] == "error" for c in check_validator(bids, "bids"))

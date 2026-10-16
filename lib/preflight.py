@@ -195,10 +195,34 @@ def check_container(container_type):
     return []
 
 
+def check_validator(bids_dir, mode="prism", run=subprocess.run):
+    """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins."""
+    if mode == "skip":
+        return [_item("validator", WARN, "Dataset validator skipped.", "Choose 'PRISM' or 'plain BIDS' to validate the dataset.")]
+    exe = Path(sys.executable).parent / "prism-validator"
+    exe = str(exe) if exe.is_file() else shutil.which("prism-validator")
+    if not exe:
+        return [_item("validator", WARN, "prism-validator is not installed; the dataset was not validated.", "Run: uv sync")]
+    cmd = [exe, str(bids_dir), "--json"] + (["--no-prism"] if mode == "bids" else [])
+    try:
+        proc = run(cmd, capture_output=True, text=True, timeout=1800)  # ponytail: no result cache; add one if validation proves slow
+        issues = json.loads(proc.stdout[proc.stdout.index("{"):]).get("issues", [])
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        return [_item("validator", WARN, f"The dataset validator produced no report ({exc}).", "Run prism-validator by hand to see why.")]
+    out = [_item("validator", ERROR, f"{i['code']}: {i['message'].splitlines()[0]} ({i.get('file_path', '')})",
+                 "Fix the dataset, or choose 'skip' if the problem is unrelated to this analysis (e.g. DWI).")
+           for i in issues if i.get("severity") == "ERROR"]
+    warns = [i for i in issues if i.get("severity") == "WARNING"]
+    if warns:
+        out.append(_item("validator", WARN, f"{len(warns)} validator warning(s): " + ", ".join(sorted({w['code'] for w in warns}))))
+    return out
+
+
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="prism", container_type=""):
     checks = check_dirs(bids_dir, fmriprep_dir)
     if not checks:
+        checks += check_validator(bids_dir, validator)
         from lib.core import discover_tasks  # lazy: keeps module import light
         tasks = list(tasks) or discover_tasks(Path(bids_dir))
         if not tasks:
