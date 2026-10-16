@@ -26,7 +26,16 @@ def _t_contrast(name, conditions, weights):
 
 
 def _contrast_name(ref):
-    return ref.removeprefix("trial_type.").replace(".", "_")
+    name = re.sub(r"[^A-Za-z0-9_]+", "_", ref.removeprefix("trial_type.")).strip("_")
+    if not name:
+        raise WizardError(f"cannot derive a contrast name from {ref!r}")
+    return name
+
+
+def _expect(value, kind, what):
+    if not isinstance(value, kind):
+        raise WizardError(f"{what} has the wrong type")
+    return value
 
 
 def second_level_nodes(names):
@@ -53,19 +62,25 @@ def _nuisance(value):
 
 def _run_contrasts(regressors, pmods, spec):
     out = []
+    _expect(spec, dict, "contrasts")
     if spec.get("auto", True):
         out += [_t_contrast(_contrast_name(r), [r], [1]) for r in regressors]
         for pm in pmods:
             ref = pm["Conditions"][0]
             for k in range(1, pm.get("PolynomialExpansion", 1) + 1):
                 out.append(_t_contrast(f"{_contrast_name(ref)}_{pm['Name']}_{k}", [f"{ref}:{pm['Name']}^{k}"], [1]))
-    for pair in spec.get("pairs") or []:
-        name, pos, neg = pair.get("name") or "", list(pair.get("positive") or []), list(pair.get("negative") or [])
+    for pair in _expect(spec.get("pairs", []), list, "contrasts.pairs"):
+        _expect(pair, dict, "contrast pair")
+        name = _expect(pair.get("name") or "", str, "contrast name")
+        pos = _expect(pair.get("positive") or [], list, "contrast positive")
+        neg = _expect(pair.get("negative") or [], list, "contrast negative")
         if not NAME_RE.fullmatch(name):
             raise WizardError(f"contrast name {name!r}: use letters, digits and underscores only")
         unknown = [r for r in pos + neg if r not in regressors]
         if not pos or not neg or unknown:
             raise WizardError(f"contrast {name!r} needs regressors on both sides" + (f"; unknown: {', '.join(unknown)}" if unknown else ""))
+        if len(set(pos + neg)) != len(pos + neg):
+            raise WizardError(f"contrast {name!r} uses a regressor twice")
         out.append(_t_contrast(name, pos + neg, [1 / len(pos)] * len(pos) + [-1 / len(neg)] * len(neg)))
     names = [c["Name"] for c in out]
     dupes = sorted({n for n in names if names.count(n) > 1})
@@ -75,17 +90,25 @@ def _run_contrasts(regressors, pmods, spec):
 
 
 def build_model(choices, scan):
+    _expect(choices, dict, "choices")
+    _expect(scan, dict, "scan")
     task = choices.get("task")
     if task not in scan.get("tasks", []):
         raise WizardError(f"task {task!r} was not found in the dataset (found: {', '.join(scan.get('tasks', [])) or 'none'})")
     conditions = scan.get("columns", {}).get("trial_type", [])
     if not conditions:
         raise WizardError(f"the events of task-{task} have no trial_type values; the wizard needs a trial_type column")
-    exclude = set(choices.get("exclude") or [])
+    exclude = _expect(choices.get("exclude", []), list, "exclude")
+    if not all(isinstance(e, str) for e in exclude):
+        raise WizardError("exclude must be a list of trial_type values")
+    if set(exclude) - set(conditions):
+        raise WizardError(f"cannot exclude unknown trial_type values: {', '.join(sorted(set(exclude) - set(conditions)))}")
+    _expect(choices.get("name") or "", str, "name")
+    recipes = _expect(choices.get("recipes", []), list, "recipes")
     state = {"regressors": [f"trial_type.{c}" for c in conditions if c not in exclude], "instructions": [],
              "pmods": [], "warnings": [], "columns": scan["columns"], "numeric": set(scan.get("numeric", []))}
-    for recipe in choices.get("recipes") or []:
-        fn = RECIPES.get(recipe.get("id"))
+    for recipe in recipes:
+        fn = RECIPES.get(_expect(recipe, dict, "recipe").get("id"))
         if fn is None:
             raise WizardError(f"unknown recipe {recipe.get('id')!r}")
         fn(state, recipe)
@@ -93,7 +116,7 @@ def build_model(choices, scan):
     if not regressors:
         raise WizardError("the model has no regressors left")
     nuisance = _nuisance(choices.get("nuisance", "none"))
-    contrasts = _run_contrasts(regressors, state["pmods"], choices.get("contrasts") or {})
+    contrasts = _run_contrasts(regressors, state["pmods"], choices.get("contrasts", {}))
     spm = {"SerialCorrelation": "FAST"}  # lab default (as in studies/141*.json); bidspm's own default is AR(1)
     if state["pmods"]:
         spm["ParametricModulations"] = state["pmods"]

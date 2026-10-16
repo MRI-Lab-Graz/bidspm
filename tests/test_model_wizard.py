@@ -101,3 +101,49 @@ def test_second_level_nodes_shape():
     subject, dataset = second_level_nodes(["a"])
     assert subject["GroupBy"] == ["subject", "contrast"] and dataset["Model"]["X"] == [1]
     assert second_level_nodes([])[0]["Model"]["X"] == ["contrast"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"contrasts": []}, {"contrasts": {"pairs": {}}}, {"contrasts": {"auto": False, "pairs": ["x"]}},
+    {"recipes": {}}, {"recipes": ["x"]}, {"exclude": "b"}, {"exclude": [1]}, {"name": 5}, {"task": ["x"]},
+])
+def test_malformed_choice_shapes_raise_wizard_error(bad):
+    with pytest.raises(WizardError):
+        build_model(choices(**bad), SCAN)
+
+
+@pytest.mark.parametrize("args", [("nope", SCAN), (choices(), "nope")])
+def test_non_dict_choices_or_scan_raise_wizard_error(args):
+    with pytest.raises(WizardError):
+        build_model(*args)
+
+
+@pytest.mark.parametrize("pair", [
+    {"name": "x", "positive": ["trial_type.a"], "negative": ["trial_type.a", "trial_type.b"]},
+    {"name": "x", "positive": ["trial_type.a", "trial_type.a"], "negative": ["trial_type.b"]},
+    {"name": "x", "positive": ["trial_type.a"], "negative": ["trial_type.b", "trial_type.b"]},
+])
+def test_pair_overlap_or_repeat_is_rejected(pair):
+    with pytest.raises(WizardError):
+        build_model(choices(contrasts={"auto": False, "pairs": [pair]}), SCAN)
+
+
+def test_unknown_exclude_value_is_rejected():
+    with pytest.raises(WizardError):
+        build_model(choices(exclude=["typo"]), SCAN)
+
+
+def _scan_with(values):
+    return {**SCAN, "columns": {"trial_type": values}}
+
+
+def test_auto_contrast_names_are_sanitized():
+    result = build_model(choices(), _scan_with(["a-b"]))
+    (contrast,) = run_node(result)["Contrasts"]
+    assert contrast["Name"] == "a_b" and contrast["ConditionList"] == ["trial_type.a-b"]
+
+
+@pytest.mark.parametrize("values", [["a-b", "a_b"], [""]])
+def test_auto_contrast_names_colliding_or_empty_are_rejected(values):
+    with pytest.raises(WizardError):
+        build_model(choices(), _scan_with(values))
