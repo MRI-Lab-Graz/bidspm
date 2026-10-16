@@ -494,3 +494,27 @@ def test_chained_merges_apply_in_order():
     instr = node["Transformations"]["Instructions"]
     assert [i["Replace"][0]["key"] for i in instr] == ["^a$", "^b$"]
     assert node["Model"]["X"] == ["trial_type.item", "trial_type.c", 1]
+
+
+import json
+from pathlib import Path
+
+GOLDEN = Path(__file__).resolve().parent.parent / "studies" / "141_fix_pmod.json"
+
+
+@pytest.mark.skipif(not GOLDEN.is_file(), reason="studies/141_fix_pmod.json not present")
+def test_wizard_reproduces_the_141_run_node():
+    ref = next(n for n in json.loads(GOLDEN.read_text())["Nodes"] if n["Level"] == "Run")
+    scan = {"tasks": ["crom"],
+            "columns": {"trial_type": ["button_press", "fixation", "item", "rating", "verbal_response"],
+                        "response_validity": ["valid", "invalid"], "ai_rating": ["1", "2"]},
+            "numeric": ["ai_rating"], "confound_columns": []}
+    recipes = [valid_only(), pmod(regressor="valid_item.item", polynomial=2)]
+    mine = run_node(build_model(choices(task="crom", name="crom", recipes=recipes, exclude=["fixation"],
+                                        nuisance="motion6"), scan))
+    assert mine["Transformations"] == ref["Transformations"]
+    assert mine["Model"]["Software"]["SPM"]["ParametricModulations"] == ref["Model"]["Software"]["SPM"]["ParametricModulations"]
+    assert {str(x) for x in mine["Model"]["X"]} == {str(x) for x in ref["Model"]["X"]}
+    assert set(mine["Model"]["HRF"]["Variables"]) == set(ref["Model"]["HRF"]["Variables"])
+    ref_pmod_conditions = {c["ConditionList"][0] for c in ref["Contrasts"] if ":" in c["ConditionList"][0]}
+    assert ref_pmod_conditions <= {c["ConditionList"][0] for c in mine["Contrasts"]}
