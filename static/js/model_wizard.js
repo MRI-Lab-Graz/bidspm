@@ -328,6 +328,7 @@ async function loadScan(task) {
 }
 
 async function save(overwrite = false) {
+    if (wiz.recipes.some((r) => !isComplete(r))) return showError('Finish or remove the incomplete recipe(s) before saving.');
     $('wiz-save').disabled = true;
     try {
         const {status, data} = await postJson('/api/wizard/build', requestBody({save_path: $('wiz-save-path').value.trim(), overwrite}));

@@ -181,12 +181,6 @@ def test_preflight_exception_is_json_500(tmp_path):
     assert res.status_code == 500 and "boom" in res.get_json()["error"]
 
 
-@pytest.fixture(autouse=True)
-def _fresh_scan_cache():
-    from webapp import web_wizard_api
-    web_wizard_api._SCAN_CACHE.clear()
-
-
 def test_preview_build_without_preflight_skips_it_and_the_confound_scan(tmp_path):
     with mock.patch("webapp.web_wizard_api.run_preflight_from_config") as pre, \
             mock.patch("webapp.web_wizard_api._discover_confound_info") as conf:
@@ -205,30 +199,15 @@ def test_build_runs_preflight_by_default_and_on_save(tmp_path):
     assert pre.call_count == 2  # saving always includes the verdict
 
 
-def test_scan_is_cached_for_builds_and_bypassed_by_the_scan_route(tmp_path):
-    p = paths(tmp_path)
-    real = web_scan_events = __import__("webapp.web_wizard_api", fromlist=["scan_events"]).scan_events
-    with mock.patch("webapp.web_wizard_api.scan_events", side_effect=real) as spy:
-        body = {**p, "choices": choices(nuisance="none"), "preflight": False}
-        post("/api/wizard/build", body)
-        post("/api/wizard/build", body)
-        assert spy.call_count == 1
-        post("/api/wizard/scan", p)  # bypasses and refreshes
-        assert spy.call_count == 2
-        post("/api/wizard/build", body)
-        assert spy.call_count == 2
-
-
-def test_scan_cache_expires(tmp_path):
-    from webapp import web_wizard_api
+def test_scan_and_build_both_see_edited_events(tmp_path):
     p = paths(tmp_path)
     body = {**p, "choices": choices(nuisance="none"), "preflight": False}
-    real = web_wizard_api.scan_events
-    with mock.patch("webapp.web_wizard_api.scan_events", side_effect=real) as spy:
-        post("/api/wizard/build", body)
-        with mock.patch("webapp.web_wizard_api.time.monotonic", return_value=1e9):
-            post("/api/wizard/build", body)
-    assert spy.call_count == 2
+    assert "rare" not in post("/api/wizard/scan", p).get_json()["columns"]["trial_type"]
+    assert "trial_type.rare" not in post("/api/wizard/build", body).get_json()["preview"]["regressors"]
+    f = next((tmp_path / "bids").glob("sub-*/**/*_events.tsv"))
+    f.write_text(f.read_text() + "9\t1\trare\n")
+    assert "rare" in post("/api/wizard/scan", p).get_json()["columns"]["trial_type"]
+    assert "trial_type.rare" in post("/api/wizard/build", body).get_json()["preview"]["regressors"]
 
 
 def test_files_truncated_adds_preview_warning(tmp_path):

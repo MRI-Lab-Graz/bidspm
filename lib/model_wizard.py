@@ -1,6 +1,7 @@
 """Model wizard: build a BIDS-StatsModel from the scanned events/confounds plus the user's choices.
 
-Pure functions, no Flask. Recipes (Task 2+) are small functions registered in RECIPES that rewrite the working state:
+Pure functions, no Flask: scan_events reads the events files, build_model turns the user's choices into a model. Recipes are
+small functions registered in RECIPES that rewrite the working state:
 state = {"regressors": ["column.value", ...], "instructions": [...], "pmods": [...], "warnings": [...],
          "columns": {column: [values]}, "numeric": {columns}}.
 """
@@ -18,6 +19,14 @@ NUISANCE_PRESETS = {
     "motion6_fd": MOTION6 + ["framewise_displacement"],
 }
 RECIPES = {}
+RECIPE_CATALOG = []
+NA = {"n/a", "N/A", "nan", "NaN", ""}
+# Names end up in Filter queries (bids-matlab get_query splits on ==, ~=, <, >, >=, <=; the right side is an
+# anchored regex) and in output field names (coerce_fieldname strips everything but [A-Za-z0-9_]); '.' would
+# also corrupt the "<column>.<value>" regressor name. So only word characters are allowed, plus '-' in
+# conditions and values (a literal in the regex; the query keeps it, output names are coerced like bids-matlab).
+UNSAFE = re.compile(r"[^A-Za-z0-9_]")
+UNSAFE_HYPHEN_OK = re.compile(r"[^A-Za-z0-9_-]")
 
 
 class WizardError(ValueError):
@@ -78,8 +87,8 @@ def _run_contrasts(regressors, pmods, spec):
     for pair in _expect(spec.get("pairs", []), list, "contrasts.pairs"):
         _expect(pair, dict, "contrast pair")
         name = _expect(pair.get("name") or "", str, "contrast name")
-        pos = _str_list_param("contrast positive", pair.get("positive") or [])
-        neg = _str_list_param("contrast negative", pair.get("negative") or [])
+        pos = _str_list_param("positive", pair.get("positive") or [], "contrast positive")
+        neg = _str_list_param("negative", pair.get("negative") or [], "contrast negative")
         if not NAME_RE.fullmatch(name):
             raise WizardError(f"contrast name {name!r}: use letters, digits and underscores only")
         unknown = [r for r in pos + neg if r not in regressors]
@@ -96,14 +105,6 @@ def _run_contrasts(regressors, pmods, spec):
         raise WizardError(f"duplicate contrast names: {', '.join(dupes)}")
     return out
 
-RECIPE_CATALOG = []
-NA = {"n/a", "N/A", "nan", "NaN", ""}
-# Names end up in Filter queries (bids-matlab get_query splits on ==, ~=, <, >, >=, <=; the right side is an
-# anchored regex) and in output field names (coerce_fieldname strips everything but [A-Za-z0-9_]); '.' would
-# also corrupt the "<column>.<value>" regressor name. So only word characters are allowed, plus '-' in
-# conditions and values (a literal in the regex; the query keeps it, output names are coerced like bids-matlab).
-UNSAFE = re.compile(r"[^A-Za-z0-9_]")
-UNSAFE_HYPHEN_OK = re.compile(r"[^A-Za-z0-9_-]")
 
 
 def _coerce(name):
@@ -122,14 +123,14 @@ def recipe(id, title, description, params):
     return register
 
 
-def _str_param(label, value):
-    return _expect(value, str, f"recipe {label}")
+def _str_param(label, value, what=None):
+    return _expect(value, str, what or f"recipe {label}")
 
 
-def _str_list_param(label, value):
-    _expect(value, list, f"recipe {label}")
+def _str_list_param(label, value, what=None):
+    _expect(value, list, what or f"recipe {label}")
     for v in value:
-        _str_param(label, v)
+        _str_param(label, v, what)
     return value
 
 
@@ -254,8 +255,9 @@ def merge_rename(state, p):
         if target in state["columns"]["trial_type"]:
             raise WizardError(f"new name {target!r} is a condition that is excluded or already used by an earlier recipe; merging into it would model those events twice")
         for r in state["regressors"]:
-            if r.startswith("trial_type.") and r != f"trial_type.{target}" and _coerce(r[11:]) == _coerce(target) and r[11:] not in sources:
-                raise WizardError(f"new name {target!r} clashes with {r[11:]!r} once output names are coerced; choose another name")
+            cond = r.removeprefix("trial_type.")
+            if r.startswith("trial_type.") and r != f"trial_type.{target}" and _coerce(cond) == _coerce(target) and cond not in sources:
+                raise WizardError(f"new name {target!r} clashes with {cond!r} once output names are coerced; choose another name")
     elif any(ref in pm["Conditions"] for pm in state["pmods"]):
         raise WizardError(f"{ref!r} has a parametric modulator, so nothing can be merged into it; add the modulator last")
     state["instructions"].append({"Name": "Replace", "Input": "trial_type", "Output": "trial_type",

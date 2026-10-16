@@ -2,7 +2,6 @@
 import json
 import os
 import tempfile
-import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -13,21 +12,7 @@ from lib.preflight import _verdict, run_preflight_from_config
 from webapp.web_discovery_model_api import _discover_confound_info
 
 
-_SCAN_CACHE = {}  # (bids_dir, fmriprep_dir, task, with_confounds) -> (time, result)
-_SCAN_TTL = 60  # seconds; the live preview rebuilds on every edit and the scan reads every events file
-
-
-def _scan(bids_dir, fmriprep_dir, task, with_confounds=True, use_cache=False):
-    key = (bids_dir, fmriprep_dir, repr(task), with_confounds)
-    hit = _SCAN_CACHE.get(key)
-    if use_cache and hit and time.monotonic() - hit[0] < _SCAN_TTL:
-        return hit[1]
-    result = _scan_uncached(bids_dir, fmriprep_dir, task, with_confounds)
-    _SCAN_CACHE[key] = (time.monotonic(), result)
-    return result
-
-
-def _scan_uncached(bids_dir, fmriprep_dir, task, with_confounds):
+def _scan(bids_dir, fmriprep_dir, task, with_confounds=True):
     tasks = discover_tasks(Path(bids_dir))
     task = task if task in tasks else (tasks[0] if tasks else "")
     events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False}
@@ -91,7 +76,7 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
                 return jsonify({"error": "File already exists. Set overwrite=true to replace it."}), 409
         try:
             # build_model never reads confound columns, so skip reading every confounds TSV
-            scan = _scan(bids_dir, fmriprep_dir, choices.get("task"), with_confounds=False, use_cache=True)
+            scan = _scan(bids_dir, fmriprep_dir, choices.get("task"), with_confounds=False)
             result = build_model(choices, scan)
         except WizardError as exc:
             return jsonify({"error": str(exc)}), 400

@@ -595,3 +595,12 @@ def test_pair_items_must_be_strings(pair):
 def test_recipe_id_must_be_a_string(bad):
     with pytest.raises(WizardError):
         build_model(choices(recipes=[bad]), SCAN)
+
+
+def test_pair_item_error_does_not_say_recipe():
+    pair = {"name": "x", "positive": [5], "negative": ["trial_type.b"]}
+    with pytest.raises(WizardError) as e:
+        build_model(choices(contrasts={"auto": False, "pairs": [pair]}), SCAN)
+    assert "contrast positive" in str(e.value) and "recipe" not in str(e.value)
+    with pytest.raises(WizardError, match="recipe values"):
+        build_model(choices(recipes=[{"id": "split_by_column", "condition": "item", "column": "response_validity", "values": [5]}]), SCAN)

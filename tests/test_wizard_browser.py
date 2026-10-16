@@ -309,3 +309,19 @@ class TestWizardPage(unittest.TestCase):
         self.assertTrue(all(b["choices"]["recipes"] == [] for b in bodies))
         self.assertTrue(page.locator("#wiz-error").is_hidden())
         self.assertIn("incomplete", page.inner_text("#wiz-recipes"))
+
+    def test_save_refuses_while_a_recipe_is_incomplete(self):
+        page = self.browser.new_page()
+        bodies = self.build_bodies(page)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        target = self.root / "never_written.json"
+        page.fill("#wiz-save-path", str(target))
+        page.select_option("#wiz-recipe-add", "merge_rename")
+        page.click("#wiz-add-recipe")
+        page.wait_for_selector("#wiz-recipes .wiz-incomplete-note:not([hidden])")
+        page.click("#wiz-save")
+        page.wait_for_function("document.getElementById('wiz-error').innerText.includes('incomplete recipe')")
+        page.wait_for_timeout(500)
+        self.assertFalse(any(b.get("save_path") for b in bodies))
+        self.assertFalse(target.exists())
