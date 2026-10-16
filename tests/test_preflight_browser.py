@@ -102,3 +102,11 @@ class TestPreflightPanel(unittest.TestCase):
         page.select_option("#validator-mode", "skip")
         keys = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('bidspm_validator_mode_'))")
         self.assertEqual(keys, [f"bidspm_validator_mode_{self.project_id}"])
+
+    def test_note_and_checking_status_are_shown(self):
+        page = self.open_page()
+        self.assertIn("saved project settings", page.inner_text("#preflight-note"))
+        page.route("**/api/preflight", lambda r: None)  # never answered: the status line stays
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .preflight-status")
+        self.assertIn("Checking readiness", page.inner_text("#preflight-panel"))

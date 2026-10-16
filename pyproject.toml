@@ -2,7 +2,7 @@
 name = "bidspm-runner"
 version = "2.0.1"
 description = "Run bidspm (SPM/Octave in containers) on BIDS datasets from a CLI or a local web GUI"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "requests>=2.28.0",
     "jsonschema>=4.17.0",

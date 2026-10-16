@@ -37,6 +37,10 @@ function renderPreflight(report) {
 async function runPreflight() {
     const btn = document.getElementById('btn-preflight');
     btn.disabled = true;
+    const status = document.createElement('div');
+    status.className = 'small text-muted preflight-status';
+    status.textContent = 'Checking readiness...';
+    document.getElementById('preflight-panel')?.replaceChildren(status);
     try {
         updateInternalState();
         const res = await fetch('/api/preflight', {
@@ -56,6 +60,8 @@ async function runPreflight() {
 }
 
 (function () {
+    document.getElementById('preflight-note').textContent =
+        'Checks all subjects with the current form settings; Run checks the saved project settings and your subject selection.';
     const select = document.getElementById('validator-mode');
     try { select.value = localStorage.getItem(VALIDATOR_KEY) || 'prism'; } catch (e) { /* storage unavailable */ }
     select.addEventListener('change', () => { try { localStorage.setItem(VALIDATOR_KEY, select.value); } catch (e) { /* ignore */ } });

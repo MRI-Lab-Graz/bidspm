@@ -34,7 +34,7 @@ class TestUvProject(unittest.TestCase):
 
     def test_python_is_pinned_and_allowed(self):
         self.assertEqual(_text(".python-version").strip(), "3.12")
-        self.assertIn("3.10", self.pyproject["project"]["requires-python"])
+        self.assertIn("3.11", self.pyproject["project"]["requires-python"])
 
     def test_lock_file_is_committed_and_covers_the_dependencies(self):
         lock = _text("uv.lock")
