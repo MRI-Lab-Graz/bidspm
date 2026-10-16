@@ -4,6 +4,7 @@ Pure functions, no Flask. Recipes (Task 2+) are small functions registered in RE
 state = {"regressors": ["column.value", ...], "instructions": [...], "pmods": [...], "warnings": [...],
          "columns": {column: [values]}, "numeric": {columns}}.
 """
+import copy
 import re
 
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -90,7 +91,14 @@ def _run_contrasts(regressors, pmods, spec):
 
 RECIPE_CATALOG = []
 NA = {"n/a", "N/A", "nan", "NaN", ""}
-UNSAFE = re.compile(r"[\s'\"=]")
+# Names end up in Filter queries (bids-matlab get_query splits on ==, ~=, <, >, >=, <=; the right side is an
+# anchored regex) and in output field names (coerce_fieldname strips everything but [A-Za-z0-9_]); '.' would
+# also corrupt the "<column>.<value>" regressor name. So only word characters are allowed.
+UNSAFE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def catalog():
+    return copy.deepcopy(RECIPE_CATALOG)
 
 
 def recipe(id, title, description, params):
@@ -118,7 +126,7 @@ def _bool_param(label, value):
 
 def _safe(label, value):
     if not value or UNSAFE.search(str(value)):
-        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (spaces, quotes and '=' are not supported); rename it in the events first")
+        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (only letters, digits and underscores are supported); rename it in the events first")
 
 
 def _need_condition(state, condition):
@@ -128,15 +136,19 @@ def _need_condition(state, condition):
 
 def _first_filter(state, condition):
     out = f"trial_{condition}"
-    if not any(i.get("Output") == out for i in state["instructions"]):
-        state["instructions"].append({"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out})
+    instruction = {"Name": "Filter", "Input": "trial_type", "Query": f"trial_type=={condition}", "Output": out}
+    if instruction in state["instructions"]:
+        return out
+    if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
+        raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
+    state["instructions"].append(instruction)
     return out
 
 
 def _second_filter(state, source, column, value, condition):
     out = f"{value}_{condition}"
-    if any(i.get("Output") == out for i in state["instructions"]):
-        raise WizardError(f"the output name {out!r} is already used by another recipe")
+    if out in state["columns"] or any(i.get("Output") == out for i in state["instructions"]):
+        raise WizardError(f"the output name {out!r} clashes with an events column or another recipe")
     state["instructions"].append({"Name": "Filter", "Input": source, "Query": f"{column}=={value}", "Output": out})
     return f"{out}.{condition}"
 
@@ -146,6 +158,7 @@ def _split(state, condition, column, values, keep_original):
     _str_param("column", column)
     _str_list_param("values", values)
     keep_original = _bool_param("keep_original", keep_original)
+    values = list(dict.fromkeys(values))
     _need_condition(state, condition)
     if column == "trial_type" or column not in state["columns"]:
         raise WizardError(f"column {column!r} is not an events column that can split a condition")
@@ -171,7 +184,7 @@ def _split(state, condition, column, values, keep_original):
 def valid_only(state, p):
     _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"))
     others = [v for v in state["columns"][p["column"]] if v != p["value"] and v not in NA]
-    if others:
+    if others and not p.get("keep_original"):
         state["warnings"].append(f"{p['condition']}: trials with {p['column']} = {', '.join(others)} are not modelled")
 
 
@@ -185,6 +198,8 @@ def split_by_column(state, p):
     column = _str_param("column", p.get("column"))
     values = p.get("values")
     if values is None:
+        if column in state["numeric"]:
+            raise WizardError(f"column {column!r} is numeric; choose the values to split by explicitly (or use the parametric modulator recipe)")
         values = [v for v in state["columns"].get(column, []) if v not in NA]
     _split(state, p.get("condition"), column, values, p.get("keep_original"))
 

@@ -1,7 +1,7 @@
 # tests/test_model_wizard.py
 import pytest
 
-from lib.model_wizard import NUISANCE_PRESETS, RECIPE_CATALOG, WizardError, build_model, second_level_nodes
+from lib.model_wizard import NUISANCE_PRESETS, RECIPE_CATALOG, WizardError, build_model, catalog, second_level_nodes
 
 SCAN = {
     "tasks": ["x"],
@@ -228,3 +228,65 @@ def test_wrongly_typed_recipe_params_raise_wizard_error(bad):
 def test_missing_or_none_keep_original_means_false():
     x = run_node(build_model(choices(recipes=[valid_only(keep_original=None)]), SCAN))["Model"]["X"]
     assert "trial_type.item" not in x
+
+
+def _scan_cols(**cols):
+    return {**SCAN, "columns": {**SCAN["columns"], **cols}}
+
+
+@pytest.mark.parametrize("bad, cols", [
+    (valid_only(value="0.5"), {"response_validity": ["0.5", "x"]}),          # '.' corrupts column.value names
+    (valid_only(condition="a.b"), {}),
+    (valid_only(value="a-b"), {"response_validity": ["a-b", "x"]}),          # coerce_fieldname strips it
+    (valid_only(value="a<b"), {"response_validity": ["a<b", "x"]}),          # Filter query operators
+    (valid_only(value="a~b"), {"response_validity": ["a~b", "x"]}),
+    (valid_only(value="a|b"), {"response_validity": ["a|b", "x"]}),          # right side is a regex
+    (valid_only(value="a*"), {"response_validity": ["a*", "x"]}),
+])
+def test_names_outside_word_characters_are_rejected(bad, cols):
+    scan = _scan_cols(**cols)
+    scan["columns"]["trial_type"] = ["a", "b", "item", "a.b"]
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[bad]), scan)
+
+
+def test_split_by_column_on_a_numeric_column_needs_explicit_values():
+    recipe = {"id": "split_by_column", "condition": "item", "column": "rt"}
+    with pytest.raises(WizardError, match="numeric"):
+        build_model(choices(recipes=[recipe]), SCAN)
+
+
+def test_output_names_clashing_with_events_columns_are_rejected():
+    scan = _scan_cols(trial_item=["1"])
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[valid_only()]), scan)
+    scan = _scan_cols(valid_item=["1"])
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[valid_only()]), scan)
+
+
+def test_first_filter_is_not_chained_onto_a_foreign_instruction_with_the_same_output():
+    scan = _scan_cols(c=["trial_a", "z"])
+    scan["columns"]["trial_type"] = ["b", "a_b"]
+    first = {"id": "split_by_column", "condition": "b", "column": "c", "values": ["trial_a"]}  # output trial_a_b
+    second = {"id": "split_by_column", "condition": "a_b", "column": "c", "values": ["z"]}     # first filter trial_a_b
+    with pytest.raises(WizardError):
+        build_model(choices(recipes=[first, second]), scan)
+
+
+def test_valid_only_with_keep_original_does_not_warn():
+    result = build_model(choices(recipes=[valid_only(keep_original=True)]), SCAN)
+    assert result["preview"]["warnings"] == []
+
+
+def test_duplicate_split_values_are_deduped():
+    recipe = {**SPLIT, "values": ["valid", "valid", "invalid"]}
+    instr = run_node(build_model(choices(recipes=[recipe]), SCAN))["Transformations"]["Instructions"]
+    assert [i["Output"] for i in instr] == ["trial_item", "valid_item", "invalid_item"]
+
+
+def test_catalog_returns_a_deep_copy():
+    c = catalog()
+    c[0]["params"][0]["name"] = "mutated"
+    c.append("x")
+    assert catalog()[0]["params"][0]["name"] != "mutated" and len(catalog()) == len(RECIPE_CATALOG)
