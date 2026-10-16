@@ -55,10 +55,61 @@ def check_subjects(bids_dir, fmriprep_dir, subjects):
     return selected, out
 
 
+def _func_files(root, sub, pattern):
+    return sorted(p for p in (Path(root) / f"sub-{sub}").rglob(pattern) if p.parent.name == "func")
+
+
+def _read_tsv(path):
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        rows = list(reader)
+        return list(reader.fieldnames or []), rows
+
+
+def _events_problems(sub, name, cols, rows):
+    missing = [c for c in ("onset", "duration") if c not in cols]
+    if missing:
+        return [_item("events_columns", ERROR, f"{name} has no {' / '.join(missing)} column",
+                      "Events files need onset and duration columns (tab-separated).", sub)]
+    for n, row in enumerate(rows, start=2):
+        try:
+            ok = float(row["onset"]) >= 0 and float(row["duration"]) >= 0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            return [_item("events_values", ERROR,
+                          f"{name} line {n}: onset/duration must be non-negative numbers (got {row['onset']!r}, {row['duration']!r})",
+                          "Fix or remove that row (n/a is not allowed in onset or duration).", sub)]
+    return []
+
+
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space):
+    out = []
+    if not _func_files(fmriprep_dir, sub, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz"):
+        out.append(_item("preproc_missing", ERROR,
+                         f"sub-{sub} has no preprocessed BOLD for task-{task} in space {space or '(any)'}",
+                         f"Re-run fMRIPrep with --output-spaces {space or '<space>'}, or change the Space setting.", sub))
+    events = _func_files(bids_dir, sub, f"*task-{task}_*events.tsv")
+    if not events:
+        out.append(_item("events_missing", ERROR, f"sub-{sub} has no events file for task-{task}",
+                         "Add sub-*/func/*_task-*_events.tsv to the BIDS dataset.", sub))
+    for path in events:
+        cols, rows = _read_tsv(path)
+        out += _events_problems(sub, path.name, cols, rows)
+    return out
+
+
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="prism", container_type=""):
     checks = check_dirs(bids_dir, fmriprep_dir)
     if not checks:
-        _, found = check_subjects(bids_dir, fmriprep_dir, subjects)
+        from lib.core import discover_tasks  # lazy: keeps module import light
+        tasks = list(tasks) or discover_tasks(Path(bids_dir))
+        selected, found = check_subjects(bids_dir, fmriprep_dir, subjects)
         checks += found
+        present = set(_subjects_in(bids_dir)) & set(_subjects_in(fmriprep_dir))
+        for task in tasks:
+            for sub in selected:
+                if sub in present:
+                    checks += check_subject_task(bids_dir, fmriprep_dir, sub, task, space)
     return {"verdict": _verdict(checks), "checks": checks}
