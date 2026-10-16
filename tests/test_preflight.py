@@ -314,7 +314,7 @@ def test_missing_binary_stays_a_warning(tmp_path):
 
 
 @pytest.mark.parametrize("report", [
-    {"issues": None}, {"issues": "oops"}, {"issues": [{"severity": "ERROR"}]},
+    {"issues": None}, {"issues": "oops"}, {"issues": 5}, {"issues": [{"severity": "ERROR"}]},
     {"issues": [{"severity": "ERROR", "code": "X", "message": ""}]}, {"issues": [{"severity": "WARNING"}]}, {"issues": [1]}])
 def test_malformed_issues_never_raise(tmp_path, fake_exe, report):
     check_validator(tmp_path, "prism", run=fake_run(json.dumps(report), 1))

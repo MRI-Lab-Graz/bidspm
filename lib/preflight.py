@@ -91,30 +91,27 @@ def _events_problems(sub, name, cols, rows):
 def _model_needs(model_file):
     """(trial_type conditions, nuisance regressor names, uses Transformations, names the Transformations produce)."""
     conditions, nuisance, transformed, produced = set(), [], False, set()
-    try:
+    try:  # malformed models: return empty needs, never partial state (check_model reports them)
         model = json.loads(Path(model_file).read_text()) if model_file else {}
-    except (OSError, ValueError):
-        return conditions, nuisance, transformed, produced  # check_model reports unreadable models
-    nodes = model.get("Nodes") if isinstance(model, dict) else None
-    for node in nodes if isinstance(nodes, list) else []:
-        if not isinstance(node, dict) or node.get("Level") != "Run":
-            continue
-        trans = node.get("Transformations")
-        instructions = trans.get("Instructions") if isinstance(trans, dict) else None
-        if instructions:  # bidspm drops Transformations without Instructions
-            transformed = True
-            for ins in instructions if isinstance(instructions, list) else []:
-                out = ins.get("Output") if isinstance(ins, dict) else None
-                produced |= {str(o) for o in (out if isinstance(out, list) else [out])}
-        inner = node.get("Model")
-        xs = inner.get("X") if isinstance(inner, dict) else None
-        for x in xs if isinstance(xs, list) else []:
-            if not isinstance(x, str) or x in ("0", "1"):
+        for node in model.get("Nodes") or []:
+            if node.get("Level") != "Run":
                 continue
-            if x.startswith("trial_type."):
-                conditions.add(x.split(".", 1)[1])
-            elif "." not in x:
-                nuisance.append(x)
+            instructions = (node.get("Transformations") or {}).get("Instructions")
+            if instructions:  # bidspm drops Transformations without Instructions
+                transformed = True
+                for ins in instructions:
+                    out = ins.get("Output")
+                    produced |= {str(o) for o in (out if isinstance(out, list) else [out])}
+            xs = (node.get("Model") or {}).get("X")
+            for x in xs if isinstance(xs, list) else []:  # a bare string would iterate as characters
+                if not isinstance(x, str) or x in ("0", "1"):
+                    continue
+                if x.startswith("trial_type."):
+                    conditions.add(x.split(".", 1)[1])
+                elif "." not in x:
+                    nuisance.append(x)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return set(), [], False, set()
     return conditions, nuisance, transformed, produced
 
 
@@ -138,7 +135,7 @@ def _events_files(bids_dir, sub, task):
     return _func_files(bids_dir, sub, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
 
 
-def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs=(set(), [], False, set()), full=True):
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True):
     """Returns (items, trial_type values seen in this subject's events files)."""
     conditions, nuisance, transformed, produced = needs
     out, seen, event_cols = [], set(), set()
@@ -254,7 +251,7 @@ def check_validator(bids_dir, mode="prism", run=None):
             return [_item("validator", ERROR, f"the dataset validator crashed and produced no report (exit {proc.returncode})",
                           hand + ", or choose 'skip' to continue without dataset validation.")]
         return [_item("validator", WARN, "The dataset validator produced no report.", hand + ".")]
-    issues = [i for i in report.get("issues") or [] if isinstance(i, dict)] if isinstance(report.get("issues"), list) else []
+    issues = [i for i in report.get("issues") if isinstance(i, dict)] if isinstance(report.get("issues"), list) else []
     errors = [i for i in issues if i.get("severity") == "ERROR"]
     groups = {}
     for i in errors:
