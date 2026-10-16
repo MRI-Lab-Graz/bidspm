@@ -82,6 +82,10 @@ async function validateModel() {
 }
 
 async function createNewModel() {
+    if (currentProjectId) {
+        window.location.href = `/model-wizard/${currentProjectId}`;
+        return;
+    }
     // Suggest a default path based on the current project folder or studies/
     const configFolder = document.getElementById('config-folder')?.value?.trim() || 'studies/';
     const suggestedPath = configFolder.replace(/\/$/, '') + '/model.json';

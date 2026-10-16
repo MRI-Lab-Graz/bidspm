@@ -280,7 +280,7 @@
                 node.Description = 'one sample t-test: averaging across all subjects';
                 node.DummyContrasts = { Test: 't' };
                 node.Contrasts = [];
-                return { message: 'Applied all-subject one-sample dataset preset.', tone: 'success', suggestedName: 'dataset_level' };
+                return { message: 'Applied all-subject one-sample dataset preset.', tone: 'success', suggestedName: 'dataset' };
             }
 
             if (preset === 'one_sample_by_group') {
@@ -382,7 +382,7 @@
                 };
             }
 
-            return { message: 'Applied dataset preset.', tone: 'success', suggestedName: 'dataset_level' };
+            return { message: 'Applied dataset preset.', tone: 'success', suggestedName: 'dataset' };
         }
 
         function buildNodeFromPreset(preset) {
@@ -420,7 +420,7 @@
                 return {
                     node: {
                         Level: 'Dataset',
-                        Name: getUniqueModelNodeName('dataset_level'),
+                        Name: getUniqueModelNodeName('dataset'),
                         GroupBy: ['contrast'],
                         Model: { Type: 'glm', X: ['1'] },
                         DummyContrasts: { Test: 't' },
@@ -441,7 +441,7 @@
                     Contrasts: []
                 };
                 const result = applyDatasetNodePreset(node, preset);
-                node.Name = getUniqueModelNodeName(result.suggestedName || 'dataset_level');
+                node.Name = getUniqueModelNodeName(result.suggestedName || 'dataset');
                 return { node, message: result.message, tone: result.tone || 'success' };
             }
 

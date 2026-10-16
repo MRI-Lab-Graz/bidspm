@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+
+{% block title %}Model Wizard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="fas fa-hat-wizard me-2 text-primary"></i>Model Wizard</h4>
+  <a href="{{ url_for('analysis_page', project_id=current_project_id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="fas fa-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<div id="wiz-error" class="alert alert-danger py-2 small" role="alert" hidden></div>
+
+<div class="row g-3" id="wiz-form">
+  <div class="col-lg-7">
+    <div class="card shadow-sm mb-3"><div class="card-body">
+      <h6 class="fw-bold">1. Task and conditions</h6>
+      <label class="form-label small mb-1" for="wiz-task">Task</label>
+      <select id="wiz-task" class="form-select form-select-sm mb-2"></select>
+      <div class="small text-muted mb-1">Conditions (uncheck to exclude)</div>
+      <div id="wiz-conditions" class="d-flex flex-wrap gap-3"></div>
+    </div></div>
+
+    <div class="card shadow-sm mb-3"><div class="card-body">
+      <h6 class="fw-bold">2. Refine conditions</h6>
+      <div class="input-group input-group-sm mb-2">
+        <select id="wiz-recipe-add" class="form-select" aria-label="Recipe to add"></select>
+        <button type="button" id="wiz-add-recipe" class="btn btn-outline-primary"><i class="fas fa-plus me-1"></i>Add</button>
+      </div>
+      <div id="wiz-recipe-help" class="small text-muted mb-2"></div>
+      <div class="small text-muted mb-1">Recipes run in this order.</div>
+      <div id="wiz-recipes"></div>
+    </div></div>
+
+    <div class="card shadow-sm mb-3"><div class="card-body">
+      <h6 class="fw-bold">3. Nuisance regressors</h6>
+      <select id="wiz-nuisance" class="form-select form-select-sm mb-2" aria-label="Nuisance regressors"></select>
+      <input id="wiz-nuisance-custom" aria-label="Custom confound columns" class="form-control form-control-sm" placeholder="comma-separated confound columns" hidden>
+    </div></div>
+
+    <div class="card shadow-sm mb-3"><div class="card-body">
+      <h6 class="fw-bold">4. Contrasts</h6>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="wiz-auto-contrasts" checked>
+        <label class="form-check-label small" for="wiz-auto-contrasts">One contrast per regressor</label>
+      </div>
+      <table id="wiz-pair-table" class="table table-sm align-middle mb-1">
+        <thead><tr><th>Name</th><th>Positive</th><th>Negative</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button type="button" id="wiz-add-pair" class="btn btn-outline-secondary btn-sm"><i class="fas fa-plus me-1"></i>Add contrast</button>
+      <details class="small text-muted mt-2"><summary>Advanced</summary>
+        <a href="{{ url_for('analysis_page', project_id=current_project_id) }}">Open the saved model in the editor</a> / contrast builder for custom contrasts.
+      </details>
+    </div></div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-3"><div class="card-body">
+      <h6 class="fw-bold">5. Review and save</h6>
+      <div id="wiz-review" class="small mb-3"></div>
+      <label class="form-label small mb-1" for="wiz-name">Model name</label>
+      <input id="wiz-name" class="form-control form-control-sm mb-2">
+      <label class="form-label small mb-1" for="wiz-save-path">Save to</label>
+      <input id="wiz-save-path" class="form-control form-control-sm mb-2">
+      <button type="button" id="wiz-check" class="btn btn-outline-primary btn-sm me-1"><i class="fas fa-clipboard-check me-1"></i>Check readiness</button>
+      <button type="button" id="wiz-save" class="btn btn-success btn-sm"><i class="fas fa-save me-1"></i>Save and open</button>
+    </div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.BIDSPM_WIZARD_CONTEXT = {{ wizard_context | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/model_wizard.js', v=static_version('js/model_wizard.js')) }}"></script>
+{% endblock %}

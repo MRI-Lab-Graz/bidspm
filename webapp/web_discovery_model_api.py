@@ -15,6 +15,7 @@ from lib import (
     discover_tasks,
     validate_bids_model,
 )
+from lib.model_wizard import second_level_nodes
 
 
 PathResolver = Callable[[str], str]
@@ -557,23 +558,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
             if contrast['Name'] not in all_contrast_names:
                 all_contrast_names.append(contrast['Name'])
 
-    subject_contrasts = [{'Name': name, 'ConditionList': [name], 'Weights': [1], 'Test': 't'} for name in all_contrast_names]
-    nodes.append({
-        'Level': 'Subject',
-        'Name': 'subject_level',
-        'GroupBy': ['subject', 'contrast'],
-        'Model': {'Type': 'glm', 'X': all_contrast_names or ['contrast']},
-        'Contrasts': subject_contrasts,
-    })
-
-    dataset_contrasts = [{'Name': name, 'ConditionList': [name], 'Weights': [1], 'Test': 't'} for name in all_contrast_names]
-    nodes.append({
-        'Level': 'Dataset',
-        'Name': 'dataset_level',
-        'GroupBy': ['contrast'],
-        'Model': {'Type': 'glm', 'X': [1]},
-        'Contrasts': dataset_contrasts,
-    })
+    nodes.extend(second_level_nodes(all_contrast_names))
 
     return {
         'Name': 'default-model',

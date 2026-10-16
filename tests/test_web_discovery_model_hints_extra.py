@@ -170,3 +170,9 @@ class TestBuildDefaultModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_default_model_dataset_node_is_named_dataset():
+    # bidspm looks the Dataset node up by exact name; the default model goes through second_level_nodes
+    nodes = _build_default_model(["motor"], {"motor": ["left", "right"]})["Nodes"]
+    assert [n["Name"] for n in nodes if n["Level"] == "Dataset"] == ["dataset"]
