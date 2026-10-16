@@ -195,26 +195,47 @@ def check_container(container_type):
     return []
 
 
-def check_validator(bids_dir, mode="prism", run=subprocess.run):
+MAX_VALIDATOR_ERRORS = 20
+
+
+def check_validator(bids_dir, mode="prism", run=None):
     """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins."""
     if mode == "skip":
         return [_item("validator", WARN, "Dataset validator skipped.", "Choose 'PRISM' or 'plain BIDS' to validate the dataset.")]
+    if mode not in ("prism", "bids"):
+        return [_item("validator", ERROR, f"unknown validator mode: {mode!r}", "Choose 'PRISM', 'plain BIDS' or 'skip'.")]
     exe = Path(sys.executable).parent / "prism-validator"
     exe = str(exe) if exe.is_file() else shutil.which("prism-validator")
     if not exe:
         return [_item("validator", WARN, "prism-validator is not installed; the dataset was not validated.", "Run: uv sync")]
     cmd = [exe, str(bids_dir), "--json"] + (["--no-prism"] if mode == "bids" else [])
+    hand = "Run prism-validator by hand to see why"
     try:
-        proc = run(cmd, capture_output=True, text=True, timeout=1800)  # ponytail: no result cache; add one if validation proves slow
-        issues = json.loads(proc.stdout[proc.stdout.index("{"):]).get("issues", [])
-    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
-        return [_item("validator", WARN, f"The dataset validator produced no report ({exc}).", "Run prism-validator by hand to see why.")]
-    out = [_item("validator", ERROR, f"{i['code']}: {i['message'].splitlines()[0]} ({i.get('file_path', '')})",
+        proc = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=1800)  # ponytail: no result cache; add one if validation proves slow
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [_item("validator", WARN, f"The dataset validator could not run ({exc}).", hand + ".")]
+    try:
+        report = json.loads(proc.stdout[proc.stdout.index("{"):])
+    except ValueError:
+        report = None
+    if not isinstance(report, dict):
+        if proc.returncode:
+            return [_item("validator", ERROR, f"the dataset validator crashed and produced no report (exit {proc.returncode})",
+                          hand + ", or choose 'skip' to continue without dataset validation.")]
+        return [_item("validator", WARN, "The dataset validator produced no report.", hand + ".")]
+    issues = [i for i in report.get("issues") or [] if isinstance(i, dict)] if isinstance(report.get("issues"), list) else []
+    errors = [i for i in issues if i.get("severity") == "ERROR"]
+    out = [_item("validator", ERROR,
+                 f"{i.get('code', '?')}: {((i.get('message') or '').splitlines() or [''])[0]} ({i.get('file_path', '')})",
                  "Fix the dataset, or choose 'skip' if the problem is unrelated to this analysis (e.g. DWI).")
-           for i in issues if i.get("severity") == "ERROR"]
+           for i in errors[:MAX_VALIDATOR_ERRORS]]
+    if len(errors) > MAX_VALIDATOR_ERRORS:
+        out.append(_item("validator", ERROR, f"+{len(errors) - MAX_VALIDATOR_ERRORS} more validator errors", hand + " for the full list."))
+    if report.get("valid") is False and not errors:
+        out.append(_item("validator", ERROR, "the validator reports the dataset invalid but listed no errors", hand + "."))
     warns = [i for i in issues if i.get("severity") == "WARNING"]
     if warns:
-        out.append(_item("validator", WARN, f"{len(warns)} validator warning(s): " + ", ".join(sorted({w['code'] for w in warns}))))
+        out.append(_item("validator", WARN, f"{len(warns)} validator warning(s): " + ", ".join(sorted({str(w.get('code', '?')) for w in warns}))))
     return out
 
 

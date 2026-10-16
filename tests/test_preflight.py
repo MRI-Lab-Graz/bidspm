@@ -240,6 +240,15 @@ REPORT = {"valid": False, "issues": [
     {"code": "BIDS_README_FILE_MISSING", "severity": "WARNING", "message": "[BIDS] README", "file_path": "/d/y"}]}
 
 
+@pytest.fixture
+def fake_exe(tmp_path_factory):
+    """A stand-in prism-validator next to a fake interpreter, so the fake-run tests never need the real tool."""
+    bindir = tmp_path_factory.mktemp("bin")
+    (bindir / "prism-validator").write_text("")
+    with patch("lib.preflight.sys.executable", str(bindir / "python")):
+        yield
+
+
 def fake_run(stdout, returncode=1, calls=None):
     def run(cmd, **kw):
         if calls is not None:
@@ -248,14 +257,14 @@ def fake_run(stdout, returncode=1, calls=None):
     return run
 
 
-def test_validator_errors_block_and_warnings_are_summarised(tmp_path):
+def test_validator_errors_block_and_warnings_are_summarised(tmp_path, fake_exe):
     out = check_validator(tmp_path, "prism", run=fake_run("banner\n" + json.dumps(REPORT)))
     assert [(c["severity"], c["id"]) for c in out] == [("error", "validator"), ("warn", "validator")]
     assert "PRISM301" in out[0]["message"] and "more" not in out[0]["message"]
     assert "2 validator warning" in out[1]["message"]
 
 
-def test_plain_bids_mode_passes_no_prism_and_never_fix_or_plugins(tmp_path):
+def test_plain_bids_mode_passes_no_prism_and_never_fix_or_plugins(tmp_path, fake_exe):
     calls = []
     check_validator(tmp_path, "bids", run=fake_run(json.dumps({"issues": []}), 0, calls))
     cmd = calls[0]
@@ -263,18 +272,67 @@ def test_plain_bids_mode_passes_no_prism_and_never_fix_or_plugins(tmp_path):
     assert not {"--fix", "--plugins"} & set(cmd)
 
 
-def test_skip_mode_warns_and_does_not_run(tmp_path):
+def test_skip_mode_warns_and_does_not_run(tmp_path, fake_exe):
     calls = []
     out = check_validator(tmp_path, "skip", run=fake_run("", 0, calls))
     assert [c["severity"] for c in out] == ["warn"] and calls == []
 
 
-def test_unparseable_validator_output_degrades_to_a_warning(tmp_path):
-    out = check_validator(tmp_path, "prism", run=fake_run("Traceback ..."))
+def test_unparseable_output_with_clean_exit_degrades_to_a_warning(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "prism", run=fake_run("Traceback ...", 0))
     assert [c["severity"] for c in out] == ["warn"]
 
 
-def test_validator_error_blocks_the_whole_preflight(tmp_path):
+def test_crashed_validator_blocks(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "prism", run=fake_run("Traceback ...", 2))
+    assert [(c["severity"], c["id"]) for c in out] == [("error", "validator")]
+    assert "crashed" in out[0]["message"] and "exit 2" in out[0]["message"] and "skip" in out[0]["fix"]
+
+
+@pytest.mark.parametrize("stdout", ["[]", "null", '"x"'])
+def test_non_object_report_is_unparseable(tmp_path, fake_exe, stdout):
+    out = check_validator(tmp_path, "prism", run=fake_run(stdout, 1))
+    assert [c["severity"] for c in out] == ["error"]
+
+
+def test_invalid_report_without_listed_errors_blocks(tmp_path, fake_exe):
+    out = check_validator(tmp_path, "prism", run=fake_run(json.dumps({"valid": False, "issues": []}), 1))
+    assert [c["severity"] for c in out] == ["error"] and "listed no errors" in out[0]["message"]
+
+
+def test_timeout_and_oserror_stay_warnings(tmp_path, fake_exe):
+    for exc in (subprocess.TimeoutExpired("x", 1), OSError("boom")):
+        def run(cmd, **kw):
+            raise exc
+        assert [c["severity"] for c in check_validator(tmp_path, "prism", run=run)] == ["warn"]
+
+
+def test_missing_binary_stays_a_warning(tmp_path):
+    with patch("lib.preflight.sys.executable", str(tmp_path / "python")), patch("lib.preflight.shutil.which", return_value=None):
+        out = check_validator(tmp_path, "prism", run=fake_run("", 0))
+    assert [c["severity"] for c in out] == ["warn"] and "not installed" in out[0]["message"]
+
+
+@pytest.mark.parametrize("report", [
+    {"issues": None}, {"issues": "oops"}, {"issues": [{"severity": "ERROR"}]},
+    {"issues": [{"severity": "ERROR", "code": "X", "message": ""}]}, {"issues": [{"severity": "WARNING"}]}, {"issues": [1]}])
+def test_malformed_issues_never_raise(tmp_path, fake_exe, report):
+    check_validator(tmp_path, "prism", run=fake_run(json.dumps(report), 1))
+
+
+def test_validator_errors_are_capped_at_twenty(tmp_path, fake_exe):
+    issues = [{"code": f"E{n}", "severity": "ERROR", "message": "m", "file_path": "f"} for n in range(25)]
+    out = check_validator(tmp_path, "prism", run=fake_run(json.dumps({"issues": issues})))
+    assert len(out) == 21 and {c["severity"] for c in out} == {"error"} and "+5 more" in out[-1]["message"]
+
+
+def test_unknown_mode_blocks_without_running(tmp_path, fake_exe):
+    calls = []
+    out = check_validator(tmp_path, "strict", run=fake_run("", 0, calls))
+    assert [(c["severity"], c["id"]) for c in out] == [("error", "validator")] and "unknown" in out[0]["message"] and calls == []
+
+
+def test_validator_error_blocks_the_whole_preflight(tmp_path, fake_exe):
     bids, fmriprep = make_trees(tmp_path)
     with patch("lib.preflight.subprocess.run", fake_run(json.dumps(REPORT))):
         result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="prism")
