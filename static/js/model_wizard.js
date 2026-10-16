@@ -64,6 +64,16 @@ function focusInside(id) {
     return $(id).contains(document.activeElement);
 }
 
+// Option lists only change when the offered regressors do. Never replace what the user is working in:
+// while focus is inside, leave optKey stale and retry on focusout.
+function refreshOptions() {
+    if (!wiz.preview || JSON.stringify(wiz.preview.regressors) === wiz.optKey) return;
+    if (focusInside('wiz-recipes') || focusInside('wiz-pair-table')) return;
+    wiz.optKey = JSON.stringify(wiz.preview.regressors);
+    renderRecipes();
+    renderPairs();
+}
+
 async function build() {
     if (!wiz.scan) return;
     const seq = ++wiz.seq;
@@ -74,13 +84,7 @@ async function build() {
         showError('');
         wiz.preview = data.preview;
         renderReview(data.preview, data.preflight);
-        // Option lists only change when the offered regressors do; never replace what the user is typing in.
-        const key = JSON.stringify(data.preview.regressors);
-        if (key !== wiz.optKey && !focusInside('wiz-recipes') && !focusInside('wiz-pair-table')) {
-            wiz.optKey = key;
-            renderRecipes();
-            renderPairs();
-        }
+        refreshOptions();
     } catch (e) {
         if (seq === wiz.seq) showError(`Preview failed: ${e.message}`);
     }
@@ -202,6 +206,9 @@ function move(list, i, d) {
     [list[i], list[i + d]] = [list[i + d], list[i]];
     renderRecipes();
     scheduleBuild();
+    const buttons = $('wiz-recipes').children[i + d].querySelectorAll('button[aria-label^="Move recipe"]');
+    const [same, other] = d < 0 ? [buttons[0], buttons[1]] : [buttons[1], buttons[0]];
+    (same.disabled ? other : same).focus();
 }
 
 function renderRecipes() {
@@ -264,8 +271,11 @@ async function loadScan(task) {
     } catch (e) {
         if (seq !== wiz.scanSeq) return;
         wiz.scan = null;
+        wiz.seq++;  // an in-flight build must not paint a stale preview
         showError(`Scan failed: ${e.message}`);
-        return setEnabled(false);
+        setEnabled(false);
+        $('wiz-task').disabled = false;  // allow retrying another task
+        return;
     }
     showError('');
     setEnabled(true);
@@ -333,6 +343,9 @@ function init() {
         wiz.nameEdited = true; if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath(); scheduleBuild(); });
     $('wiz-save-path').addEventListener('input', () => { wiz.pathEdited = true; });
     $('wiz-save').addEventListener('click', () => save());
+    for (const id of ['wiz-recipes', 'wiz-pair-table']) {
+        $(id).addEventListener('focusout', () => setTimeout(refreshOptions, 0));
+    }
     loadScan('');
 }
 

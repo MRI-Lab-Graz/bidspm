@@ -34,6 +34,11 @@ class TestWizardPage(unittest.TestCase):
         cls.server.wait(timeout=10)
         cls.tmp.cleanup()
 
+    def tearDown(self):  # leaked pages (e.g. the analysis page after a save) keep server connections busy
+        for ctx in self.browser.contexts:
+            for pg in ctx.pages:
+                pg.close()
+
     def open_wizard(self):
         page = self.browser.new_page()
         self.errors = []
@@ -212,3 +217,63 @@ class TestWizardPage(unittest.TestCase):
         self.assertIn("<i>q</i>", page.inner_text("#wiz-conditions"))
         labels = page.locator("#wiz-recipes [data-param=value] option").all_text_contents()
         self.assertIn("<b>x</b>", labels)
+
+    def drop_b_route(self, page):
+        def patch(route):
+            data = route.fetch().json()
+            if "preview" in data:
+                data["preview"]["regressors"] = [r for r in data["preview"]["regressors"] if r != "trial_type.b"]
+            route.fulfill(status=route.fetch().status, body=json.dumps(data), content_type="application/json")
+        page.route("**/api/wizard/build", patch)
+
+    def test_deferred_rerender_runs_after_focus_leaves_recipes(self):
+        page = self.open_wizard()
+        self.add_recipe(page, "parametric_modulator")
+        sel = page.locator("#wiz-recipes [data-param=regressor]")
+        self.assertIn("trial_type.b", sel.locator("option").all_text_contents())
+        self.drop_b_route(page)
+        sel.focus()
+        sel.select_option("trial_type.a")
+        page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
+        page.evaluate("document.activeElement.blur()")
+        page.wait_for_function("![...document.querySelectorAll('#wiz-recipes [data-param=regressor] option')]"
+                               ".some(o => o.value === 'trial_type.b')")
+        self.assertEqual(page.input_value("#wiz-recipes [data-param=regressor]"), "trial_type.a")
+
+    def test_deferred_rerender_runs_after_focus_leaves_pairs(self):
+        import time
+        page = self.open_wizard()
+        page.click("#wiz-add-pair")
+        page.route("**/api/wizard/build", lambda r: (time.sleep(0.6), r.continue_()))
+        page.uncheck("#wiz-conditions input[value=b]")
+        box = page.locator("#wiz-pair-table input")
+        box.click()
+        box.press_sequentially("zz")
+        page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
+        self.assertEqual(box.input_value(), "zz")
+        page.evaluate("document.activeElement.blur()")
+        page.wait_for_function("![...document.querySelectorAll('#wiz-pair-table select option')]"
+                               ".some(o => o.value === 'trial_type.b')")
+        self.assertEqual(page.locator("#wiz-pair-table input").input_value(), "zz")
+
+    def test_failed_scan_keeps_task_select_for_retry(self):
+        page = self.browser.new_page()
+        calls = []
+
+        def scan(route):
+            calls.append(1)
+            if len(calls) == 2:
+                return route.fulfill(status=500, body="<html>x</html>", content_type="text/html")
+            data = route.fetch().json()
+            data["tasks"] = ["x", "y"]
+            route.fulfill(status=200, body=json.dumps(data), content_type="application/json")
+        page.route("**/api/wizard/scan", scan)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        page.select_option("#wiz-task", "y")
+        page.wait_for_function("document.getElementById('wiz-error').innerText !== ''")
+        self.assertTrue(page.is_disabled("#wiz-save"))
+        self.assertTrue(page.is_enabled("#wiz-task"))
+        page.select_option("#wiz-task", "x")
+        page.wait_for_function("document.getElementById('wiz-error').innerText === ''")
+        self.assertTrue(page.is_enabled("#wiz-save"))
