@@ -713,7 +713,7 @@
     var currentProjectId = '{{ current_project_id or "" }}';
     var hasProject = {{ 'true' if project else 'false' }};
 </script>
-{% for name in ['analysis_run', 'analysis_project_form', 'analysis_preflight', 'analysis_api_actions', 'analysis_buttons', 'analysis_model_editor'] %}
+{% for name in ['analysis_run', 'analysis_project_form', 'readiness_panel', 'analysis_preflight', 'analysis_api_actions', 'analysis_buttons', 'analysis_model_editor'] %}
 <script src="{{ url_for('static', filename='js/' ~ name ~ '.js', v=static_version('js/' ~ name ~ '.js')) }}"></script>
 {% endfor %}
 {% endblock %}

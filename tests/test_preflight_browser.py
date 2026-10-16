@@ -82,7 +82,7 @@ class TestPreflightPanel(unittest.TestCase):
         self.assertIn("500", page.evaluate("terminal.innerText"))
 
     def test_preflight_non_json_response_shows_blocked_failure(self):
-        page = self.run_with_route("/api/preflight", 500, "<html>boom</html>", "text/html")
+        page = self.run_with_route("/api/preflight/start", 500, "<html>boom</html>", "text/html")
         page.click("#btn-preflight")
         page.wait_for_selector("#preflight-panel .preflight-verdict")
         self.assertIn("Readiness check failed", page.inner_text("#preflight-panel"))
@@ -109,7 +109,7 @@ class TestPreflightPanel(unittest.TestCase):
     def test_note_and_checking_status_are_shown(self):
         page = self.open_page()
         self.assertIn("saved project settings", page.inner_text("#preflight-note"))
-        page.route("**/api/preflight", lambda r: None)  # never answered: the status line stays
+        page.route("**/api/preflight/start", lambda r: None)  # never answered: the status line stays
         page.click("#btn-preflight")
-        page.wait_for_selector("#preflight-panel .preflight-status")
+        page.wait_for_selector("#preflight-panel .rp-status")
         self.assertIn("Checking readiness", page.inner_text("#preflight-panel"))
