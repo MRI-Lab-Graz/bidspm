@@ -29,6 +29,15 @@ No git tag is created until the user asks.
 8. Model passes existing checks: dataset node name, empty contrasts, schema (reuses `lib/core.py`).
 9. Container image/engine available (warn).
 
+## Dataset validator (check 0)
+- `prism-validator <bids_dir> --json` as a subprocess (BIDS validator + PRISM checks; `--no-prism` for plain BIDS, chosen by
+  PRISM marker detection with a manual project override). Never `--fix`, never `--plugins`.
+- Validator errors -> `error` (blocks Run); warnings -> `warn`. Dependency in `pyproject.toml`/`uv.lock`; if missing -> `warn`, other checks still run.
+- **Skip option:** CLI `--skip-validator`, GUI checkbox "Skip dataset validator" (remembered per project). Skips only this check
+  (e.g. unrelated DWI problems); every other preflight check still blocks. A skipped validator is reported as a `warn` ("validator skipped").
+- Result cached per dataset until files change; shown as its own labelled section in the panel.
+- Open: exact PRISM marker; the first test fixture is a real `--json` run on a small dataset to pin the severity mapping.
+
 ## Testing (TDD)
 Failing test first for each check, using small synthetic BIDS/fMRIPrep trees in `tmp_path`
 (`tests/test_preflight.py`); then route test, CLI test, version test, and a Playwright test of the panel (skips without playwright).
