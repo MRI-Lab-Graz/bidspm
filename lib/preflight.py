@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -249,8 +250,41 @@ def _first_json_object(text):
     return None
 
 
-def check_validator(bids_dir, mode="auto", run=None):
-    """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins."""
+def _run_killable(cmd, cancelled, timeout=1800):
+    """subprocess.run(capture_output, text) that polls `cancelled` and then kills the whole process group (deno children
+    included); returns None when cancelled. Raises subprocess.TimeoutExpired after `timeout` seconds."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    deadline = time.monotonic() + timeout
+
+    def kill(sig):
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            pass
+    while True:
+        try:
+            out, err = proc.communicate(timeout=0.2)
+            return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            expired = time.monotonic() > deadline
+            if not expired and not (cancelled and cancelled()):
+                continue
+        kill(signal.SIGTERM)
+        try:
+            proc.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            kill(signal.SIGKILL)
+            proc.communicate()
+        if expired:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        return None
+
+
+def check_validator(bids_dir, mode="auto", run=None, cancelled=None):
+    """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins.
+
+    cancelled(): polled while it runs; on cancel the process group is killed and [] is returned.
+    The injectable `run` (tests) replaces the process handling and is not cancellable."""
     if mode == "off":  # internal (wizard): the dataset is not what is being checked, so no item at all
         return []
     if mode == "skip":
@@ -270,7 +304,10 @@ def check_validator(bids_dir, mode="auto", run=None):
     cmd = [exe, str(Path(bids_dir).resolve()), "--json"] + (["--no-prism"] if mode == "bids" else [])
     hand = "Run prism-validator by hand to see why"
     try:
-        proc = (run or subprocess.run)(cmd, capture_output=True, text=True, timeout=1800)  # ponytail: no result cache; add one if validation proves slow
+        # ponytail: no result cache; add one if validation proves slow
+        proc = run(cmd, capture_output=True, text=True, timeout=1800) if run else _run_killable(cmd, cancelled)
+        if proc is None:  # cancelled and killed
+            return []
     except (OSError, subprocess.TimeoutExpired) as exc:
         return [_item("validator", WARN, f"The dataset validator could not run ({exc}).", hand + ".")]
     report = _first_json_object(proc.stdout)
@@ -418,7 +455,7 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
         prog.add(front)
     else:  # blocking subprocess: overlap it with the per-subject checks
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        prog.future = pool.submit(check_validator, bids_dir, validator)
+        prog.future = pool.submit(check_validator, bids_dir, validator, cancelled=prog.stop)
         prog.emit("validator", "start", "running the dataset validator")
     try:
         checks += _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects,
@@ -426,8 +463,7 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
         while pool and not prog.future.done() and not prog.stop():  # cancel stays responsive while waiting
             concurrent.futures.wait([prog.future], timeout=0.2)
     finally:
-        if pool:  # on cancel do not wait: the validator subprocess finishes in the background
-            # ponytail: the abandoned subprocess runs on (workers are joined at interpreter exit); killing it needs a handle from check_validator
+        if pool:  # on cancel do not wait: the validator thread kills its process group and exits within ~1 s
             pool.shutdown(wait=not prog.is_cancelled, cancel_futures=prog.is_cancelled)
     if prog.is_cancelled:
         prog.poll_validator()  # only if it already finished
