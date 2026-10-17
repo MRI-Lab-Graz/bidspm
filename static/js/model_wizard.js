@@ -69,7 +69,8 @@ function requestBody(extra = {}) {
 
 // ---- build / preview ----------------------------------------------------------------------------
 function setEnabled(on) {
-    document.querySelectorAll('#wiz-form input, #wiz-form select, #wiz-form button').forEach((n) => { n.disabled = !on; });
+    // the readiness panel's own Cancel/Retry stay usable
+    document.querySelectorAll('#wiz-form input, #wiz-form select, #wiz-form button').forEach((n) => { if (!n.closest('#wiz-readiness')) n.disabled = !on; });
 }
 
 function scheduleBuild() {
@@ -376,7 +377,7 @@ function runCheck() {
     updateCheck();
     ReadinessPanel.run({
         target: $('wiz-readiness'),
-        body: {config: {BIDS_DIR: WIZ.bidsDir, FMRIPREP_DIR: WIZ.fmriprepDir, SPACE: WIZ.space, TASKS: [$('wiz-task').value]},
+        body: {config: {BIDS_DIR: wiz.scan.bids_dir || WIZ.bidsDir, FMRIPREP_DIR: wiz.scan.fmriprep_dir || WIZ.fmriprepDir, SPACE: WIZ.space, TASKS: [$('wiz-task').value]},
                model_json: wiz.model, validator: 'off', actions: ['stats']},
         onDone: () => { if (run === wiz.runSeq) { wiz.checked = edit; updateCheck(); } },  // an older run must not mark a newer one
     });

@@ -664,6 +664,32 @@ class TestWizardPage(unittest.TestCase):
         self.assertEqual(body["config"]["TASKS"], ["x"])
         self.assertEqual({"BIDS_DIR", "FMRIPREP_DIR", "SPACE"} - set(body["config"]), set())
 
+    def test_check_uses_the_folders_the_scan_resolved(self):
+        page = self.browser.new_page()
+        starts = []
+        page.route("**/api/wizard/scan", lambda r: r.fulfill(response=r.fetch(), json={
+            **r.fetch().json(), "bids_dir": "/resolved/bids", "fmriprep_dir": "/resolved/fmriprep"}))
+        page.route("**/api/preflight/start", lambda r: (starts.append(r.request.post_data_json), r.fulfill(
+            status=200, body='{"id": "j1"}', content_type="application/json")))
+        page.route("**/api/preflight/stream/**", lambda r: None)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="load")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        wizard_go_to(page, "review")
+        page.click("#wiz-check")
+        page.wait_for_function("document.querySelector('#wiz-readiness .rp-cancel')")
+        self.assertEqual((starts[0]["config"]["BIDS_DIR"], starts[0]["config"]["FMRIPREP_DIR"]),
+                         ("/resolved/bids", "/resolved/fmriprep"))
+
+    def test_a_scan_failure_leaves_the_readiness_panels_buttons_usable(self):
+        page, *_ = self.readiness_page()  # the stream never answers: Cancel is showing
+        page.click("#wiz-check")
+        page.wait_for_selector("#wiz-readiness .rp-cancel")
+        page.route("**/api/wizard/scan", lambda r: r.fulfill(status=500, body='{"error": "boom"}', content_type="application/json"))
+        page.evaluate("loadScan('')")
+        page.wait_for_function("wiz.scanError === true")
+        self.assertTrue(page.is_disabled("#wiz-save"))  # the form itself is disabled
+        self.assertTrue(page.is_enabled("#wiz-readiness .rp-cancel"))
+
     def test_verdict_renders_inside_the_review_step_not_the_rail(self):
         page, *_ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
         page.click("#wiz-check")

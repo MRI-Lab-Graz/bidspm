@@ -281,3 +281,12 @@ def test_build_preflight_uses_validator_off(tmp_path):
     with mock.patch("webapp.web_wizard_api.run_preflight_from_config", return_value={"verdict": "ready", "checks": []}) as pf:
         res = post("/api/wizard/build", {**paths(tmp_path), "space": "MNI", "choices": choices()})
     assert res.status_code == 200 and pf.call_args.kwargs["validator"] == "off"
+
+
+def test_scan_returns_the_resolved_folders_for_a_tilde_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    make_trees(tmp_path / "data")
+    res = post("/api/wizard/scan", {"bids_dir": "~/data/bids", "fmriprep_dir": "~/data/fmriprep"})
+    assert res.status_code == 200
+    assert res.get_json()["bids_dir"] == str(tmp_path / "data" / "bids")
+    assert res.get_json()["fmriprep_dir"] == str(tmp_path / "data" / "fmriprep")

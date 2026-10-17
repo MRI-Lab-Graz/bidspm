@@ -80,7 +80,8 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
         bids_dir, fmriprep_dir = _dirs(data)
         if not os.path.isdir(bids_dir):
             return jsonify({"error": f"BIDS folder not found: {bids_dir}"}), 404
-        return jsonify({**_cached_scan(bids_dir, fmriprep_dir, data.get("task"), refresh=True), "catalog": catalog(),
+        return jsonify({**_cached_scan(bids_dir, fmriprep_dir, data.get("task"), refresh=True), "bids_dir": bids_dir, "fmriprep_dir": fmriprep_dir,  # resolved (~, relative): the readiness job needs real paths
+                        "catalog": catalog(),
                         "nuisance_presets": NUISANCE_PRESETS})
 
     @app.route("/api/wizard/build", methods=["POST"])
