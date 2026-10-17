@@ -232,8 +232,10 @@ per-subject checks, and errors as they are found; **Cancel** stops the check. Th
 readiness checks run at once.
 
 `/run` reuses a passing result (`ready` or `warnings`) for identical inputs for 10 minutes instead of checking again.
-Dataset edits made in that window are not noticed; a model edit or any change of the checked settings (config, model,
-validator mode, actions) invalidates it.
+Dataset edits made in that window are not noticed. Any change of what the check covers invalidates the result: the BIDS
+folder, the fMRIPrep folder, the tasks, the space, the subject selection, the container type, the validator mode, the
+actions, the skip-model-validation flag and the model's content (not its path or timestamp). "Check readiness" sends the
+same actions and flag as Run, so a passing check is reused by the next Run when nothing was changed in between.
 
 Validator modes: `auto` (default: PRISM if the BIDS root has a `project.json`, otherwise plain BIDS), `prism` (PRISM + BIDS, forced), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
 is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.

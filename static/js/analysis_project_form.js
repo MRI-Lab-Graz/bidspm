@@ -54,6 +54,7 @@ async function setFullFormData(data) {
         unifiedStudyConfig = data.study_content;
         await syncInternalToForm();
     }
+    window.analysisStages?.refresh();  // fields were assigned without events
 }
 
 document.getElementById('suggest_workers')?.addEventListener('click', async () => {

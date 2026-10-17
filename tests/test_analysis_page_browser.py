@@ -84,6 +84,14 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(again, data)
         self.assertEqual(self.errors, [])
 
+    def test_setting_the_form_programmatically_refreshes_the_stage_gate(self):
+        page = self.open_page()
+        page.wait_for_function("window.analysisStages !== undefined")
+        count = page.evaluate("""async () => { let n = 0; const r = window.analysisStages.refresh;
+            window.analysisStages.refresh = () => { n++; return r(); };
+            await setFullFormData({actions: ['stats'], pilot: true}); return n; }""")
+        self.assertGreaterEqual(count, 1)
+
     def test_toolbar_buttons_are_wired(self):
         page = self.open_page()
         go_to_stage(page, "run")

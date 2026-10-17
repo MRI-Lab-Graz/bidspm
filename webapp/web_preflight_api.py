@@ -5,7 +5,10 @@ Jobs API (progress over SSE). Event contract, one `id: <seq>\\ndata: <json>\\n\\
   * terminal success: the runner's final `{"phase":"done","state":"done",...}` event plus `report`
     (the full `{"verdict","checks"}`; verdict may be "cancelled");
   * terminal failure (the check itself raised): `{"phase":"error","state":"done","message":<text>}`;
-  * unknown job id: a single `{"phase":"error","message":"job not found"}` without id.
+  * unknown job id: a single `{"phase":"error","message":"job not found"}` without id;
+  * stream lifetime exceeded (STREAM_MAX_SECONDS; the job itself may still be running): a single
+    `{"phase":"error","state":"done","message":"stream timed out"}` without seq and id. The client tells it from a job failure
+    (which has a seq) and offers a retry that resumes with `?from=<last seq + 1>`.
 The stream ends after the terminal event.
 """
 import json

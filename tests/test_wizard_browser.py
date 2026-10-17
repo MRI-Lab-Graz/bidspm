@@ -456,7 +456,9 @@ class TestWizardPage(unittest.TestCase):
         wizard_go_to(page, "contrasts")
         self.assertFalse(page.evaluate("document.getElementById('wiz-pairs-details').open"))
         self.assertTrue(page.locator("#wiz-pair-table").is_hidden())
-        self.assertTrue(page.get_by_role("link", name="contrast builder").is_visible())
+        link = page.get_by_role("link", name="contrast builder")
+        self.assertTrue(link.is_visible())
+        self.assertTrue(link.get_attribute("href").endswith(f"/analysis/{self.project_id}#stage=model"))
         self.assertTrue(page.is_checked("#wiz-auto-contrasts"))
 
     def test_back_and_strip_jump(self):
