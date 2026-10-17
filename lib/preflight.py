@@ -251,6 +251,8 @@ def _first_json_object(text):
 
 def check_validator(bids_dir, mode="auto", run=None):
     """Run prism-validator --json (BIDS validator + PRISM checks); never --fix, never --plugins."""
+    if mode == "off":  # internal (wizard): the dataset is not what is being checked, so no item at all
+        return []
     if mode == "skip":
         return [_item("validator", WARN, "Dataset validator skipped.", "Choose 'auto', 'PRISM' or 'plain BIDS' to validate the dataset.")]
     if mode not in ("auto", "prism", "bids"):
@@ -411,7 +413,7 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
         return {"verdict": _verdict(checks), "checks": checks}
     if prog.stop():
         return {"verdict": "cancelled", "checks": []}
-    if validator == "skip":  # nothing slow to overlap: no thread
+    if validator in ("skip", "off"):  # nothing slow to overlap: no thread
         pool, front = None, check_validator(bids_dir, validator)
         prog.add(front)
     else:  # blocking subprocess: overlap it with the per-subject checks

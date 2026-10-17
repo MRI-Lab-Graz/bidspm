@@ -190,13 +190,13 @@ def test_preview_build_without_preflight_skips_it_and_the_confound_scan(tmp_path
     conf.assert_not_called()
 
 
-def test_build_runs_preflight_by_default_and_on_save(tmp_path):
+def test_build_runs_preflight_by_default_but_not_on_save_with_preflight_false(tmp_path):
     report = {"checks": []}
     with mock.patch("webapp.web_wizard_api.run_preflight_from_config", return_value=report) as pre:
         post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none")})
         post("/api/wizard/build", {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False,
                                    "save_path": str(tmp_path / "m.json")})
-    assert pre.call_count == 2  # saving always includes the verdict
+    assert pre.call_count == 1  # saving does not repeat it: its result was never shown
 
 
 def test_scan_and_build_both_see_edited_events(tmp_path):
@@ -234,3 +234,9 @@ def test_malformed_pair_items_and_recipe_id_are_400_through_the_route(tmp_path):
     for ch in (choices(contrasts={"auto": True, "pairs": [bad_pair]}), choices(recipes=[{"id": {}}])):
         res = post("/api/wizard/build", {**paths(tmp_path), "choices": ch, "preflight": False})
         assert res.status_code == 400
+
+
+def test_build_preflight_uses_validator_off(tmp_path):
+    with mock.patch("webapp.web_wizard_api.run_preflight_from_config", return_value={"verdict": "ready", "checks": []}) as pf:
+        res = post("/api/wizard/build", {**paths(tmp_path), "space": "MNI", "choices": choices()})
+    assert res.status_code == 200 and pf.call_args.kwargs["validator"] == "off"

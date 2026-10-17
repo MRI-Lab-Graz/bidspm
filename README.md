@@ -263,7 +263,7 @@ with a reason when the input of a step is incomplete. Five steps:
 2. **Recipes**: a gallery of four recipe cards (below); click one to add it. Recipes are applied in order.
 3. **Nuisance**: a confound preset (e.g. motion6) or a custom comma-separated list of confound columns.
 4. **Contrasts**: generated automatically (one per condition) plus simple pairs.
-5. **Review and save**: shows the generated names live; "Check readiness" runs the preflight for the proposed model (it is slow on large studies, so the live preview skips it), and saving always includes it.
+5. **Review and save**: shows the generated names live; "Check readiness" runs the preflight for the proposed model (it is slow on large studies, so the live preview skips it); saving does not repeat it.
 
 Recipes:
 
@@ -277,7 +277,7 @@ get a `v` prefix in the generated column names (`2` becomes `v2`).
 
 Splits with more than one value (or with the original kept) rename the split cells to the output column, so each regressor is a different condition in SPM (e.g. `valid_item.valid_item` and `invalid_item.invalid_item`); a single-value split keeps `valid_item.item`.
 
-The preflight verdict is shown before saving. Saving is still allowed when preflight reports data problems (for example events
+The readiness verdict is shown in the review step before saving. Saving is still allowed when preflight reports data problems (for example events
 missing for one subject), so you can fix the data afterwards.
 
 Contrasts are the basics only (auto + simple pairs). For anything else (weighted, F-contrasts, ...) save the model and open it in

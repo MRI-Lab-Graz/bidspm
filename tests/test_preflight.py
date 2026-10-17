@@ -278,6 +278,16 @@ def test_skip_mode_warns_and_does_not_run(tmp_path, fake_exe):
     assert [c["severity"] for c in out] == ["warn"] and calls == []
 
 
+def test_off_mode_is_silent_and_does_not_run(tmp_path, fake_exe):
+    calls = []
+    assert check_validator(tmp_path, "off", run=fake_run("", 0, calls)) == [] and calls == []
+
+
+def test_run_preflight_accepts_validator_off_with_no_validator_item(tmp_path):
+    result = run(tmp_path, validator="off")
+    assert _only(result, "validator") == [] and ids(result, "error") == set()
+
+
 def test_unparseable_output_with_clean_exit_degrades_to_a_warning(tmp_path, fake_exe):
     out = check_validator(tmp_path, "prism", run=fake_run("Traceback ...", 0))
     assert [c["severity"] for c in out] == ["warn"]

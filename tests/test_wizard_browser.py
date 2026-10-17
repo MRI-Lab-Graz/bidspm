@@ -660,7 +660,7 @@ class TestWizardPage(unittest.TestCase):
         page.wait_for_function("document.querySelector('#wiz-readiness .preflight-verdict')")
         body = starts[0]
         self.assertEqual(body["model_json"], builds[-1]["model"])
-        self.assertEqual((body["validator"], body["actions"]), ("skip", ["stats"]))
+        self.assertEqual((body["validator"], body["actions"]), ("off", ["stats"]))
         self.assertEqual(body["config"]["TASKS"], ["x"])
         self.assertEqual({"BIDS_DIR", "FMRIPREP_DIR", "SPACE"} - set(body["config"]), set())
 
@@ -722,6 +722,6 @@ class TestWizardPage(unittest.TestCase):
         wizard_go_to(page, "review")
         page.click("#wiz-check")
         page.wait_for_selector("#wiz-readiness .preflight-verdict", timeout=60000)
-        self.assertRegex(page.inner_text("#wiz-readiness .preflight-verdict"), r"ready|warnings")
+        self.assertRegex(page.inner_text("#wiz-readiness .preflight-verdict"), r"ready")
         self.assertIn("1 / 1 subject checks", page.inner_text("#wiz-readiness .rp-count"))
         self.assertEqual(sent[0]["model_json"]["Nodes"][0]["Level"], "Run")

@@ -8,7 +8,7 @@ from flask import Flask, jsonify, request
 
 from lib.core import discover_tasks
 from lib.model_wizard import NUISANCE_PRESETS, WizardError, build_model, catalog, scan_events
-from lib.preflight import _verdict, run_preflight_from_config
+from lib.preflight import run_preflight_from_config
 from webapp.web_discovery_model_api import _discover_confound_info
 
 
@@ -25,18 +25,17 @@ def _scan(bids_dir, fmriprep_dir, task, with_confounds=True):
 
 
 def _preflight(model, bids_dir, fmriprep_dir, space, task):
-    """Preflight of the proposed model against the real data (the dataset validator is not model-related: dropped)."""
+    """Preflight of the proposed model against the real data (validator "off": the dataset is not what is being checked)."""
     fd, name = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(model, fh)
         report = run_preflight_from_config(
             {"BIDS_DIR": bids_dir, "FMRIPREP_DIR": fmriprep_dir, "SPACE": space or "", "TASKS": [task]},
-            model=name, validator="skip", actions=["stats"])
+            model=name, validator="off", actions=["stats"])
     finally:
         os.unlink(name)
-    checks = [c for c in report["checks"] if c["id"] != "validator"]
-    return {"verdict": _verdict(checks), "checks": checks}
+    return report
 
 
 def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
@@ -85,7 +84,7 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
             result["preview"]["warnings"].append(f"trial_type has more than {n} values; only the first {n} are offered")
         if scan.get("files_truncated"):
             result["preview"]["warnings"].append(f"the task has more events files than were scanned (only the first {scan['events_files']} were read); later subjects are not considered")
-        if data.get("preflight", True) or save_path:  # the live preview skips the slow readiness check; saving never does
+        if data.get("preflight", True):  # the live preview skips the slow readiness check
             try:
                 result["preflight"] = _preflight(result["model"], bids_dir, fmriprep_dir, data.get("space"), choices["task"])
             except Exception as exc:  # JSON instead of an HTML 500

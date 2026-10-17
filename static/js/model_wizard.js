@@ -377,7 +377,7 @@ function runCheck() {
     ReadinessPanel.run({
         target: $('wiz-readiness'),
         body: {config: {BIDS_DIR: WIZ.bidsDir, FMRIPREP_DIR: WIZ.fmriprepDir, SPACE: WIZ.space, TASKS: [$('wiz-task').value]},
-               model_json: wiz.model, validator: 'skip', actions: ['stats']},
+               model_json: wiz.model, validator: 'off', actions: ['stats']},
         onDone: () => { if (run === wiz.runSeq) { wiz.checked = edit; updateCheck(); } },  // an older run must not mark a newer one
     });
 }
