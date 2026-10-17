@@ -1,7 +1,7 @@
 // model_wizard.js -- renders the wizard form and collects choices. All logic lives in lib/model_wizard.py
 // (/api/wizard/scan, /api/wizard/build). Server strings go in via textContent/DOM nodes, never innerHTML.
 const WIZ = window.BIDSPM_WIZARD_CONTEXT;
-const wiz = {step: 'task', scanError: false, buildError: false, edit: 0, built: 0, scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
+const wiz = {step: 'task', scanError: false, buildError: false, edit: 0, built: 0, scan: null, preview: null, model: null, checked: null, runSeq: 0, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...kids) {
@@ -93,21 +93,22 @@ function refreshOptions() {
     renderPairs();
 }
 
-// The live preview skips the readiness check (about 30 s on a real study); "Check readiness" asks for it.
-async function build(withPreflight = false) {
+// The live preview skips the readiness check (about 30 s on a real study); "Check readiness" runs it as a live job.
+async function build() {
     if (!wiz.scan) return;
     const seq = ++wiz.seq;
     const edit = wiz.edit;
     markIncomplete();
     try {
-        const {status, data} = await postJson('/api/wizard/build', requestBody({preflight: withPreflight === true}));
+        const {status, data} = await postJson('/api/wizard/build', requestBody({preflight: false}));
         if (seq !== wiz.seq) return;  // a newer request is in flight
         wiz.built = edit;
         wiz.buildError = status !== 200;
         if (status !== 200) { WizardSteps.render(); return showError(data.error || `HTTP ${status}`); }
         showError('');
         wiz.preview = data.preview;
-        renderReview(data.preview, data.preflight);
+        wiz.model = data.model;
+        renderReview(data.preview);
         refreshOptions();
         WizardSteps.render();
     } catch (e) {
@@ -119,7 +120,7 @@ async function build(withPreflight = false) {
     }
 }
 
-function renderReview(preview, preflight) {
+function renderReview(preview) {
     const section = (title, items, cls) => {
         const ul = el('ul', {className: 'mb-2 ps-3 ' + (cls || '')}, ...items.map((t) => el('li', {textContent: t})));
         return [el('div', {className: 'fw-bold', textContent: title}), ul];
@@ -134,21 +135,6 @@ function renderReview(preview, preflight) {
     if (preview.warnings.length) {
         const w = section('Warnings', preview.warnings, 'text-warning wiz-warnings');
         parts.push(...w);
-    }
-    if (!preflight) {
-        parts.push(el('div', {className: 'small text-muted preflight-pending', textContent: 'Readiness not checked yet (use "Check readiness"; saving checks it too).'}));
-    } else {
-        const tone = {blocked: 'danger', warnings: 'warning', ready: 'success'}[preflight.verdict] || 'secondary';
-        const verdict = el('div', {className: `alert alert-${tone} py-1 mb-1 preflight-verdict`}, 'Readiness: ',
-            el('strong', {textContent: preflight.verdict || 'unknown'}));
-        const list = el('ul', {className: 'list-unstyled mb-0'});
-        for (const c of preflight.checks || []) {
-            const li = el('li', {className: `small ${c.severity === 'error' ? 'text-danger' : 'text-warning'}`,
-                textContent: `${c.subject ? 'sub-' + c.subject + ': ' : ''}${c.message}`});
-            if (c.fix) li.append(el('div', {className: 'preflight-fix text-muted', textContent: '→ ' + c.fix}));
-            list.append(li);
-        }
-        parts.push(verdict, list);
     }
     $('wiz-review').replaceChildren(...parts);
 }
@@ -339,6 +325,7 @@ async function loadScan(task) {
     wiz.recipes = [];
     wiz.pairs = [];
     wiz.preview = null;
+    wiz.model = null;
     wiz.optKey = null;
     $('wiz-task').replaceChildren(...data.tasks.map((t) => option(t)));
     $('wiz-task').value = data.task;
@@ -364,6 +351,35 @@ async function loadScan(task) {
     renderPairs();
     WizardSteps.render();
     build();
+}
+
+// ---- live readiness check (shared panel) ------------------------------------------------------------
+// The button needs a successful, current build: the job checks exactly the model shown in the summary.
+function updateCheck() {
+    const ok = !!(wiz.scan && wiz.model && !wiz.buildError && wiz.edit === wiz.built);
+    $('wiz-check').disabled = !ok;
+    $('wiz-check-hint').textContent = ok ? '' : 'Build a valid preview first';
+    const target = $('wiz-readiness');
+    const note = target.querySelector('.wiz-stale');
+    const stale = wiz.checked !== null && wiz.checked !== wiz.edit;
+    if (stale && !note) {
+        const n = el('div', {className: 'small text-muted wiz-stale', textContent: 'Out of date: the choices changed after this check. Run it again.'});
+        n.setAttribute('aria-live', 'off');  // the panel is a live region; this note must not announce
+        target.append(n);
+    } else if (!stale && note) note.remove();
+}
+
+function runCheck() {
+    const run = ++wiz.runSeq;
+    const edit = wiz.edit;
+    wiz.checked = null;
+    updateCheck();
+    ReadinessPanel.run({
+        target: $('wiz-readiness'),
+        body: {config: {BIDS_DIR: WIZ.bidsDir, FMRIPREP_DIR: WIZ.fmriprepDir, SPACE: WIZ.space, TASKS: [$('wiz-task').value]},
+               model_json: wiz.model, validator: 'skip', actions: ['stats']},
+        onDone: () => { if (run === wiz.runSeq) { wiz.checked = edit; updateCheck(); } },  // an older run must not mark a newer one
+    });
 }
 
 async function save(overwrite = false) {
@@ -398,12 +414,7 @@ function init() {
         wiz.nameEdited = true; if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath(); scheduleBuild(); });
     $('wiz-save-path').addEventListener('input', () => { wiz.pathEdited = true; });
     $('wiz-save').addEventListener('click', () => save());
-    $('wiz-check').addEventListener('click', async () => {
-        clearTimeout(wiz.timer);
-        $('wiz-check').disabled = true;
-        $('wiz-check').textContent = 'Checking...';
-        try { await build(true); } finally { $('wiz-check').textContent = 'Check readiness'; $('wiz-check').disabled = !wiz.scan; }
-    });
+    $('wiz-check').addEventListener('click', runCheck);
     for (const id of ['wiz-recipes', 'wiz-pair-table']) {
         $(id).addEventListener('focusout', () => setTimeout(refreshOptions, 0));
     }

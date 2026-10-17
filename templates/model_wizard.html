@@ -96,8 +96,10 @@
       <input id="wiz-name" class="form-control form-control-sm mb-2">
       <label class="form-label small mb-1" for="wiz-save-path">Save to</label>
       <input id="wiz-save-path" class="form-control form-control-sm mb-2">
-      <button type="button" id="wiz-check" class="btn btn-outline-primary btn-sm me-1"><i class="fas fa-clipboard-check me-1"></i>Check readiness</button>
+      <button type="button" id="wiz-check" aria-describedby="wiz-check-hint" class="btn btn-outline-primary btn-sm me-1"><i class="fas fa-clipboard-check me-1"></i>Check readiness</button>
       <button type="button" id="wiz-save" class="btn btn-success btn-sm"><i class="fas fa-save me-1"></i>Save and open</button>
+      <div id="wiz-check-hint" class="small text-muted mt-1"></div>
+      <div id="wiz-readiness" class="mt-2"></div>
     </div></section>
   </div>
 
@@ -114,6 +116,7 @@
 <script>
   window.BIDSPM_WIZARD_CONTEXT = {{ wizard_context | tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/readiness_panel.js', v=static_version('js/readiness_panel.js')) }}"></script>
 <script src="{{ url_for('static', filename='js/model_wizard_steps.js', v=static_version('js/model_wizard_steps.js')) }}"></script>
 <script src="{{ url_for('static', filename='js/model_wizard.js', v=static_version('js/model_wizard.js')) }}"></script>
 {% endblock %}

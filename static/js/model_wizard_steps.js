@@ -55,6 +55,7 @@ const STEPS = ['task', 'recipes', 'nuisance', 'contrasts', 'review'];
         $('wiz-next').hidden = cur === STEPS.length - 1;
         $('wiz-next').setAttribute('aria-disabled', block ? 'true' : 'false');
         $('wiz-hint').textContent = block || '';
+        updateCheck();
     }
 
     function goTo(name) {

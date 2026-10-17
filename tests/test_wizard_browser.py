@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tests.browser_support import chromium_available, post_json, start_server, sync_playwright
 from tests.preflight_support import make_trees
+from tests.test_readiness_panel_browser import HEAD, done, sse, subject_step
 
 EVENTS = ("onset\tduration\ttrial_type\tresponse_validity\trt\n"
           "1\t1\ta\tvalid\t0.5\n5\t1\titem\tvalid\t0.7\n9\t1\titem\tinvalid\t0.4\n13\t1\tb\tvalid\t0.6\n")
@@ -32,7 +33,7 @@ class TestWizardPage(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.tmp.name)
-        _, fmriprep = make_trees(cls.root, task="x", events=EVENTS)
+        _, fmriprep = make_trees(cls.root, task="x", events=EVENTS, space="MNI152NLin2009cAsym")
         cls.server, cls.base, cls.project_id = start_server(cls.root)
         req = urllib.request.Request(
             f"{cls.base}/api/projects/{cls.project_id}", json.dumps({"config": {"fmriprep_folder": str(fmriprep)}}).encode(),
@@ -100,10 +101,9 @@ class TestWizardPage(unittest.TestCase):
 
     def test_server_strings_in_the_review_are_text(self):
         page = self.open_wizard()
-        page.evaluate("""renderReview({regressors: ['trial_type.<i>q</i>'], nuisance: [], contrasts: [], warnings: ['w <b>x</b>']},
-            {verdict: 'blocked', checks: [{severity: 'error', subject: null, message: 'm <u>z</u>', fix: 'f <s>k</s>'}]})""")
-        self.assertEqual(page.locator("#wiz-review b, #wiz-review i, #wiz-review u, #wiz-review s").count(), 0)
-        self.assertIn("m <u>z</u>", page.inner_text("#wiz-review"))
+        page.evaluate("""renderReview({regressors: ['trial_type.<i>q</i>'], nuisance: [], contrasts: [], warnings: ['w <b>x</b>']})""")
+        self.assertEqual(page.locator("#wiz-review b, #wiz-review i").count(), 0)
+        self.assertIn("w <b>x</b>", page.inner_text("#wiz-review"))
 
     def test_save_writes_the_model_and_returns_to_analysis(self):
         page = self.open_wizard()
@@ -309,7 +309,7 @@ class TestWizardPage(unittest.TestCase):
         page.on("request", lambda r: bodies.append(json.loads(r.post_data)) if r.url.endswith("/api/wizard/build") else None)
         return bodies
 
-    def test_preview_builds_do_not_request_preflight_but_the_button_does(self):
+    def test_preview_builds_do_not_request_preflight(self):
         page = self.browser.new_page()
         bodies = self.build_bodies(page)
         page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
@@ -317,11 +317,7 @@ class TestWizardPage(unittest.TestCase):
         page.uncheck("#wiz-conditions input[value=b]")
         page.wait_for_function("!document.getElementById('wiz-review').innerText.includes('trial_type.b')")
         self.assertTrue(bodies and all(b["preflight"] is False for b in bodies))
-        self.assertIn("not checked", page.inner_text("#wiz-review"))
-        wizard_go_to(page, "review")
-        page.click("#wiz-check")
-        page.wait_for_selector("#wiz-review .preflight-verdict")
-        self.assertIs(bodies[-1]["preflight"], True)
+        self.assertEqual(page.locator("#wiz-review .preflight-verdict, #wiz-review .preflight-pending").count(), 0)
 
     def test_incomplete_recipe_is_not_sent_and_is_marked(self):
         page = self.browser.new_page()
@@ -625,3 +621,107 @@ class TestWizardPage(unittest.TestCase):
         page.get_by_role("button", name="Add recipe: " + page.evaluate("wiz.scan.catalog[0].title")).click()
         self.assertTrue(page.evaluate("!!document.activeElement.closest('#wiz-recipes .wiz-recipe')"))
         self.assertEqual(page.get_attribute("#wiz-recipes .wiz-recipe", "tabindex"), "-1")
+
+    # ---- live readiness check in the review step ---------------------------------------------------
+    def readiness_page(self, stream=None, hold_builds=False):
+        """Wizard with the start/stream/cancel endpoints mocked; returns (page, builds, starts, cancels)."""
+        page = self.browser.new_page()
+        self.errors = []
+        page.on("pageerror", lambda e: self.errors.append(str(e)))
+        builds, starts, cancels = [], [], []
+
+        def build(route):
+            if hold_builds:
+                return None
+            resp = route.fetch()
+            if resp.status == 200:
+                builds.append(resp.json())
+            route.fulfill(response=resp)
+
+        page.route("**/api/wizard/build", build)
+        page.route("**/api/preflight/start", lambda r: (starts.append(r.request.post_data_json), r.fulfill(
+            status=200, body='{"id": "j1"}', content_type="application/json")))
+        page.route("**/api/preflight/stream/**", (lambda r: r.fulfill(status=200, body=stream, content_type="text/event-stream"))
+                   if stream is not None else (lambda r: None))
+        page.route("**/api/preflight/cancel/**", lambda r: (cancels.append(r.request.url), r.fulfill(
+            status=200, body='{"status": "cancelling"}', content_type="application/json")))
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="load")
+        if not hold_builds:
+            page.wait_for_selector("#wiz-review .wiz-regressor")
+            wizard_go_to(page, "review")
+        else:
+            page.wait_for_function("wiz.scan !== null")
+            page.evaluate("wiz.step = 'review'; WizardSteps.render()")
+        return page, builds, starts, cancels
+
+    def test_check_posts_the_built_model_with_stats_and_no_validator(self):
+        page, builds, starts, _ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
+        page.click("#wiz-check")
+        page.wait_for_function("document.querySelector('#wiz-readiness .preflight-verdict')")
+        body = starts[0]
+        self.assertEqual(body["model_json"], builds[-1]["model"])
+        self.assertEqual((body["validator"], body["actions"]), ("skip", ["stats"]))
+        self.assertEqual(body["config"]["TASKS"], ["x"])
+        self.assertEqual({"BIDS_DIR", "FMRIPREP_DIR", "SPACE"} - set(body["config"]), set())
+
+    def test_verdict_renders_inside_the_review_step_not_the_rail(self):
+        page, *_ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
+        page.click("#wiz-check")
+        page.wait_for_selector("#wiz-readiness .preflight-verdict")
+        self.assertEqual(page.locator("#wiz-rail .preflight-verdict").count(), 0)
+        self.assertTrue(page.evaluate("!!document.querySelector('[data-wiz-step=review] #wiz-readiness')"))
+
+    def test_check_is_disabled_with_a_reason_before_the_first_build(self):
+        page, *_ = self.readiness_page(hold_builds=True)
+        self.assertTrue(page.is_disabled("#wiz-check"))
+        self.assertIn("Build a valid preview first", page.inner_text("#wiz-check-hint"))
+        self.assertTrue(page.is_visible("#wiz-check-hint"))
+
+    def test_check_is_disabled_while_the_preview_is_dirty_and_back_after(self):
+        page, *_ = self.readiness_page()
+        self.assertTrue(page.is_enabled("#wiz-check"))
+        held = []
+        page.route("**/api/wizard/build", lambda r: held.append(r))
+        with page.expect_request("**/api/wizard/build"):
+            page.evaluate("document.querySelector('#wiz-conditions input[value=b]').click()")
+        self.assertTrue(page.is_disabled("#wiz-check"))
+        self.assertIn("Build a valid preview first", page.inner_text("#wiz-check-hint"))
+        page.unroute("**/api/wizard/build")
+        held.pop().continue_()
+        page.wait_for_function("!document.getElementById('wiz-check').disabled")
+        self.assertEqual(page.inner_text("#wiz-check-hint"), "")
+
+    def test_a_choice_change_after_a_finished_check_marks_it_out_of_date(self):
+        page, *_ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
+        page.click("#wiz-check")
+        page.wait_for_selector("#wiz-readiness .preflight-verdict")
+        self.assertEqual(page.locator("#wiz-readiness .wiz-stale").count(), 0)
+        page.evaluate("document.querySelector('#wiz-conditions input[value=b]').click()")
+        page.wait_for_selector("#wiz-readiness .wiz-stale")
+        note = page.locator("#wiz-readiness .wiz-stale")
+        self.assertIn("out of date", note.inner_text().lower())
+        self.assertEqual(note.get_attribute("aria-live"), "off")
+        self.assertIn("Readiness:", page.inner_text("#wiz-readiness"))  # the old verdict stays visible, labelled
+        page.wait_for_function("wiz.edit === wiz.built")
+        page.click("#wiz-check")
+        page.wait_for_function("!document.querySelector('#wiz-readiness .wiz-stale')")
+
+    def test_cancel_posts_to_the_job(self):
+        page, _, _, cancels = self.readiness_page()  # the stream never answers
+        page.click("#wiz-check")
+        page.click("#wiz-readiness .rp-cancel")
+        page.wait_for_function("document.getElementById('wiz-readiness').innerText.includes('Cancelled')")
+        self.assertTrue(any(u.endswith("/api/preflight/cancel/j1") for u in cancels))
+
+    def test_real_readiness_check_reaches_a_verdict_for_the_built_model(self):
+        page = self.browser.new_page()
+        sent = []
+        page.on("request", lambda r: sent.append(r.post_data_json) if r.url.endswith("/api/preflight/start") else None)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        wizard_go_to(page, "review")
+        page.click("#wiz-check")
+        page.wait_for_selector("#wiz-readiness .preflight-verdict", timeout=60000)
+        self.assertRegex(page.inner_text("#wiz-readiness .preflight-verdict"), r"ready|warnings")
+        self.assertIn("1 / 1 subject checks", page.inner_text("#wiz-readiness .rp-count"))
+        self.assertEqual(sent[0]["model_json"]["Nodes"][0]["Level"], "Run")
