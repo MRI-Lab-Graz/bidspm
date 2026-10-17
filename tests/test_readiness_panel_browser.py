@@ -181,6 +181,23 @@ class TestReadinessPanelMocked(unittest.TestCase):
         self.assertTrue(any(u.endswith("/api/preflight/cancel/j1") for u in self.requests))
         self.assertEqual(page.locator("#preflight-panel .rp-cancel").count(), 0)
 
+    def test_pagehide_cancels_a_live_job_but_not_a_finished_one(self):
+        page = self.open_page([sse(HEAD + [subject_step(1)])])
+        page.route(STREAM, lambda r: None)  # never answered: the run stays live
+        page.click("#btn-preflight")
+        page.wait_for_function("document.querySelector('#preflight-panel .rp-cancel')")
+        page.wait_for_timeout(300)  # the job id is known once the start answered
+        page.evaluate("window.dispatchEvent(new Event('pagehide'))")
+        page.wait_for_timeout(500)
+        self.assertTrue(any(u.endswith("/api/preflight/cancel/j1") for u in self.requests), self.requests)
+        done_page = self.open_page([sse(HEAD + [subject_step(1), done()])])
+        before = len(self.requests)
+        done_page.click("#btn-preflight")
+        done_page.wait_for_selector("#preflight-panel .preflight-verdict")
+        done_page.evaluate("window.dispatchEvent(new Event('pagehide'))")
+        done_page.wait_for_timeout(500)
+        self.assertFalse(any("/cancel/" in u for u in self.requests[before:]), self.requests)
+
     def test_stream_cut_before_terminal_shows_lost_connection_and_retry_resumes(self):
         first = sse(HEAD + [subject_step(1, [item("sub-01 broke")])])  # seq 0..7
         rest = sse([subject_step(2), subject_step(3), done([item("sub-01 broke")], "blocked")], first_seq=8)

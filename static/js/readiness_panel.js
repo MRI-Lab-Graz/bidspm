@@ -129,7 +129,16 @@ window.ReadinessPanel = (function () {
             }
         }
 
+        // Reload/navigation: free the server slot of a live job (beacons survive the unload, plain fetches may not).
+        function onPageHide() {
+            if (!jobId || finished || stopped) return;
+            const url = cancelUrl(jobId);
+            if (!(navigator.sendBeacon && navigator.sendBeacon(url))) fetch(url, {method: 'POST', keepalive: true}).catch(() => {});
+        }
+        window.addEventListener('pagehide', onPageHide);
+
         function end() {
+            window.removeEventListener('pagehide', onPageHide);
             finished = true;
             if (source) source.close();
             source = null;
@@ -209,6 +218,7 @@ window.ReadinessPanel = (function () {
         }
 
         function abandon() {
+            window.removeEventListener('pagehide', onPageHide);
             stopped = true;
             if (source) source.close();
             source = null;
