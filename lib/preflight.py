@@ -446,6 +446,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                     checks.append(_item("condition_missing", WARN, f"sub-{sub} has no events for: {', '.join(absent)}",
                                         "Expected if the subject never produced that condition; bidspm will warn and skip it.", sub))
         prog.add(checks[before:])
+    prog.emit("subjects", "done", "subject checks finished")  # the bar leaves 100 % while a slow validator is still running
     return checks
 
 

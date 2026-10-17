@@ -262,3 +262,17 @@ def test_cli_progress_lines_read_well_and_progress_without_preflight_warns(tmp_p
     proc = subprocess.run([sys.executable, "bidspm.py", "--progress", "--list-tasks", "-s", str(cfg)],
                           cwd=ROOT, capture_output=True, text=True)
     assert "--progress" in proc.stderr and "--preflight" in proc.stderr
+
+
+def test_subjects_done_follows_the_last_subject_step_and_precedes_the_terminal_event(tmp_path):
+    _, events = collect(tmp_path)
+    order = [(e["phase"], e["state"]) for e in events if e["phase"] in ("subjects", "done")]
+    assert order == [("subjects", "start")] + [("subjects", "progress")] * 3 + [("subjects", "done"), ("done", "done")]
+
+
+def test_no_subjects_done_event_after_a_cancel(tmp_path):
+    seen = []
+    bids, fmriprep = make_trees(tmp_path, subjects=("01", "02", "03"))
+    run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="skip",
+                  progress=seen.append, cancelled=lambda: len(steps(seen)) >= 1)
+    assert not [e for e in seen if e["phase"] == "subjects" and e["state"] == "done"]

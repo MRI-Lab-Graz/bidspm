@@ -181,6 +181,24 @@ class TestReadinessPanelMocked(unittest.TestCase):
         self.assertTrue(any(u.endswith("/api/preflight/cancel/j1") for u in self.requests))
         self.assertEqual(page.locator("#preflight-panel .rp-cancel").count(), 0)
 
+    def test_bar_turns_indeterminate_after_the_subjects_while_the_validator_still_runs(self):
+        head = [e for e in HEAD if not (e["phase"] == "validator" and e["state"] == "done")]  # validator never finishes
+        steps = [subject_step(1), subject_step(2), subject_step(3)]
+        page = self.open_page([sse(head + steps + [ev("subjects", "done")])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.locator("#preflight-panel .progress-bar-animated").count(), 1)
+        self.assertIsNone(page.get_attribute("#preflight-panel .rp-bar", "aria-valuenow"))
+        self.assertIn("3 / 3 subject checks", self.panel(page))
+
+    def test_bar_stays_full_after_the_subjects_when_the_validator_is_done(self):
+        steps = [subject_step(1), subject_step(2), subject_step(3)]
+        page = self.open_page([sse(HEAD + steps + [ev("subjects", "done")])])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.locator("#preflight-panel .progress-bar-animated").count(), 0)
+        self.assertEqual(page.get_attribute("#preflight-panel .rp-bar", "aria-valuenow"), "100")
+
     def test_pagehide_cancels_a_live_job_but_not_a_finished_one(self):
         page = self.open_page([sse(HEAD + [subject_step(1)])])
         page.route(STREAM, lambda r: None)  # never answered: the run stays live

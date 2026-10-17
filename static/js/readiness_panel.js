@@ -182,7 +182,11 @@ window.ReadinessPanel = (function () {
             else if (ev.state === 'start' || ev.state === 'progress') setPhase(ev.phase, 'running');
             if (subjectsTotal) {
                 if (ev.index != null) setBar('determinate', 100 * ev.index / subjectsTotal);
-                else if (ev.phase === 'subjects' && ev.state === 'done') setBar('determinate', 100);
+                else if (ev.phase === 'subjects' && ev.state === 'done') {
+                    // all subjects are checked: a still-running validator is the only thing left to wait for
+                    if (phaseEls.get('validator').dataset.state === 'running') setBar('indeterminate');
+                    else setBar('determinate', 100);
+                }
             } else if (phaseEls.get('validator').dataset.state === 'running') setBar('indeterminate');
             else setBar('hidden');
             addItems(ev.items);
