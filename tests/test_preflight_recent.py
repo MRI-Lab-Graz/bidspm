@@ -283,13 +283,20 @@ def test_run_gate_remembers_warnings_too(tmp_path):
 MODEL = {"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"]}, "Nodes": []}
 
 
+RUN_ACTIONS = ["stats", "dataset", "report"]  # ticked on the analysis page
+
+
 def _form_job(client, tmp_path, model_body, **cfg_over):
     bids, fmriprep = make_trees(tmp_path)
+    model_file = tmp_path / "form_model.json"
+    model_file.write_text(json.dumps(model_body))
     form = {"BIDS_DIR": str(bids), "FMRIPREP_DIR": str(fmriprep), "SPACE": "MNI", "TASKS": "x",
+            "MODELS_FILE": str(model_file), "skip_validation": True,
             "FWHM": 6, "VERBOSITY": 3, "WD": "/w", "docker_image": "img", "unifiedStudyConfig": {"k": [1]},
             **cfg_over}
-    res = client.post("/api/preflight/start", json={"config": form, "model_json": model_body, "validator": "skip",
-                                                    "actions": ["stats"], "skip_model_validation": True})
+    # literally the body analysis_preflight.js sends (see test_check_readiness_sends_what_run_will_use)
+    res = client.post("/api/preflight/start", json={"config": form, "validator": "skip",
+                                                    "actions": RUN_ACTIONS, "skip_model_validation": True})
     assert res.status_code == 200, res.data
     with api._JOBS_LOCK:
         job = api._JOBS[res.get_json()["id"]]
@@ -305,7 +312,7 @@ def _export_run(client, tmp_path, bids, fmriprep, model_path, **over):
     with patch(RUN_PF, return_value=READY) as pf, \
          patch("webapp.web_execution_api.subprocess.Popen", return_value=MagicMock(pid=4242)), \
          patch("webapp.web_execution_api.threading.Thread"):
-        res = client.post("/run", json={"actions": ["stats"], "settings": str(settings), "model": str(model_path),
+        res = client.post("/run", json={"actions": RUN_ACTIONS, "settings": str(settings), "model": str(model_path),
                                         "validator": "skip", "skip_validation": True})
     assert res.status_code == 200, res.data
     return pf

@@ -40,6 +40,25 @@ class TestPreflightPanel(unittest.TestCase):
         self.assertTrue(page.locator("#preflight-panel .preflight-fix").count() >= 1)
         self.assertEqual(errors, [])
 
+    def test_check_readiness_sends_what_run_will_use(self):
+        """The job signature must equal the /run one: actions and the skip flag ride along."""
+        import json
+        page = self.open_page()
+        go_to_stage(page, "options")
+        for name in ("smooth", "stats", "dataset", "report"):
+            page.check(f"input[name=action][value={name}]")
+        page.uncheck("input[name=action][value=smooth]")
+        go_to_stage(page, "run")
+        sent = []
+        page.route("**/api/preflight/start", lambda r: (sent.append(json.loads(r.request.post_data)),
+                                                        r.fulfill(status=500, body="{}", content_type="application/json")))
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertEqual(sorted(sent[0]["actions"]), ["dataset", "report", "stats"])
+        self.assertEqual(sent[0]["skip_model_validation"], page.evaluate("document.getElementById('skip_validation').checked"))
+        self.assertIn("config", sent[0])
+        self.assertIn("validator", sent[0])
+
     def test_validator_select_defaults_to_auto(self):
         self.assertEqual(self.open_page().input_value("#validator-mode"), "auto")
 

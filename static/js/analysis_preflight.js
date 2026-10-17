@@ -16,7 +16,10 @@ function runPreflight() {
     const panel = document.getElementById('preflight-panel');
     if (!panel) return;
     updateInternalState();
-    ReadinessPanel.run({target: panel, body: {config: unifiedStudyConfig, validator: validatorMode()}});
+    // Exactly what /run will gate on (same builder as the Run buttons), so Run can reuse this result.
+    const form = getFullFormData();
+    ReadinessPanel.run({target: panel, body: {config: unifiedStudyConfig, validator: validatorMode(),
+                                              actions: form.actions, skip_model_validation: form.skip_validation}});
 }
 
 (function () {
