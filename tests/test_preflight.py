@@ -610,3 +610,54 @@ def test_cancel_kills_the_validator_and_its_children(tmp_path):
     while time.monotonic() < deadline and (_alive(parent) or _alive(child)):
         time.sleep(0.05)
     assert not _alive(parent) and not _alive(child)
+
+
+# --- empty TASKS: the model's Input.task, else the tasks found in the BIDS folder ---
+
+def _two_task_tree(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    (bids / "sub-01" / "func" / "sub-01_task-y_bold.nii.gz").write_text("")  # task y: no events file
+    stem = fmriprep / "sub-01" / "func" / "sub-01_task-y_space-MNI_desc-preproc_bold.nii.gz"
+    shutil.copy(next((fmriprep / "sub-01" / "func").glob("*task-x*preproc_bold.nii.gz")), stem)
+    return bids, fmriprep
+
+
+def _model_with_tasks(tmp_path, tasks):
+    path = write_model(tmp_path)
+    body = json.loads(path.read_text())
+    body["Input"] = {"task": tasks}
+    path.write_text(json.dumps(body))
+    return path
+
+
+def test_empty_tasks_use_the_models_input_task(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = _model_with_tasks(tmp_path, ["x"])
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=[], space="MNI", validator="off",
+                           skip_model_validation=True)
+    assert _only(result, "events_missing") == []
+
+
+def test_empty_tasks_without_a_model_task_discover_from_the_bids_folder(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    for model in (None, _model_with_tasks(tmp_path, [])):
+        result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model or "", tasks=[], space="MNI",
+                               validator="off", skip_model_validation=True)
+        assert any("task-y" in c["message"] for c in _only(result, "events_missing"))
+
+
+def test_explicit_tasks_beat_the_models_input_task(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = _model_with_tasks(tmp_path, ["x"])
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=["y"], space="MNI",
+                           validator="off", skip_model_validation=True)
+    assert any("task-y" in c["message"] for c in _only(result, "events_missing"))
+
+
+def test_malformed_model_falls_back_to_discovery(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = tmp_path / "bad.json"
+    model.write_text('{"Input": {"task": 5}}')
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=[], space="MNI",
+                           validator="off", skip_model_validation=True)
+    assert any("task-y" in c["message"] for c in _only(result, "events_missing"))

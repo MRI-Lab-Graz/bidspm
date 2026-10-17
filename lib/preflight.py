@@ -133,6 +133,15 @@ def _model_needs(model_file):
     return conditions, nuisance, transformed, produced
 
 
+def _model_tasks(model_file):
+    """The model's Input.task as a list of strings; [] when absent or malformed."""
+    try:
+        task = (json.loads(Path(model_file).read_text()).get("Input") or {}).get("task")
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+    return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
+
+
 def _scan_length_warning(sub, preproc, events_rows):
     import nibabel as nib
     sidecar = preproc.with_name(preproc.name.replace(".nii.gz", ".json"))
@@ -384,7 +393,8 @@ class _Progress:
 def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full, prog):
     checks = []
     from lib.core import discover_tasks  # lazy: keeps module import light
-    tasks = list(tasks) or discover_tasks(Path(bids_dir))
+    # empty TASKS: the model's own task list, else every task of the BIDS folder
+    tasks = list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
     if not tasks:
         checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
                             "check the BIDS folder or set the task in the project settings"))
