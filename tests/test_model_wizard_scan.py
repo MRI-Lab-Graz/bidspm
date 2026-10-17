@@ -41,3 +41,13 @@ def test_files_truncated_reported(tmp_path):
         write(tmp_path, f"sub-{s}/func/sub-{s}_task-x_events.tsv", ev((1, 1, "a", "1")))
     assert scan_events(tmp_path, "x", max_files=2)["files_truncated"] is True
     assert scan_events(tmp_path, "x")["files_truncated"] is False
+
+
+def test_bids_tasks_matches_discover_tasks_without_walking_imaging_folders(tmp_path):
+    from lib.core import discover_tasks
+    from lib.model_wizard import bids_tasks
+    write(tmp_path, "sub-01/func/sub-01_task-x_bold.nii.gz", "")
+    write(tmp_path, "sub-02/ses-1/func/sub-02_ses-1_task-y_events.tsv", "")
+    write(tmp_path, "sub-02/anat/sub-02_T1w.nii.gz", "")
+    write(tmp_path, "sub-02/anat/sub-02_task-nope_T1w.nii.gz", "")
+    assert bids_tasks(tmp_path) == discover_tasks(tmp_path) == ["x", "y"]

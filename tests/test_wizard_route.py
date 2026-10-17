@@ -1,11 +1,13 @@
 import json
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from bidspm_gui import app
+from lib.model_wizard import scan_events
 from tests.preflight_support import make_trees
 
 
@@ -199,15 +201,54 @@ def test_build_runs_preflight_by_default_but_not_on_save_with_preflight_false(tm
     assert pre.call_count == 1  # saving does not repeat it: its result was never shown
 
 
-def test_scan_and_build_both_see_edited_events(tmp_path):
+def test_scan_refreshes_and_the_next_build_sees_edited_events(tmp_path):
     p = paths(tmp_path)
     body = {**p, "choices": choices(nuisance="none"), "preflight": False}
     assert "rare" not in post("/api/wizard/scan", p).get_json()["columns"]["trial_type"]
     assert "trial_type.rare" not in post("/api/wizard/build", body).get_json()["preview"]["regressors"]
     f = next((tmp_path / "bids").glob("sub-*/**/*_events.tsv"))
     f.write_text(f.read_text() + "9\t1\trare\n")
+    # ponytail: builds may be up to the scan TTL stale; the scan route (page load / task change) always refreshes
     assert "rare" in post("/api/wizard/scan", p).get_json()["columns"]["trial_type"]
     assert "trial_type.rare" in post("/api/wizard/build", body).get_json()["preview"]["regressors"]
+
+
+def test_warm_builds_do_not_reread_the_events_files(tmp_path):
+    p = paths(tmp_path)
+    body = {**p, "choices": choices(nuisance="none"), "preflight": False}
+    with mock.patch("webapp.web_wizard_api.scan_events", wraps=scan_events) as spy:
+        post("/api/wizard/scan", p)
+        post("/api/wizard/build", body)
+        post("/api/wizard/build", body)
+        assert spy.call_count == 1  # one scan; both builds used its result
+        post("/api/wizard/scan", p)
+        assert spy.call_count == 2  # the scan route always refreshes
+
+
+def test_a_build_without_a_prior_scan_scans_once_then_stays_warm(tmp_path):
+    body = {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False}
+    with mock.patch("webapp.web_wizard_api.scan_events", wraps=scan_events) as spy:
+        post("/api/wizard/build", body)
+        post("/api/wizard/build", body)
+    assert spy.call_count == 1
+
+
+def test_cache_entries_expire_after_the_ttl(tmp_path):
+    from webapp import web_wizard_api
+    body = {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False}
+    post("/api/wizard/build", body)
+    with mock.patch("webapp.web_wizard_api.scan_events", wraps=scan_events) as spy, \
+            mock.patch.object(web_wizard_api.time, "monotonic", return_value=time.monotonic() + web_wizard_api.SCAN_TTL + 1):
+        post("/api/wizard/build", body)
+    assert spy.call_count == 1
+
+
+def test_a_build_does_not_leak_a_cached_scan_between_folders(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    pa, pb = paths(a), paths(b, events="onset\tduration\ttrial_type\n1\t1\tzz\n")
+    for p, cond in ((pa, "trial_type.a"), (pb, "trial_type.zz")):
+        res = post("/api/wizard/build", {**p, "choices": choices(nuisance="none"), "preflight": False})
+        assert cond in res.get_json()["preview"]["regressors"]
 
 
 def test_files_truncated_adds_preview_warning(tmp_path):

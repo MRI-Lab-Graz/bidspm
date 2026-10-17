@@ -2,18 +2,44 @@
 import json
 import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from lib.core import discover_tasks
-from lib.model_wizard import NUISANCE_PRESETS, WizardError, build_model, catalog, scan_events
+from lib.model_wizard import NUISANCE_PRESETS, WizardError, bids_tasks, build_model, catalog, scan_events
 from lib.preflight import run_preflight_from_config
 from webapp.web_discovery_model_api import _discover_confound_info
 
 
+SCAN_TTL = 60
+_SCANS = {}  # (bids_dir, fmriprep_dir, requested task) -> (monotonic time, scan)
+_SCANS_LOCK = threading.Lock()
+
+
+def _cached_scan(bids_dir, fmriprep_dir, task, refresh=False):
+    """The scan of a dataset folder, shared by the scan route (refresh=True: always rescans) and the builds.
+
+    ponytail: events edited within SCAN_TTL (60 s) are not seen by builds; the scan route (page load, task change) refreshes
+    the entry. An in-process dict capped at 8 entries; add per-file mtimes if edits-while-open ever matter."""
+    key = (bids_dir, fmriprep_dir, str(task or ""))
+    now = time.monotonic()
+    with _SCANS_LOCK:
+        hit = _SCANS.get(key)
+    if hit and not refresh and now - hit[0] < SCAN_TTL:
+        return hit[1]
+    scan = _scan(bids_dir, fmriprep_dir, task, with_confounds=refresh)  # the builds never read confound columns
+    with _SCANS_LOCK:
+        for k in {key, (bids_dir, fmriprep_dir, scan["task"])}:
+            _SCANS[k] = (now, scan)
+        while len(_SCANS) > 8:
+            del _SCANS[next(iter(_SCANS))]
+    return scan
+
+
 def _scan(bids_dir, fmriprep_dir, task, with_confounds=True):
-    tasks = discover_tasks(Path(bids_dir))
+    tasks = bids_tasks(bids_dir)
     task = task if task in tasks else (tasks[0] if tasks else "")
     events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False}
     confounds = (_discover_confound_info(Path(fmriprep_dir), [task] if task else None)
@@ -54,7 +80,7 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
         bids_dir, fmriprep_dir = _dirs(data)
         if not os.path.isdir(bids_dir):
             return jsonify({"error": f"BIDS folder not found: {bids_dir}"}), 404
-        return jsonify({**_scan(bids_dir, fmriprep_dir, data.get("task")), "catalog": catalog(),
+        return jsonify({**_cached_scan(bids_dir, fmriprep_dir, data.get("task"), refresh=True), "catalog": catalog(),
                         "nuisance_presets": NUISANCE_PRESETS})
 
     @app.route("/api/wizard/build", methods=["POST"])
@@ -75,7 +101,7 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
                 return jsonify({"error": "File already exists. Set overwrite=true to replace it."}), 409
         try:
             # build_model never reads confound columns, so skip reading every confounds TSV
-            scan = _scan(bids_dir, fmriprep_dir, choices.get("task"), with_confounds=False)
+            scan = _cached_scan(bids_dir, fmriprep_dir, choices.get("task"))
             result = build_model(choices, scan)
         except WizardError as exc:
             return jsonify({"error": str(exc)}), 400
