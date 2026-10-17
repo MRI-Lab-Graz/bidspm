@@ -278,6 +278,16 @@ def test_skip_mode_warns_and_does_not_run(tmp_path, fake_exe):
     assert [c["severity"] for c in out] == ["warn"] and calls == []
 
 
+def test_off_mode_is_silent_and_does_not_run(tmp_path, fake_exe):
+    calls = []
+    assert check_validator(tmp_path, "off", run=fake_run("", 0, calls)) == [] and calls == []
+
+
+def test_run_preflight_accepts_validator_off_with_no_validator_item(tmp_path):
+    result = run(tmp_path, validator="off")
+    assert _only(result, "validator") == [] and ids(result, "error") == set()
+
+
 def test_unparseable_output_with_clean_exit_degrades_to_a_warning(tmp_path, fake_exe):
     out = check_validator(tmp_path, "prism", run=fake_run("Traceback ...", 0))
     assert [c["severity"] for c in out] == ["warn"]
@@ -334,7 +344,8 @@ def test_unknown_mode_blocks_without_running(tmp_path, fake_exe):
 
 def test_validator_error_blocks_the_whole_preflight(tmp_path, fake_exe):
     bids, fmriprep = make_trees(tmp_path)
-    with patch("lib.preflight.subprocess.run", fake_run(json.dumps(REPORT))):
+    fake = fake_run(json.dumps(REPORT))
+    with patch("lib.preflight._run_killable", lambda cmd, cancelled: fake(cmd)):
         result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="prism")
     assert result["verdict"] == "blocked" and "validator" in ids(result, "error")
 
@@ -557,3 +568,96 @@ def test_validator_group_cap_counts_groups(tmp_path, fake_exe):
     issues = [{"code": f"E{n % 25}", "severity": "ERROR", "message": "m", "file_path": "f"} for n in range(100)]
     out = check_validator(tmp_path, "prism", run=fake_run(json.dumps({"issues": issues})))
     assert len(out) == 21 and "+5 more" in out[-1]["message"]
+
+
+# --- cancel kills the validator process group ---
+
+def _alive(pid):
+    try:
+        import os
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:  # a zombie is dead for our purposes
+        return Path(f"/proc/{pid}/stat").read_text().split(")")[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+def test_cancel_kills_the_validator_and_its_children(tmp_path):
+    import threading
+    import time
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    pids = tmp_path / "pids"
+    exe = bindir / "prism-validator"
+    exe.write_text(f"#!{sys.executable}\nimport os, subprocess, time\n"
+                   f"child = subprocess.Popen(['sleep', '30'])\n"
+                   f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
+                   f"time.sleep(30)\n")
+    exe.chmod(0o755)
+    bids, fmriprep = make_trees(tmp_path)
+    cancel = threading.Event()
+    threading.Timer(0.5, cancel.set).start()
+    with patch("lib.preflight.sys.executable", str(bindir / "python")):
+        start = time.monotonic()
+        result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="bids",
+                               cancelled=cancel.is_set)
+        took = time.monotonic() - start
+    assert result["verdict"] == "cancelled" and took < 2.5
+    parent, child = map(int, pids.read_text().split())
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and (_alive(parent) or _alive(child)):
+        time.sleep(0.05)
+    assert not _alive(parent) and not _alive(child)
+
+
+# --- empty TASKS: the model's Input.task, else the tasks found in the BIDS folder ---
+
+def _two_task_tree(tmp_path):
+    bids, fmriprep = make_trees(tmp_path)
+    (bids / "sub-01" / "func" / "sub-01_task-y_bold.nii.gz").write_text("")  # task y: no events file
+    stem = fmriprep / "sub-01" / "func" / "sub-01_task-y_space-MNI_desc-preproc_bold.nii.gz"
+    shutil.copy(next((fmriprep / "sub-01" / "func").glob("*task-x*preproc_bold.nii.gz")), stem)
+    return bids, fmriprep
+
+
+def _model_with_tasks(tmp_path, tasks):
+    path = write_model(tmp_path)
+    body = json.loads(path.read_text())
+    body["Input"] = {"task": tasks}
+    path.write_text(json.dumps(body))
+    return path
+
+
+def test_empty_tasks_use_the_models_input_task(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = _model_with_tasks(tmp_path, ["x"])
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=[], space="MNI", validator="off",
+                           skip_model_validation=True)
+    assert _only(result, "events_missing") == []
+
+
+def test_empty_tasks_without_a_model_task_discover_from_the_bids_folder(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    for model in (None, _model_with_tasks(tmp_path, [])):
+        result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model or "", tasks=[], space="MNI",
+                               validator="off", skip_model_validation=True)
+        assert any("task-y" in c["message"] for c in _only(result, "events_missing"))
+
+
+def test_explicit_tasks_beat_the_models_input_task(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = _model_with_tasks(tmp_path, ["x"])
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=["y"], space="MNI",
+                           validator="off", skip_model_validation=True)
+    assert any("task-y" in c["message"] for c in _only(result, "events_missing"))
+
+
+def test_malformed_model_falls_back_to_discovery(tmp_path):
+    bids, fmriprep = _two_task_tree(tmp_path)
+    model = tmp_path / "bad.json"
+    model.write_text('{"Input": {"task": 5}}')
+    result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, model_file=model, tasks=[], space="MNI",
+                           validator="off", skip_model_validation=True)
+    assert any("task-y" in c["message"] for c in _only(result, "events_missing"))

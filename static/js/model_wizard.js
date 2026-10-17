@@ -1,7 +1,7 @@
 // model_wizard.js -- renders the wizard form and collects choices. All logic lives in lib/model_wizard.py
 // (/api/wizard/scan, /api/wizard/build). Server strings go in via textContent/DOM nodes, never innerHTML.
 const WIZ = window.BIDSPM_WIZARD_CONTEXT;
-const wiz = {scan: null, preview: null, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
+const wiz = {step: 'task', scanError: false, buildError: false, edit: 0, built: 0, scan: null, preview: null, model: null, checked: null, runSeq: 0, recipes: [], pairs: [], timer: null, seq: 0, scanSeq: 0, optKey: null, uid: 0, pathEdited: false, nameEdited: false};
 const $ = (id) => document.getElementById(id);
 
 function el(tag, props = {}, ...kids) {
@@ -32,7 +32,7 @@ function excluded() {
 }
 
 function nuisanceChoice() {
-    const v = $('wiz-nuisance').value;
+    const v = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
     if (v !== 'custom') return v;
     return $('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -69,10 +69,13 @@ function requestBody(extra = {}) {
 
 // ---- build / preview ----------------------------------------------------------------------------
 function setEnabled(on) {
-    document.querySelectorAll('#wiz-form input, #wiz-form select, #wiz-form button').forEach((n) => { n.disabled = !on; });
+    // the readiness panel's own Cancel/Retry stay usable
+    document.querySelectorAll('#wiz-form input, #wiz-form select, #wiz-form button').forEach((n) => { if (!n.closest('#wiz-readiness')) n.disabled = !on; });
 }
 
 function scheduleBuild() {
+    wiz.edit++;
+    WizardSteps.render();  // gating reacts at once; the preview follows after the debounce
     clearTimeout(wiz.timer);
     wiz.timer = setTimeout(() => build(), 300);
 }
@@ -91,25 +94,34 @@ function refreshOptions() {
     renderPairs();
 }
 
-// The live preview skips the readiness check (about 30 s on a real study); "Check readiness" asks for it.
-async function build(withPreflight = false) {
+// The live preview skips the readiness check (about 30 s on a real study); "Check readiness" runs it as a live job.
+async function build() {
     if (!wiz.scan) return;
     const seq = ++wiz.seq;
+    const edit = wiz.edit;
     markIncomplete();
     try {
-        const {status, data} = await postJson('/api/wizard/build', requestBody({preflight: withPreflight === true}));
+        const {status, data} = await postJson('/api/wizard/build', requestBody({preflight: false}));
         if (seq !== wiz.seq) return;  // a newer request is in flight
-        if (status !== 200) return showError(data.error || `HTTP ${status}`);
+        wiz.built = edit;
+        wiz.buildError = status !== 200;
+        if (status !== 200) { WizardSteps.render(); return showError(data.error || `HTTP ${status}`); }
         showError('');
         wiz.preview = data.preview;
-        renderReview(data.preview, data.preflight);
+        wiz.model = data.model;
+        renderReview(data.preview);
         refreshOptions();
+        WizardSteps.render();
     } catch (e) {
-        if (seq === wiz.seq) showError(`Preview failed: ${e.message}`);
+        if (seq !== wiz.seq) return;
+        wiz.built = edit;
+        wiz.buildError = true;
+        WizardSteps.render();
+        showError(`Preview failed: ${e.message}`);
     }
 }
 
-function renderReview(preview, preflight) {
+function renderReview(preview) {
     const section = (title, items, cls) => {
         const ul = el('ul', {className: 'mb-2 ps-3 ' + (cls || '')}, ...items.map((t) => el('li', {textContent: t})));
         return [el('div', {className: 'fw-bold', textContent: title}), ul];
@@ -124,21 +136,6 @@ function renderReview(preview, preflight) {
     if (preview.warnings.length) {
         const w = section('Warnings', preview.warnings, 'text-warning wiz-warnings');
         parts.push(...w);
-    }
-    if (!preflight) {
-        parts.push(el('div', {className: 'small text-muted preflight-pending', textContent: 'Readiness not checked yet (use "Check readiness"; saving checks it too).'}));
-    } else {
-        const tone = {blocked: 'danger', warnings: 'warning', ready: 'success'}[preflight.verdict] || 'secondary';
-        const verdict = el('div', {className: `alert alert-${tone} py-1 mb-1 preflight-verdict`}, 'Readiness: ',
-            el('strong', {textContent: preflight.verdict || 'unknown'}));
-        const list = el('ul', {className: 'list-unstyled mb-0'});
-        for (const c of preflight.checks || []) {
-            const li = el('li', {className: `small ${c.severity === 'error' ? 'text-danger' : 'text-warning'}`,
-                textContent: `${c.subject ? 'sub-' + c.subject + ': ' : ''}${c.message}`});
-            if (c.fix) li.append(el('div', {className: 'preflight-fix text-muted', textContent: '→ ' + c.fix}));
-            list.append(li);
-        }
-        parts.push(verdict, list);
     }
     $('wiz-review').replaceChildren(...parts);
 }
@@ -245,12 +242,29 @@ function renderRecipes() {
             ? [el('div', {className: 'small text-muted', textContent: 'Add this last: recipes after it cannot use its regressor.'})] : [];
         const incomplete = el('div', {className: 'small text-warning wiz-incomplete-note', hidden: true,
             textContent: 'incomplete \u2014 fill in the required fields'});
-        return el('div', {className: 'border rounded p-2 mb-2 wiz-recipe'},
+        return el('div', {className: 'border rounded p-2 mb-2 wiz-recipe', tabIndex: -1},
             el('div', {className: 'd-flex justify-content-between'}, el('strong', {className: 'small', textContent: def.title}), tools),
             incomplete, ...note, ...def.params.map((spec) => paramField(recipe, spec)));
     }).filter(Boolean);
     $('wiz-recipes').replaceChildren(...nodes);
+    $('wiz-recipes-empty').hidden = wiz.recipes.length > 0;
     markIncomplete();
+}
+
+function renderGallery() {
+    $('wiz-gallery').replaceChildren(...wiz.scan.catalog.map((c) => {
+        const card = el('button', {type: 'button', className: 'btn btn-outline-secondary btn-sm wiz-card', dataset: {recipe: c.id}},
+            el('strong', {textContent: c.title}), el('small', {className: 'text-muted', textContent: c.description || ''}));
+        card.setAttribute('aria-label', `Add recipe: ${c.title}`);
+        card.addEventListener('click', () => {
+            wiz.recipes.push({id: c.id, uid: ++wiz.uid, params: {}});
+            renderRecipes();
+            scheduleBuild();
+            const form = $('wiz-recipes').lastElementChild;  // opens the form: first control, or the card when it has none
+            (form?.querySelector('[data-param]') || form)?.focus();
+        });
+        return el('div', {className: 'col-md-6'}, card);
+    }));
 }
 
 // ---- contrast pairs -----------------------------------------------------------------------------
@@ -295,18 +309,24 @@ async function loadScan(task) {
     } catch (e) {
         if (seq !== wiz.scanSeq) return;
         wiz.scan = null;
+        wiz.scanError = true;
         wiz.seq++;  // an in-flight build must not paint a stale preview
         showError(`Scan failed: ${e.message}`);
         setEnabled(false);
         $('wiz-task').disabled = false;  // allow retrying another task
+        WizardSteps.render();
         return;
     }
     showError('');
     setEnabled(true);
+    wiz.scanError = false;
+    wiz.buildError = false;
+    wiz.edit++;
     wiz.scan = data;
     wiz.recipes = [];
     wiz.pairs = [];
     wiz.preview = null;
+    wiz.model = null;
     wiz.optKey = null;
     $('wiz-task').replaceChildren(...data.tasks.map((t) => option(t)));
     $('wiz-task').value = data.task;
@@ -317,14 +337,50 @@ async function loadScan(task) {
     }));
     if (!wiz.nameEdited) $('wiz-name').value = `${data.task}_model`;
     if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath();
-    $('wiz-recipe-add').replaceChildren(...data.catalog.map((c) => option(c.id, c.title)));
-    $('wiz-recipe-add').dispatchEvent(new Event('change'));
-    const current = $('wiz-nuisance').value;
-    $('wiz-nuisance').replaceChildren(...Object.keys(data.nuisance_presets).map((n) => option(n)), option('custom', 'custom...'));
-    $('wiz-nuisance').value = current || 'none';
+    const current = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
+    const radio = (n, label) => {
+        const input = el('input', {type: 'radio', name: 'wiz-nuisance', value: n, id: `wiz-nuisance-radio-${n}`, className: 'form-check-input'});
+        return el('div', {className: 'form-check small'}, input, el('label', {className: 'form-check-label', htmlFor: input.id, textContent: label}));
+    };
+    $('wiz-nuisance').replaceChildren($('wiz-nuisance').querySelector('legend'),
+        ...Object.keys(data.nuisance_presets).map((n) => radio(n, n)), radio('custom', 'Custom list'));
+    const keep = $('wiz-nuisance').querySelector(`input[value="${current}"]`) || $('wiz-nuisance').querySelector('input[value=none]');
+    keep.checked = true;
+    if (keep.value === 'custom') $('wiz-nuisance-details').open = true;
+    renderGallery();
     renderRecipes();
     renderPairs();
+    WizardSteps.render();
     build();
+}
+
+// ---- live readiness check (shared panel) ------------------------------------------------------------
+// The button needs a successful, current build: the job checks exactly the model shown in the summary.
+function updateCheck() {
+    const ok = !!(wiz.scan && wiz.model && !wiz.buildError && wiz.edit === wiz.built);
+    $('wiz-check').disabled = !ok;
+    $('wiz-check-hint').textContent = ok ? '' : 'Build a valid preview first';
+    const target = $('wiz-readiness');
+    const note = target.querySelector('.wiz-stale');
+    const stale = wiz.checked !== null && wiz.checked !== wiz.edit;
+    if (stale && !note) {
+        const n = el('div', {className: 'small text-muted wiz-stale', textContent: 'Out of date: the choices changed after this check. Run it again.'});
+        n.setAttribute('aria-live', 'off');  // the panel is a live region; this note must not announce
+        target.append(n);
+    } else if (!stale && note) note.remove();
+}
+
+function runCheck() {
+    const run = ++wiz.runSeq;
+    const edit = wiz.edit;
+    wiz.checked = null;
+    updateCheck();
+    ReadinessPanel.run({
+        target: $('wiz-readiness'),
+        body: {config: {BIDS_DIR: wiz.scan.bids_dir || WIZ.bidsDir, FMRIPREP_DIR: wiz.scan.fmriprep_dir || WIZ.fmriprepDir, SPACE: WIZ.space, TASKS: [$('wiz-task').value]},
+               model_json: wiz.model, validator: 'off', actions: ['stats']},
+        onDone: () => { if (run === wiz.runSeq) { wiz.checked = edit; updateCheck(); } },  // an older run must not mark a newer one
+    });
 }
 
 async function save(overwrite = false) {
@@ -349,18 +405,9 @@ async function save(overwrite = false) {
 }
 
 function init() {
-    const nuisance = $('wiz-nuisance');
     $('wiz-task').addEventListener('change', () => loadScan($('wiz-task').value));
-    $('wiz-add-recipe').addEventListener('click', () => {
-        if (!$('wiz-recipe-add').value) return;
-        wiz.recipes.push({id: $('wiz-recipe-add').value, uid: ++wiz.uid, params: {}});
-        renderRecipes();
-        scheduleBuild();
-    });
-    $('wiz-recipe-add').addEventListener('change', () => {
-        $('wiz-recipe-help').textContent = wiz.scan?.catalog.find((c) => c.id === $('wiz-recipe-add').value)?.description || '';
-    });
-    nuisance.addEventListener('change', () => { $('wiz-nuisance-custom').hidden = nuisance.value !== 'custom'; scheduleBuild(); });
+    $('wiz-form').addEventListener('change', (e) => { if (e.target.name === 'wiz-nuisance') scheduleBuild(); });
+    $('wiz-nuisance-custom').addEventListener('input', () => { $('wiz-nuisance-radio-custom').checked = true; });  // typing means "use it"
     $('wiz-nuisance-custom').addEventListener('change', scheduleBuild);
     $('wiz-auto-contrasts').addEventListener('change', scheduleBuild);
     $('wiz-add-pair').addEventListener('click', () => { wiz.pairs.push({name: '', positive: [], negative: []}); renderPairs(); });
@@ -368,15 +415,11 @@ function init() {
         wiz.nameEdited = true; if (!wiz.pathEdited) $('wiz-save-path').value = defaultSavePath(); scheduleBuild(); });
     $('wiz-save-path').addEventListener('input', () => { wiz.pathEdited = true; });
     $('wiz-save').addEventListener('click', () => save());
-    $('wiz-check').addEventListener('click', async () => {
-        clearTimeout(wiz.timer);
-        $('wiz-check').disabled = true;
-        $('wiz-check').textContent = 'Checking...';
-        try { await build(true); } finally { $('wiz-check').textContent = 'Check readiness'; $('wiz-check').disabled = !wiz.scan; }
-    });
+    $('wiz-check').addEventListener('click', runCheck);
     for (const id of ['wiz-recipes', 'wiz-pair-table']) {
         $(id).addEventListener('focusout', () => setTimeout(refreshOptions, 0));
     }
+    WizardSteps.init();
     loadScan('');
 }
 

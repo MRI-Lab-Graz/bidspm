@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.browser_support import chromium_available, make_dataset, start_server, sync_playwright
+from tests.browser_support import (chromium_available, make_dataset, start_server, sync_playwright, go_to_stage)
 
 
 @unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
@@ -26,6 +26,7 @@ class TestPreflightPanel(unittest.TestCase):
     def open_page(self):
         page = self.browser.new_page()
         page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="networkidle")
+        go_to_stage(page, "run")  # readiness controls, terminal and Run live in the last stage
         return page
 
     def test_button_renders_a_blocked_report_with_fix_hints(self):
@@ -38,6 +39,25 @@ class TestPreflightPanel(unittest.TestCase):
         self.assertIn("blocked", page.inner_text("#preflight-panel").lower())  # the test project has no fMRIPrep tree
         self.assertTrue(page.locator("#preflight-panel .preflight-fix").count() >= 1)
         self.assertEqual(errors, [])
+
+    def test_check_readiness_sends_what_run_will_use(self):
+        """The job signature must equal the /run one: actions and the skip flag ride along."""
+        import json
+        page = self.open_page()
+        go_to_stage(page, "options")
+        for name in ("smooth", "stats", "dataset", "report"):
+            page.check(f"input[name=action][value={name}]")
+        page.uncheck("input[name=action][value=smooth]")
+        go_to_stage(page, "run")
+        sent = []
+        page.route("**/api/preflight/start", lambda r: (sent.append(json.loads(r.request.post_data)),
+                                                        r.fulfill(status=500, body="{}", content_type="application/json")))
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .preflight-verdict")
+        self.assertEqual(sorted(sent[0]["actions"]), ["dataset", "report", "stats"])
+        self.assertEqual(sent[0]["skip_model_validation"], page.evaluate("document.getElementById('skip_validation').checked"))
+        self.assertIn("config", sent[0])
+        self.assertIn("validator", sent[0])
 
     def test_validator_select_defaults_to_auto(self):
         self.assertEqual(self.open_page().input_value("#validator-mode"), "auto")
@@ -82,7 +102,7 @@ class TestPreflightPanel(unittest.TestCase):
         self.assertIn("500", page.evaluate("terminal.innerText"))
 
     def test_preflight_non_json_response_shows_blocked_failure(self):
-        page = self.run_with_route("/api/preflight", 500, "<html>boom</html>", "text/html")
+        page = self.run_with_route("/api/preflight/start", 500, "<html>boom</html>", "text/html")
         page.click("#btn-preflight")
         page.wait_for_selector("#preflight-panel .preflight-verdict")
         self.assertIn("Readiness check failed", page.inner_text("#preflight-panel"))
@@ -109,7 +129,7 @@ class TestPreflightPanel(unittest.TestCase):
     def test_note_and_checking_status_are_shown(self):
         page = self.open_page()
         self.assertIn("saved project settings", page.inner_text("#preflight-note"))
-        page.route("**/api/preflight", lambda r: None)  # never answered: the status line stays
+        page.route("**/api/preflight/start", lambda r: None)  # never answered: the status line stays
         page.click("#btn-preflight")
-        page.wait_for_selector("#preflight-panel .preflight-status")
+        page.wait_for_selector("#preflight-panel .rp-status")
         self.assertIn("Checking readiness", page.inner_text("#preflight-panel"))

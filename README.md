@@ -218,24 +218,54 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 python bidspm.py --preflight -s config/config.json [--validator auto|prism|bids|skip | --skip-validator]
 ```
 
-It prints a JSON report (`verdict`: `ready`, `warnings` or `blocked`) and exits 1 if blocked. In the GUI the analysis page has a
-"Check readiness" button and a validator select; errors block Run (smooth/stats/dataset).
+It prints a JSON report (`verdict`: `ready`, `warnings` or `blocked`) and exits 1 if blocked. With `--progress` it also writes
+progress lines to stderr; stdout stays pure JSON.
+
+```bash
+python bidspm.py --preflight --progress -s config/config.json
+```
+
+In the GUI the readiness check lives in the last stage ("Review and run") of the analysis page, next to a validator select;
+errors block Run (smooth/stats/dataset). While it runs the panel shows the current phase, a per-subject counter for the
+per-subject checks, and errors as they are found; **Cancel** stops the check. The GUI starts a check with
+`/api/preflight/start` and follows it on `/api/preflight/stream/<job>` (cancel: `/api/preflight/cancel/<job>`); at most 3
+readiness checks run at once.
+
+`/run` reuses a passing result (`ready` or `warnings`) for identical inputs for 10 minutes instead of checking again.
+Dataset edits made in that window are not noticed. Any change of what the check covers invalidates the result: the BIDS
+folder, the fMRIPrep folder, the tasks, the space, the subject selection, the container type, the validator mode, the
+actions, the skip-model-validation flag and the model's content (not its path or timestamp). "Check readiness" sends the
+same actions and flag as Run, so a passing check is reused by the next Run when nothing was changed in between.
 
 Validator modes: `auto` (default: PRISM if the BIDS root has a `project.json`, otherwise plain BIDS), `prism` (PRISM + BIDS, forced), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
 is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.
 
 The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.
 
+## Analysis page stages
+
+The analysis page shows one stage at a time: **Folders**, **Model**, **Options**, **Review and run**. Next is enabled when the
+current stage is valid:
+
+- Folders: working directory, BIDS folder and fMRIPrep folder are set (Derivatives defaults to the Working Directory)
+- Model: a models file is chosen
+- Options: at least one action is selected
+
+Finished stages show a one-line summary under their button. The last stage you were on is remembered per project, and
+`#stage=folders|model|options|run` in the URL opens a stage directly (a deep link can skip ahead; the server still checks
+everything on Run). The run controls and the readiness check are in the last stage.
+
 ## Model wizard
 
 "New model" on the analysis page opens a wizard that builds a first-level BIDS Stats Model from the events files of your
-project, so common models need no hand-written JSON. Five steps:
+project, so common models need no hand-written JSON. It is a one-step-at-a-time stepper with a live summary rail; Next is blocked
+with a reason when the input of a step is incomplete. Five steps:
 
 1. **Task and conditions**: pick the task; the wizard scans the events files (`trial_type` values and other columns) of all subjects. Uncheck conditions here to exclude them from the model.
-2. **Recipes**: shape the conditions (below). Recipes are applied in order.
+2. **Recipes**: a gallery of four recipe cards (below); click one to add it. Recipes are applied in order.
 3. **Nuisance**: a confound preset (e.g. motion6) or a custom comma-separated list of confound columns.
 4. **Contrasts**: generated automatically (one per condition) plus simple pairs.
-5. **Review and save**: shows the generated names live; "Check readiness" runs the preflight for the proposed model (it is slow on large studies, so the live preview skips it), and saving always includes it.
+5. **Review and save**: shows the generated names live; "Check readiness" runs the preflight for the proposed model (it is slow on large studies, so the live preview skips it); saving does not repeat it.
 
 Recipes:
 
@@ -249,7 +279,7 @@ get a `v` prefix in the generated column names (`2` becomes `v2`).
 
 Splits with more than one value (or with the original kept) rename the split cells to the output column, so each regressor is a different condition in SPM (e.g. `valid_item.valid_item` and `invalid_item.invalid_item`); a single-value split keeps `valid_item.item`.
 
-The preflight verdict is shown before saving. Saving is still allowed when preflight reports data problems (for example events
+The readiness verdict is shown in the review step before saving. Saving is still allowed when preflight reports data problems (for example events
 missing for one subject), so you can fix the data afterwards.
 
 Contrasts are the basics only (auto + simple pairs). For anything else (weighted, F-contrasts, ...) save the model and open it in
@@ -374,6 +404,8 @@ Measured on a 32-core machine (study 132, 3 subjects in parallel, stats only): 8
   subjects at once. The GUI's **Suggest** button proposes a value from your CPU count and free memory (about 4 GB per worker).
 - **SPM Results export is opt-in** (`--results`, or the checkbox in the GUI): it costs about a third of the per-subject time
   on short runs. The `report` action needs it and turns it on automatically.
+- **Readiness check.** A 100-subject study checks in about 3 s without the dataset validator and about 17 s with it; the
+  validator dominates the time.
 - The BIDS dataset is validated by the first container only, and the atlases are unpacked at build time (no warm-up subject).
 
 ## Checking a run log

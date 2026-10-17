@@ -41,7 +41,8 @@ var modelEditorInputEntityValues = {};
 var modelEditorParticipantsInfo = emptyParticipantsInfo();
 var showModelTechnicalPaths = false;
 const MODEL_ADVANCED_FIELDS_STORAGE_KEY = 'bidspm_model_editor_show_advanced';
-var showModelAdvancedFields = localStorage.getItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY) === '1';
+var showModelAdvancedFields = false;
+try { showModelAdvancedFields = localStorage.getItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY) === '1'; } catch (e) { /* storage blocked */ }
 
 // ParametricModulations, Edge.Filter and node/edge Description are rarely used in
 // practice (none of the production models we've checked -- studies/OL.json or any of
@@ -178,7 +179,8 @@ const { openBrowser } = window.BidspmAnalysisBrowser.createBrowserController({
         const input = document.getElementById(`input-${targetKey}`);
         if (!input) return;
         input.value = path;
-        input.dispatchEvent(new Event('change'));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
     }
 });
 

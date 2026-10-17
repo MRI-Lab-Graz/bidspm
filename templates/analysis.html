@@ -9,8 +9,8 @@
 {% endblock %}
 
 {% block content %}
-{% macro path_input(key, label, value, kind='dir', col='col-md-6') %}
-<div class="{{ col }}">
+{% macro path_input(key, label, value, kind='dir', col='col-md-6', stage='') %}
+<div class="{{ col }}"{% if stage %} data-stage="{{ stage }}"{% endif %}>
     <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">{{ label }}</label>
     <div class="input-group input-group-sm">
         <input type="text" class="form-control dynamic-input border-secondary-subtle" data-key="{{ key }}" id="input-{{ key }}" value="{{ value }}">
@@ -28,18 +28,18 @@
                     <i class="fas fa-folder-open me-2"></i>Load
                 </button>
                 
-                <div class="vr mx-2"></div>
+                <div class="vr mx-2" data-stage="run"></div>
                 
-                <button type="button" class="btn btn-success" id="btn-save-start">
+                <button type="button" class="btn btn-success" id="btn-save-start" data-stage="run">
                     <i class="fas fa-play me-2"></i>Save & Run
                 </button>
-                <button type="button" class="btn btn-outline-primary" id="btn-save-only">
+                <button type="button" class="btn btn-outline-primary" id="btn-save-only" data-stage="run">
                     <i class="fas fa-save me-2"></i>Save
                 </button>
-                <button type="button" class="btn btn-warning text-dark" id="btn-run-cached">
+                <button type="button" class="btn btn-warning text-dark" id="btn-run-cached" data-stage="run">
                     <i class="fas fa-redo me-2"></i>Run
                 </button>
-                <button type="button" class="btn btn-danger" id="btn-stop">
+                <button type="button" class="btn btn-danger" id="btn-stop" data-stage="run">
                     <i class="fas fa-stop me-2"></i>Stop
                 </button>
                 
@@ -67,55 +67,44 @@
     <div class="row">
         <!-- Top Section: Form -->
         <div class="col-12">
-            <!-- Guided stepper (dismiss hides to localStorage) -->
-            <div id="analysis-stepper" class="px-4 pt-3 pb-2 border-bottom mb-0" style="background:var(--bs-light,#f8f9fa);">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <span class="small fw-bold text-muted text-uppercase" style="letter-spacing:.05em;">
-                        <i class="fas fa-map-signs me-1"></i> Setup Guide
-                    </span>
-                    <button type="button" class="btn-close btn-sm" id="stepper-dismiss" title="Dismiss guide"></button>
-                </div>
-                <div class="d-flex gap-2 align-items-center flex-wrap" id="stepper-steps">
-                    <button type="button" class="btn btn-sm stepper-step active" data-step="1" data-target="collapseSettings">
-                        <span class="stepper-num">1</span> Folders
+            <!-- Stage strip: one stage of the form is shown at a time (static/js/analysis_stages.js) -->
+            <nav aria-label="Analysis stages" id="analysis-stages" class="px-4 pt-3 pb-2 border-bottom mb-0 analysis-stage-strip">
+                <div class="d-flex gap-2 align-items-start flex-wrap" id="stage-buttons">
+                    <button type="button" class="btn btn-sm stage-btn upcoming" data-stage-btn="folders">
+                        <span class="stage-btn-num">1</span> Folders
+                        <small class="stage-btn-summary d-block"></small>
                     </button>
-                    <i class="fas fa-chevron-right text-muted small"></i>
-                    <button type="button" class="btn btn-sm stepper-step" data-step="2" data-target="analysis-model-workspace-section">
-                        <span class="stepper-num">2</span> Model
+                    <button type="button" class="btn btn-sm stage-btn upcoming" data-stage-btn="model">
+                        <span class="stage-btn-num">2</span> Model
+                        <small class="stage-btn-summary d-block"></small>
                     </button>
-                    <i class="fas fa-chevron-right text-muted small"></i>
-                    <button type="button" class="btn btn-sm stepper-step" data-step="3" data-target="analysis-execution-section">
-                        <span class="stepper-num">3</span> Options
+                    <button type="button" class="btn btn-sm stage-btn upcoming" data-stage-btn="options">
+                        <span class="stage-btn-num">3</span> Options
+                        <small class="stage-btn-summary d-block"></small>
                     </button>
-                    <i class="fas fa-chevron-right text-muted small"></i>
-                    <button type="button" class="btn btn-sm stepper-step" data-step="4" data-target="analysis-action-bar">
-                        <span class="stepper-num">4</span> Run
+                    <button type="button" class="btn btn-sm stage-btn upcoming" data-stage-btn="run">
+                        <span class="stage-btn-num">4</span> Review and run
+                        <small class="stage-btn-summary d-block"></small>
                     </button>
                 </div>
-                <div class="mt-1">
-                    <small class="text-muted" id="stepper-hint">Fill in the folder paths for your BIDS dataset, then move on to selecting a model.</small>
+                <h2 class="h6 mt-3 mb-1" id="stage-heading" tabindex="-1"></h2>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="stage-back">Back</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="stage-next">Next</button>
+                    <small class="text-muted" id="stage-hint" aria-live="polite"></small>
                 </div>
-            </div>
+            </nav>
             <div class="p-4 analysis-config-shell">
                 <form id="bidspm-form">
-                    <!-- Accordion for Detailed Sections -->
-                    <div class="accordion accordion-flush pt-3 border-top analysis-config-accordion" id="formAccordion">
-                        
-                        <!-- Section: Settings Details -->
-                        <div class="accordion-item shadow-none mb-2 analysis-config-item">
-                            <h2 class="accordion-header" id="headingSettings">
-                                <button class="accordion-button rounded shadow-none py-2 text-uppercase fw-bold x-small analysis-config-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSettings" aria-expanded="true">
-                                    <i class="fas fa-sliders-h me-2"></i> Settings Details
-                                </button>
-                            </h2>
-                            <div id="collapseSettings" class="accordion-collapse collapse show" data-bs-parent="#formAccordion">
-                                <div class="accordion-body px-0 pt-3 analysis-config-body">
+                    <div id="stage-summary" class="border rounded p-2 mb-3 small" data-stage="run" role="group" aria-label="Summary of your choices"></div>
+                    <!-- Settings rows; each row carries its own data-stage, the wrappers stay for id lookups -->
+                    <div id="formAccordion">
+                        <div id="collapseSettings">
                                     <div id="settings-form-static" class="row g-3">
-                                        {{ path_input('WD', 'Working Directory', project.config.output_folder if project else '', 'dir', 'col-md-6') }}
-                                        {{ path_input('BIDS_DIR', 'BIDS Folder', project.config.bids_folder if project else '', 'dir', 'col-md-6') }}
-                                        {{ path_input('DERIVATIVES_DIR', 'Derivatives Folder', project.config.derivatives_folder if project else '', 'dir', 'col-md-6') }}
-                                        {{ path_input('FMRIPREP_DIR', 'fMRIPrep Folder', project.config.fmriprep_folder if project else '', 'dir', 'col-md-6') }}
-                                        {% call path_input('MODELS_FILE', 'Models File', project.config.models_file if project else '', 'file', 'col-12') %}
+                                        {{ path_input('WD', 'Working Directory', project.config.output_folder if project else '', 'dir', 'col-md-6', 'folders') }}
+                                        {{ path_input('BIDS_DIR', 'BIDS Folder', project.config.bids_folder if project else '', 'dir', 'col-md-6', 'folders') }}
+                                        {{ path_input('FMRIPREP_DIR', 'fMRIPrep Folder', project.config.fmriprep_folder if project else '', 'dir', 'col-md-6', 'folders') }}
+                                        {% call path_input('MODELS_FILE', 'Models File', project.config.models_file if project else '', 'file', 'col-12', 'model') %}
                                             <div id="model-validation-status" class="mt-2" style="display:none;">
                                                 <small class="d-flex align-items-center gap-2">
                                                     <span id="model-validation-icon"></span>
@@ -124,27 +113,35 @@
                                             </div>
                                         {% endcall %}
                                         <!-- SPACE / FWHM / VERBOSITY -->
-                                        <div class="col-md-5">
+                                        <div class="col-md-6" data-stage="folders">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Space</label>
                                             <input type="text" class="form-control form-control-sm dynamic-input" data-key="SPACE" id="input-SPACE" list="spaces-list" placeholder="e.g. MNI152NLin2009cAsym" value="{{ project.config.space if project else 'MNI152NLin2009cAsym' }}">
                                             <datalist id="spaces-list"></datalist>
                                         </div>
-                                        <div class="col-md-3">
+                                        <div class="col-md-6" data-stage="folders">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">FWHM (mm)</label>
                                             <input type="number" class="form-control form-control-sm dynamic-input" data-key="FWHM" id="input-FWHM" step="0.1" value="{{ project.config.fwhm if project else 6 }}">
                                         </div>
-                                        <div class="col-md-4">
-                                            <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Verbosity (0-3)</label>
-                                            <input type="number" class="form-control form-control-sm dynamic-input" data-key="VERBOSITY" id="input-VERBOSITY" step="1" min="0" max="3" value="{{ project.config.verbosity if project else 2 }}">
-                                        </div>
+                                        <details class="col-12" data-stage="folders" id="folders-advanced">
+                                            <summary class="small text-muted">Advanced</summary>
+                                            <div class="row g-3 mt-0">
+                                                {% call path_input('DERIVATIVES_DIR', 'Derivatives Folder', project.config.derivatives_folder if project else '', 'dir', 'col-md-6') %}
+                                                    <div class="form-text x-small mt-0">Defaults to the Working Directory when empty</div>
+                                                {% endcall %}
+                                                <div class="col-md-6">
+                                                    <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Verbosity (0-3)</label>
+                                                    <input type="number" class="form-control form-control-sm dynamic-input" data-key="VERBOSITY" id="input-VERBOSITY" step="1" min="0" max="3" value="{{ project.config.verbosity if project else 2 }}">
+                                                </div>
+                                            </div>
+                                        </details>
                                         <!-- TASKS -->
-                                        <div class="col-12">
+                                        <div class="col-12" data-stage="folders">
                                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Tasks</label>
                                             <div id="tasks-container" class="border rounded p-2 bg-light d-flex flex-wrap gap-2 analysis-tasks-container" style="min-height: 38px;">
                                                 <span class="text-muted x-small italic">Select BIDS folder to detect tasks...</span>
                                             </div>
                                         </div>
-                                        <div class="col-12 text-end">
+                                        <div class="col-12 text-end" data-stage="run">
                                             <select class="form-select form-select-sm d-inline-block w-auto" id="validator-mode" title="Dataset validator used by the readiness check">
                                                 <option value="auto">Validator: auto (PRISM if project.json)</option>
                                                 <option value="prism">Validator: PRISM + BIDS</option>
@@ -160,13 +157,10 @@
                                             <div id="preflight-panel" class="mt-2 text-start"></div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
                         </div>
+                    </div> <!-- End settings rows -->
 
-                    </div> <!-- End Accordion -->
-
-                    <div class="mt-4 pt-3 border-top" id="analysis-model-workspace-section">
+                    <div class="mt-4 pt-3 border-top" id="analysis-model-workspace-section" data-stage="model">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <div>
                                 <label class="form-label small fw-bold text-muted text-uppercase mb-1">Model Workspace</label>
@@ -234,7 +228,7 @@
                         <div id="model-editor-status" class="mt-2"></div>
                     </div>
 
-                    <div class="row mt-4 pt-3 border-top analysis-execution-section">
+                    <div class="row mt-4 pt-3 border-top analysis-execution-section" data-stage="options">
                         <div class="col-md-6 border-end analysis-execution-col">
                             <label class="form-label small fw-bold text-muted text-uppercase mb-2">Actions</label>
                             <div class="d-flex flex-column gap-1">
@@ -342,20 +336,19 @@
                         </div>
                     </div>
 
-                    <div id="validation-result" class="mt-3"></div>
-                    <div id="path-alerts" class="mt-2"></div>
+                    <div id="validation-result" class="mt-3" data-stage="run"></div>
+                    <div id="path-alerts" class="mt-2" data-stage="run"></div>
                 </form>
             </div>
         </div>
     </div>
 
-    <!-- Container Options + Preflight -->
-    <div class="row mb-3">
+    <!-- Container Options -->
+    <div class="row mb-3" data-stage="options">
         <div class="col-12">
             <div class="p-3 analysis-config-shell">
-                <div class="d-flex align-items-center justify-content-between mb-3">
-                    <span class="fw-bold text-uppercase x-small text-primary"><i class="fas fa-box me-2"></i>Container Options</span>
-                </div>
+                <details id="options-advanced">
+                <summary class="fw-bold text-uppercase x-small text-primary mb-3"><i class="fas fa-box me-2"></i>Advanced: container options</summary>
                 <div class="row g-3 align-items-start">
                     <div class="col-md-6">
                         <label class="form-label x-small fw-bold text-muted text-uppercase mb-2">Container Type</label>
@@ -396,12 +389,13 @@
                         </div>
                     </div>
                 </div>
+                </details>
             </div>
         </div>
     </div>
 
     <!-- Bottom Action Bar -->
-    <div class="row mb-3">
+    <div class="row mb-3" data-stage="run">
         <div class="col-12">
             <div class="d-flex flex-wrap gap-2 p-3 align-items-center analysis-action-bar">
                 <button type="button" class="btn btn-success" onclick="document.getElementById('btn-save-start').click()">
@@ -423,7 +417,7 @@
     <!-- Run Issues: warnings/errors pulled out of the scrolling terminal log so
          they don't get missed (e.g. "No regressor found for condition ...",
          "No contrast to build."). Populated live as the run streams. -->
-    <div class="row mt-4 d-none" id="run-issues-row">
+    <div class="row mt-4 d-none" id="run-issues-row" data-stage="run">
         <div class="col-12">
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-warning-subtle d-flex justify-content-between align-items-center py-2">
@@ -440,7 +434,7 @@
     </div>
 
     <!-- Bottom Section: Terminal -->
-    <div class="row mt-4 mb-5">
+    <div class="row mt-4 mb-5" data-stage="run">
         <div class="col-12">
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
@@ -702,10 +696,11 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css', v=static_version('css/analysis.css')) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stages.css', v=static_version('css/stages.css')) }}">
 {% endblock %}
 
 {% block scripts %}
-{% for name in ['analysis_stepper', 'analysis_model_schema', 'transformer_model_x_domains', 'analysis_model_mutations', 'analysis_model_presets', 'analysis_model_hints', 'browse_breadcrumb', 'analysis_browser', 'analysis_contrast_builder', 'analysis_preview_validation', 'analysis_node_panels', 'transformer_builder_path_utils', 'model_editor_launch', 'model_editor_transformer_payload', 'analysis_nuisance_picker', 'analysis_json_editor', 'analysis_participants_modal', 'analysis_coverage_modal'] %}
+{% for name in ['analysis_model_schema', 'transformer_model_x_domains', 'analysis_model_mutations', 'analysis_model_presets', 'analysis_model_hints', 'browse_breadcrumb', 'analysis_browser', 'analysis_contrast_builder', 'analysis_preview_validation', 'analysis_node_panels', 'transformer_builder_path_utils', 'model_editor_launch', 'model_editor_transformer_payload', 'analysis_nuisance_picker', 'analysis_json_editor', 'analysis_participants_modal', 'analysis_coverage_modal'] %}
 <script src="{{ url_for('static', filename='js/' ~ name ~ '.js', v=static_version('js/' ~ name ~ '.js')) }}"></script>
 {% endfor %}
 <script>
@@ -713,7 +708,7 @@
     var currentProjectId = '{{ current_project_id or "" }}';
     var hasProject = {{ 'true' if project else 'false' }};
 </script>
-{% for name in ['analysis_run', 'analysis_project_form', 'analysis_preflight', 'analysis_api_actions', 'analysis_buttons', 'analysis_model_editor'] %}
+{% for name in ['analysis_run', 'analysis_project_form', 'readiness_panel', 'analysis_preflight', 'analysis_api_actions', 'analysis_buttons', 'analysis_model_editor', 'analysis_stages'] %}
 <script src="{{ url_for('static', filename='js/' ~ name ~ '.js', v=static_version('js/' ~ name ~ '.js')) }}"></script>
 {% endfor %}
 {% endblock %}

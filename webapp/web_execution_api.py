@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from lib.preflight import run_preflight_from_config
+from lib.preflight import recent, remember, run_preflight_from_config, signature
 from lib.project_manager import GLOBAL_CONFIG_DIR
 
 
@@ -198,9 +198,14 @@ def register_execution_routes(
                 return reject(f'Failed to read settings file: {exc}')
             if not isinstance(config, dict):
                 return reject('Failed to read settings file: expected a JSON object')
-            preflight = run_preflight_from_config(
-                config, model=data.get('model') or '', validator=data.get('validator') or 'auto',
-                skip_model_validation=bool(data.get('skip_validation')), actions=actions)
+            gate = dict(model=data.get('model') or '', validator=data.get('validator') or 'auto',
+                        skip_model_validation=bool(data.get('skip_validation')), actions=actions)
+            sig = signature(config, gate['model'], gate['validator'], actions, gate['skip_model_validation'])
+            if recent(sig):
+                preflight = {'verdict': 'ready'}  # a recent passing check for identical inputs: skip repeating it
+            else:
+                preflight = run_preflight_from_config(config, **gate)
+                remember(sig, preflight)  # ignores blocked
             if preflight['verdict'] == 'blocked':
                 return reject('Preflight check failed: fix the listed problems before running.', preflight=preflight)
 

@@ -54,6 +54,7 @@ async function setFullFormData(data) {
         unifiedStudyConfig = data.study_content;
         await syncInternalToForm();
     }
+    window.analysisStages?.refresh();  // fields were assigned without events
 }
 
 document.getElementById('suggest_workers')?.addEventListener('click', async () => {
@@ -261,7 +262,7 @@ function setupStaticListeners() {
         advancedToggle.checked = showModelAdvancedFields;
         advancedToggle.addEventListener('change', (e) => {
             showModelAdvancedFields = e.target.checked;
-            localStorage.setItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY, showModelAdvancedFields ? '1' : '0');
+            try { localStorage.setItem(MODEL_ADVANCED_FIELDS_STORAGE_KEY, showModelAdvancedFields ? '1' : '0'); } catch (err) { /* storage blocked */ }
             if (modelEditorDraft) renderModelAccordionEditor();
         });
     }
@@ -342,6 +343,7 @@ async function syncInternalToForm() {
 
     const skipVal = document.getElementById('skip_validation');
     if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
+    window.analysisStages?.refresh();  // values were assigned without events
 }
 
 window.addEventListener('DOMContentLoaded', initApp);

@@ -7,6 +7,8 @@ state = {"regressors": ["column.value", ...], "instructions": [...], "pmods": [.
 """
 import copy
 import csv
+import fnmatch
+import os
 import re
 from pathlib import Path
 
@@ -348,10 +350,29 @@ def build_model(choices, scan):
                                         "transformations": state["instructions"], "warnings": state["warnings"]}}
 
 
+def func_files(bids_dir):
+    """Every file in sub-*/func and sub-*/ses-*/func: a few scandir calls instead of a walk over the imaging folders."""
+    root = Path(bids_dir)
+    out = []
+    for sub in sorted(root.glob("sub-*")):
+        for func in [sub / "func", *sorted(sub.glob("ses-*/func"))]:
+            try:
+                out += [Path(e.path) for e in os.scandir(func) if e.is_file()]
+            except OSError:
+                continue
+    return out
+
+
+def bids_tasks(bids_dir):
+    """Task names seen in the file names of the func folders (same rule as lib.core.discover_tasks, minus the slow walk)."""
+    return sorted({p.name.split("_task-", 1)[1].split("_")[0].split(".")[0] for p in func_files(bids_dir) if "_task-" in p.name})
+
+
 def scan_events(bids_dir, task, max_files=300, max_values=200):
     """Union of every events column and value over all subjects of a task (plus a dataset-level events file)."""
     root = Path(bids_dir)
-    files = sorted(set(root.glob(f"sub-*/**/func/*task-{task}_*events.tsv")) | set(root.glob(f"task-{task}_events.tsv")))
+    pattern = f"*task-{task}_*events.tsv"
+    files = sorted({p for p in func_files(root) if fnmatch.fnmatchcase(p.name, pattern)} | set(root.glob(f"task-{task}_events.tsv")))
     values, numeric_bad, truncated, used = {}, set(), set(), 0
     for path in files[:max_files]:
         try:

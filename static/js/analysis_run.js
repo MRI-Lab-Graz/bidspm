@@ -112,6 +112,7 @@ async function startExecution(payload) {
         result = {error: `request failed: ${e.message}`};
     }
     if (result.preflight) {
+        window.analysisStages?.goTo('run');  // the report must be visible even when started from another stage
         renderPreflight(result.preflight);
         for (const c of result.preflight.checks || []) {
             terminal.innerText += `${c.severity === 'error' ? 'ERROR' : 'WARN'}: ${c.subject ? 'sub-' + c.subject + ': ' : ''}${c.message}\n`;
@@ -120,7 +121,7 @@ async function startExecution(payload) {
     } else if (!result.error) {
         document.getElementById('preflight-panel')?.replaceChildren();  // drop a stale report next to a running job
     }
-    if (result.error) { terminal.innerText += 'ERROR: ' + result.error + '\n'; resetStatus(); return; }
+    if (result.error) { window.analysisStages?.goTo('run'); terminal.innerText += 'ERROR: ' + result.error + '\n'; resetStatus(); return; }
 
     if (result.log_file) {
         terminal.innerText += `--- FOLLOWING NOHUP LOG: ${result.log_file} ---\n`;
