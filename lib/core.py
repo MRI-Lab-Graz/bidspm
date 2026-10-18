@@ -29,6 +29,7 @@ from .spm_standalone import (
     write_estimation_job,
 )
 from .config import Config, ContainerConfig, load_config, load_container_config
+from .model_path import resolve_model_file
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
@@ -1148,24 +1149,11 @@ class Pipeline:
     
     def _resolve_model_file(self) -> bool:
         """Resolve model file path from options or config."""
-        if self.options.model_file:
-            cli_model_path = Path(self.options.model_file).expanduser()
-            if cli_model_path.is_absolute():
-                self.model_file_path = cli_model_path
-            else:
-                # CLI-provided relative paths should resolve from the current working directory first.
-                cwd_candidate = (Path.cwd() / cli_model_path).resolve()
-                derivatives_candidate = self.config.DERIVATIVES_DIR / "models" / cli_model_path
-                self.model_file_path = cwd_candidate if cwd_candidate.exists() else derivatives_candidate
-        elif self.config.MODELS_FILE:
-            cfg_model_path = Path(self.config.MODELS_FILE).expanduser()
-            if cfg_model_path.is_absolute():
-                self.model_file_path = cfg_model_path
-            else:
-                # Keep existing behavior for config values (derivatives/models), with cwd fallback.
-                derivatives_candidate = self.config.DERIVATIVES_DIR / "models" / cfg_model_path
-                cwd_candidate = (Path.cwd() / cfg_model_path).resolve()
-                self.model_file_path = derivatives_candidate if derivatives_candidate.exists() else cwd_candidate
+        if self.options.model_file or self.config.MODELS_FILE:
+            # CLI value: cwd first; config value: derivatives/models first (see lib/model_path.py)
+            self.model_file_path = resolve_model_file(
+                self.options.model_file or self.config.MODELS_FILE, self.config.DERIVATIVES_DIR,
+                cwd_first=bool(self.options.model_file))
         else:
             if self._needs_model():
                 self._log_error("No model file specified for stats action")
