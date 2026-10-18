@@ -24,6 +24,7 @@ from lib.preflight import remember, run_preflight_from_config, signature, valida
 
 MAX_FINISHED_JOBS = 20
 MAX_RUNNING_JOBS = 3
+STREAM_ATTACH_GRACE = 30  # a job nobody streams within this many seconds (page unloaded before start answered) is cancelled
 STREAM_MAX_SECONDS = 1900  # just above the validator's 1800 s timeout
 _JOBS = {}  # insertion-ordered: oldest first
 _JOBS_LOCK = threading.Lock()  # guards _JOBS only; never held while running a check or yielding
@@ -36,6 +37,8 @@ class _Job:
         self.cancel_event = threading.Event()
         self.done_event = threading.Event()
         self.thread = None
+        self.timer = None  # attach-grace timer
+        self.streamed = False  # a stream attached at least once; permanent
         self.final = None  # runner's own `done` event, merged into the terminal one
 
     def add_event(self, event, terminal=False):
@@ -51,6 +54,11 @@ def _evict_finished():
     finished = [i for i, j in _JOBS.items() if j.done_event.is_set()]
     for job_id in finished[:max(0, len(finished) - MAX_FINISHED_JOBS)]:
         del _JOBS[job_id]
+
+
+def _cancel_unattended(job):
+    if not job.streamed and not job.done_event.is_set():
+        job.cancel_event.set()
 
 
 def _work(job, config, kwargs, model_path):
@@ -85,6 +93,8 @@ def _work(job, config, kwargs, model_path):
             pass
     with _JOBS_LOCK:
         job.add_event(terminal, terminal=True)
+        if job.timer is not None:
+            job.timer.cancel()
         _evict_finished()
 
 
@@ -161,6 +171,9 @@ def register_preflight_routes(app: Flask) -> None:
                 kwargs["model"] = model_path
             job.thread = threading.Thread(target=_work, args=(job, config, kwargs, model_path), daemon=True)
             job.thread.start()
+            job.timer = threading.Timer(STREAM_ATTACH_GRACE, _cancel_unattended, (job,))
+            job.timer.daemon = True
+            job.timer.start()
         except Exception as exc:  # noqa: BLE001 - never leave a job that will not run, never an HTML 500
             with _JOBS_LOCK:
                 _JOBS.pop(job_id, None)
@@ -173,6 +186,8 @@ def register_preflight_routes(app: Flask) -> None:
     def api_preflight_stream(job_id: str):
         with _JOBS_LOCK:
             job = _JOBS.get(job_id)
+        if job is not None:
+            job.streamed = True
         start = _from_index()
 
         def generate():
