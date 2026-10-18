@@ -41,12 +41,16 @@ function fetchBidsTasks(bidsDir, force = false) {
     return entry.promise;
 }
 
+// False when the last refreshTasks() failed: saved tasks must not then be called missing (the detection broke, not the task).
+let tasksDetected = true;
+
 async function refreshTasks() {
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value;
     if (!bidsDir) return;
     const container = document.getElementById('tasks-container');
     try {
         const tasks = await fetchBidsTasks(bidsDir, true);
+        tasksDetected = true;
         // a ticked task the dataset does not have stays visible (and saved) until the user unticks it
         const keep = Array.from(container.querySelectorAll('.task-checkbox:checked')).map(cb => cb.value).filter(t => !tasks.includes(t));
         container.innerHTML = '';
@@ -55,7 +59,10 @@ async function refreshTasks() {
         keep.forEach(t => { appendTaskCheckbox(container, t, true).checked = true; });
         const modelVal = document.getElementById('input-MODELS_FILE')?.value;
         if (modelVal) refreshModelTasks();
-    } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
+    } catch (e) {
+        tasksDetected = false;
+        container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>';
+    }
 }
 
 async function getModelContentFromPath(modelPath) {

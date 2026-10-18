@@ -242,6 +242,21 @@ class TestProjectRunOptions(FidelityCase):
         page.wait_for_function("document.getElementById('validation-result').textContent.includes('saved')")
         self.assertEqual(sorted(self.project_config()["tasks"]), ["ghost", "motor"])
 
+    def test_saved_tasks_are_not_called_missing_when_task_detection_failed(self):
+        model = copy.deepcopy(MODEL)
+        model["Input"]["task"] = ["motor", "ghost"]
+        self.new_project(model, tasks=["motor", "ghost"])
+        page = self.browser.new_page()
+        self.pages.append(page)
+        page.route("**/get_bids_tasks*", lambda route: route.fulfill(status=500, body="boom"))
+        page.goto(f"{self.base}/analysis/{self.pid}", wait_until="load")
+        go_to_stage(page, "folders")
+        page.wait_for_function("typeof modelEditorDraft === 'object' && modelEditorDraft !== null")
+        page.wait_for_function("document.querySelectorAll('#tasks-container .task-checkbox:checked').length === 2")
+        text = page.inner_text("#tasks-container")
+        self.assertIn("Error detecting tasks", text)
+        self.assertNotIn("not found in BIDS", text)
+
     def test_run_options_are_restored_and_saved(self):
         self.new_project(actions=["smooth", "bms"], pilot=True, bms_models=["/m/a_smdl.json"], stats_workers=8,
                          node_name="variant1", skip_validation=False)

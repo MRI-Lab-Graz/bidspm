@@ -356,7 +356,7 @@ async function syncInternalToForm() {
             await refreshTasks();
             val.forEach(t => {
                 const cb = document.getElementById(`task-${t}`)
-                    || appendTaskCheckbox(document.getElementById('tasks-container'), t, true);
+                    || appendTaskCheckbox(document.getElementById('tasks-container'), t, tasksDetected);
                 cb.checked = true;
             });
             await refreshSpaces();
