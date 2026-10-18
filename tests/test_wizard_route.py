@@ -1,6 +1,7 @@
 import json
 import tempfile
 import time
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
@@ -237,8 +238,9 @@ def test_cache_entries_expire_after_the_ttl(tmp_path):
     from webapp import web_wizard_api
     body = {**paths(tmp_path), "choices": choices(nuisance="none"), "preflight": False}
     post("/api/wizard/build", body)
+    later = time.monotonic() + web_wizard_api.SCAN_TTL + 1
     with mock.patch("webapp.web_wizard_api.scan_events", wraps=scan_events) as spy, \
-            mock.patch.object(web_wizard_api.time, "monotonic", return_value=time.monotonic() + web_wizard_api.SCAN_TTL + 1):
+            mock.patch.object(web_wizard_api, "time", SimpleNamespace(monotonic=lambda: later)):
         post("/api/wizard/build", body)
     assert spy.call_count == 1
 

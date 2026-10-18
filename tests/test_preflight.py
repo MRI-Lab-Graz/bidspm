@@ -1,8 +1,11 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -245,7 +248,7 @@ def fake_exe(tmp_path_factory):
     """A stand-in prism-validator next to a fake interpreter, so the fake-run tests never need the real tool."""
     bindir = tmp_path_factory.mktemp("bin")
     (bindir / "prism-validator").write_text("")
-    with patch("lib.preflight.sys.executable", str(bindir / "python")):
+    with patch("lib.preflight.sys", SimpleNamespace(executable=str(bindir / "python"))):
         yield
 
 
@@ -318,7 +321,7 @@ def test_timeout_and_oserror_stay_warnings(tmp_path, fake_exe):
 
 
 def test_missing_binary_stays_a_warning(tmp_path):
-    with patch("lib.preflight.sys.executable", str(tmp_path / "python")), patch("lib.preflight.shutil.which", return_value=None):
+    with patch("lib.preflight.sys", SimpleNamespace(executable=str(tmp_path / "python"))), patch("lib.preflight.shutil.which", return_value=None):
         out = check_validator(tmp_path, "prism", run=fake_run("", 0))
     assert [c["severity"] for c in out] == ["warn"] and "not installed" in out[0]["message"]
 
@@ -574,37 +577,36 @@ def test_validator_group_cap_counts_groups(tmp_path, fake_exe):
 
 def _alive(pid):
     try:
-        import os
         os.kill(pid, 0)
-    except OSError:
+    except ProcessLookupError:  # ESRCH: gone
         return False
-    try:  # a zombie is dead for our purposes
+    except PermissionError:  # EPERM: exists, just not ours to signal
+        return True
+    try:  # where /proc exists, a zombie (not yet reaped by init) is dead for our purposes
         return Path(f"/proc/{pid}/stat").read_text().split(")")[1].split()[0] != "Z"
-    except OSError:
-        return False
+    except (OSError, IndexError):
+        return True
 
 
 def test_cancel_kills_the_validator_and_its_children(tmp_path):
-    import threading
-    import time
     bindir = tmp_path / "bin"
     bindir.mkdir()
     pids = tmp_path / "pids"
     exe = bindir / "prism-validator"
     exe.write_text(f"#!{sys.executable}\nimport os, subprocess, time\n"
-                   f"child = subprocess.Popen(['sleep', '30'])\n"
+                   f"child = subprocess.Popen([{sys.executable!r}, '-c', 'import time; time.sleep(30)'])\n"
                    f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
                    f"time.sleep(30)\n")
     exe.chmod(0o755)
     bids, fmriprep = make_trees(tmp_path)
-    cancel = threading.Event()
-    threading.Timer(0.5, cancel.set).start()
-    with patch("lib.preflight.sys.executable", str(bindir / "python")):
+    def ready():  # cancel once the validator has started its child and written both pids
+        return pids.exists() and " " in pids.read_text()
+    with patch("lib.preflight.sys", SimpleNamespace(executable=str(bindir / "python"))):
         start = time.monotonic()
         result = run_preflight(bids_dir=bids, fmriprep_dir=fmriprep, tasks=["x"], space="MNI", validator="bids",
-                               cancelled=cancel.is_set)
+                               cancelled=ready)
         took = time.monotonic() - start
-    assert result["verdict"] == "cancelled" and took < 2.5
+    assert result["verdict"] == "cancelled" and took < 10
     parent, child = map(int, pids.read_text().split())
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline and (_alive(parent) or _alive(child)):

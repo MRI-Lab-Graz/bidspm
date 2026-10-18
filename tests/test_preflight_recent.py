@@ -2,6 +2,7 @@
 import json
 import os
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -126,11 +127,11 @@ def test_remember_stores_a_copy():
 
 
 def test_recent_expires_after_ttl():
-    with patch("lib.preflight.time.monotonic", return_value=1000.0):
+    with patch("lib.preflight.time", SimpleNamespace(monotonic=lambda: 1000.0)):
         preflight.remember("k", READY)
-    with patch("lib.preflight.time.monotonic", return_value=1599.0):
+    with patch("lib.preflight.time", SimpleNamespace(monotonic=lambda: 1599.0)):
         assert preflight.recent("k") is not None
-    with patch("lib.preflight.time.monotonic", return_value=1601.0):
+    with patch("lib.preflight.time", SimpleNamespace(monotonic=lambda: 1601.0)):
         assert preflight.recent("k") is None
 
 
