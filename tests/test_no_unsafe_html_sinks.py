@@ -32,18 +32,18 @@ INTERPOLATION_OK = {  # exact expressions, each reviewed as constant markup / cl
 # through escHtml/escAttr, the rest is constant. file -> sha256[:16] of the WHOLE whitespace-normalised statement, so
 # any edit to a reviewed statement (even appending to its tail) fails the guard until it is re-reviewed.
 REVIEWED = {
-    "transformer_builder_columns.js": {"08e8dcf09d4fea1e", "f12a76fb70a14dfd"},
-    "transformer_builder_model_selection.js": {"092d4807bdf9b2ee", "b0d52757e360d1ab"},
+    "transformer_builder_columns.js": {"08e8dcf09d4fea1e", "f57bce9531e67147"},
+    "transformer_builder_model_selection.js": {"092d4807bdf9b2ee", "114ebb75f3e431dd"},
     "transformer_builder_pipeline.js": {"f9e9e8f92e145a1e", "ab309e14051cd688", "5f5c796d53fcbced",
                                         "781e24ac328816a1", "bee608aed9dc30d4", "bc347d19a317a760"},
-    "transformer_builder_scan_preview.js": {"36b67d7048bfc1f1", "fa7377b080b575f4", "47fcec44719e50d0"},
+    "transformer_builder_scan_preview.js": {"36b67d7048bfc1f1", "3c96d75743f4e1c9", "47fcec44719e50d0"},
 }
 LITERAL = re.compile(r"""\s*(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)\s*""", re.S)
 
 
 def statement(text: str, start: int) -> str:
-    """Text from the sink to the end of its statement: the first `;` outside quotes and template literals."""
-    depth, quote, i = 0, None, start
+    """Text from the sink to the end of its statement: the first `;` outside quotes, template literals and brackets."""
+    depth, nest, quote, i = 0, 0, None, start
     while i < len(text):
         c = text[i]
         if quote:
@@ -57,7 +57,11 @@ def statement(text: str, start: int) -> str:
                 depth -= 1
         elif c in "'\"`":
             quote = c
-        elif c == ";":
+        elif c in "({[":
+            nest += 1
+        elif c in ")}]":
+            nest -= 1
+        elif c == ";" and nest <= 0:  # a `;` inside an arrow-function body does not end the statement
             break
         i += 1
     return text[start:i]
