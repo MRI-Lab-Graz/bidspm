@@ -108,6 +108,17 @@ MORE INFORMATION:
     print(help_text)
 
 
+def _at_least_one(text):
+    """argparse type: a whole number >= 1."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"must be a whole number of at least 1, not {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -163,7 +174,7 @@ def parse_arguments():
     parser.add_argument('--smooth-backend', choices=['spm', 'fast'], default='fast',
                        help='Smoothing implementation: "fast" (default, parallel '
                             'nibabel/scipy, no MATLAB) or "spm" (MATLAB/SPM)')
-    parser.add_argument('--stats-workers', type=int, default=4,
+    parser.add_argument('--stats-workers', type=_at_least_one, default=4,
                        help='Number of subjects to process concurrently for smooth/stats. '
                             'Default 4. Set to 1 to disable parallelism (e.g. for limited '
                             'container concurrency).')
