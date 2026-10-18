@@ -47,7 +47,7 @@ from lib import (
     validate_bids_model,
 )
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
-from lib.safe_paths import has_nul
+from lib.safe_paths import has_nul, in_bids_tree
 from webapp.web_config_fs_api import register_config_fs_routes
 from webapp.web_discovery_model_api import (
     _build_model_warnings,
@@ -356,10 +356,8 @@ def _is_inside_bids_dir(target_path: str) -> bool:
     """Return True if *target_path* is inside any registered BIDS folder."""
     typed = os.path.normpath(os.path.abspath(target_path))
     for target in {typed, os.path.realpath(target_path)}:  # a symlink in either direction must not bypass the guard
-        for bids_dir in _get_all_bids_dirs():
-            for root in {bids_dir, os.path.realpath(bids_dir)}:
-                if target == root or target.startswith(root + os.sep):
-                    return True
+        if any(in_bids_tree(target, bids_dir) for bids_dir in _get_all_bids_dirs()):
+            return True
     return False
 
 

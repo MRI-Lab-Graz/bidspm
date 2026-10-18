@@ -1,6 +1,8 @@
 """Path checks for every GUI route that writes a file or creates a folder."""
+import logging
 import os
 
+log = logging.getLogger(__name__)
 PROTECTED_NAMES = ("dataset_description.json", "participants.tsv")
 
 
@@ -31,6 +33,21 @@ def _inside(path, root):
     return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
+def in_bids_tree(path, root):
+    """True when `path` is inside the BIDS folder `root` but not inside <root>/derivatives (the standard BIDS layout puts
+    derivatives there, and that is where models and outputs belong). Typed and symlink-resolved roots are both tried.
+    A root of `/` means no real BIDS folder is configured: nothing is protected by it (dataset files still are)."""
+    if not root:
+        return False
+    for r in {os.path.abspath(root), os.path.realpath(root)}:
+        if r == os.sep:
+            log.warning("BIDS folder %r is the filesystem root; not used as write protection", root)
+            continue
+        if _inside(path, r) and not _inside(path, os.path.join(r, "derivatives")):
+            return True
+    return False
+
+
 def safe_target(path, base=None, inside=None, protect=(), resolve=None):
     """The real absolute path a GUI write may use, else UnsafePath.
 
@@ -55,12 +72,12 @@ def safe_target(path, base=None, inside=None, protect=(), resolve=None):
     if real_base is not None and not _inside(real, real_base):
         raise UnsafePath(f"{path!r} is outside {base}.", 403)
     name = os.path.basename(real)
-    if name in PROTECTED_NAMES or name.endswith("_events.tsv"):
+    if name.lower() in PROTECTED_NAMES or name.lower().endswith("_events.tsv"):
         raise UnsafePath(f"{name} is a BIDS dataset file; the GUI never writes it.", 403)
     for candidate in {lexical, real}:
         if inside and inside(candidate):
             raise UnsafePath("Writing inside the BIDS folder is not allowed.", 403)
         for root in protect:
-            if root and (_inside(candidate, os.path.realpath(root)) or _inside(candidate, os.path.abspath(root))):
+            if in_bids_tree(candidate, root):
                 raise UnsafePath("Writing inside the BIDS folder is not allowed.", 403)
     return real

@@ -34,15 +34,18 @@ def test_confounds_check_reads_only_the_header(tmp_path):
     assert [c["id"] for c in result["checks"] if "nope" in c["message"]] == ["confound_columns"]
 
 
+from lib.tsv import read_header
+
+
 def test_read_header_handles_bom_and_bad_bytes(tmp_path):
     f = tmp_path / "a.tsv"
     f.write_bytes("﻿a\tb\n1\t2\n".encode("utf-8"))
-    assert preflight._read_header(f) == ["a", "b"]
+    assert read_header(f) == ["a", "b"]
     f.write_bytes(b"")
-    assert preflight._read_header(f) == []
+    assert read_header(f) == []
     f.write_bytes(b"a\n\xe9\xff\n")
     try:
-        preflight._read_header(f)
+        read_header(f)
     except UnicodeDecodeError:
         pass
     else:

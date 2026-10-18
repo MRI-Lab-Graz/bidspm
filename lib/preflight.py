@@ -21,7 +21,6 @@ from pathlib import Path
 from lib.config import clean_path as _path  # one normaliser for the check and the run
 from lib.model_path import resolve_model_file
 from lib.tsv import count_lines, duplicates, read_head
-from lib.tsv import read_header as _read_header  # noqa: F401  (kept for callers/tests of the old name)
 from lib.tsv import read_tsv as _read_tsv
 
 ERROR, WARN = "error", "warn"
