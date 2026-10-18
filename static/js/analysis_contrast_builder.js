@@ -419,8 +419,13 @@
             weightInput.value = weight;
             weightInput.title = 'Custom weight';
             weightInput.addEventListener('change', () => {
-                const numericValue = parseFloat(weightInput.value);
-                cbDraft[cardIdx].Weights[condIdx] = Number.isNaN(numericValue) ? 0 : numericValue;
+                const numericValue = weightInput.value.trim() === '' || weightInput.validity.badInput ? NaN : Number(weightInput.value);
+                if (!Number.isFinite(numericValue)) {
+                    showStatus('Weight must be a finite number', 'warn');
+                    weightInput.value = cbDraft[cardIdx].Weights[condIdx];
+                    return;
+                }
+                cbDraft[cardIdx].Weights[condIdx] = numericValue;
                 renderContrastList();
             });
             controls.appendChild(weightInput);

@@ -120,9 +120,16 @@ const READONLY_MODEL_PATHS = [
             input.addEventListener('change', (e) => {
                 const current = getByPath(modelEditorDraft, path);
                 if (typeof current === 'number') {
-                    const problem = numberInputProblem(e.target.value);
+                    const label = path.split('.').pop();
+                    // a type=number field reports garbage such as "-" as '' with badInput: not the same as cleared
+                    const problem = e.target.validity?.badInput ? 'invalid' : numberInputProblem(e.target.value);
                     if (problem === 'invalid') {
-                        setModelEditorStatus(`Not a finite number: ${e.target.value}`, 'warning');
+                        setModelEditorStatus(`${label} must be a finite number`, 'warning');
+                        e.target.value = String(current);
+                        return;
+                    }
+                    if (problem === '' && /\.HighPassFilterCutoffHz$/.test(path) && Number(e.target.value) <= 0) {
+                        setModelEditorStatus(`${label} must be greater than 0`, 'warning');
                         e.target.value = String(current);
                         return;
                     }
@@ -130,7 +137,7 @@ const READONLY_MODEL_PATHS = [
                         if (deleteByPath(modelEditorDraft, path)) {
                             renderModelAccordionEditor();
                         } else {
-                            setModelEditorStatus('A number is required here.', 'warning');
+                            setModelEditorStatus(`${label} must be a finite number`, 'warning');
                             e.target.value = String(current);
                         }
                         return;

@@ -149,6 +149,46 @@ class TestModelRoundTrip(FidelityCase):
         self.assertEqual(json.loads(self.model_path.read_text())["Nodes"][0]["Model"]["Options"],
                          {"HighPassFilterCutoffHz": 0.008})
 
+    def status(self, page):
+        return page.inner_text("#model-editor-status")
+
+    def field_value(self, page, suffix):
+        return page.evaluate("""suffix => Array.from(document.querySelectorAll('#model-editor-accordion .json-row'))
+            .find(r => r.querySelector('.json-path')?.textContent.endsWith(suffix)).querySelector('input').value""", suffix)
+
+    def test_the_refusal_names_the_field_and_keeps_the_previous_value(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"][0]["Model"]["Options"] = {"HighPassFilterCutoffHz": 0.008}
+        self.new_project(model)
+        page = self.open_model()
+        self.type_into_options_field(page, "1e999")
+        self.assertIn("HighPassFilterCutoffHz must be a finite number", self.status(page))
+        self.assertEqual(self.field_value(page, ".HighPassFilterCutoffHz"), "0.008")
+
+    def test_a_lone_minus_in_a_real_number_input_is_refused_not_deleted(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"][0]["Model"]["Options"] = {"HighPassFilterCutoffHz": 0.008}
+        self.new_project(model)
+        page = self.open_model()
+        page.evaluate("""() => { const i = Array.from(document.querySelectorAll('#model-editor-accordion .json-row'))
+            .find(r => r.querySelector('.json-path')?.textContent.endsWith('.HighPassFilterCutoffHz')).querySelector('input');
+            for (let c = i.closest('.collapse'); c; c = c.parentElement?.closest('.collapse')) c.classList.add('show');
+            i.focus(); i.select(); }""")
+        page.keyboard.type("-")
+        page.keyboard.press("Tab")
+        self.assertIn("HighPassFilterCutoffHz must be a finite number", self.status(page))
+        self.assertEqual(self.field_value(page, ".HighPassFilterCutoffHz"), "0.008")
+
+    def test_a_non_positive_high_pass_cutoff_is_refused(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"][0]["Model"]["Options"] = {"HighPassFilterCutoffHz": 0.008}
+        self.new_project(model)
+        page = self.open_model()
+        for bad in ("0", "-0.5"):
+            self.type_into_options_field(page, bad)
+            self.assertIn("HighPassFilterCutoffHz must be greater than 0", self.status(page))
+            self.assertEqual(self.field_value(page, ".HighPassFilterCutoffHz"), "0.008")
+
 
 class TestProjectFormValues(FidelityCase):
     def set_and_save(self, page, **values):
@@ -238,6 +278,16 @@ class TestContrastBuilderValidation(FidelityCase):
         page.click("#cb-apply-btn")
         self.assertIn("name", page.inner_text("#cb-status"))
         self.assertEqual(page.evaluate("modelEditorDraft.Nodes[0].Contrasts[0].Name"), "A")
+
+    def test_an_empty_or_non_numeric_weight_is_refused_and_kept(self):
+        page = self.open_builder()
+        for bad in ("", "abc", "1e999"):
+            page.eval_on_selector(".cb-weight-input", "(i, v) => { i.type = 'text'; i.value = v; i.dispatchEvent(new Event('change')); }", bad)
+            self.assertIn("Weight must be a finite number", page.inner_text("#cb-status"))
+            self.assertEqual(page.input_value(".cb-weight-input"), "1")
+            page.evaluate("document.getElementById('cb-status').innerHTML = ''")
+        page.click("#cb-apply-btn")
+        self.assertEqual(page.evaluate("modelEditorDraft.Nodes[0].Contrasts[0].Weights"), [1])
 
     def test_a_valid_contrast_is_applied(self):
         page = self.open_builder()
