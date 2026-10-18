@@ -895,6 +895,25 @@
       return issues;
     }
 
+    // Every other starred field must be filled and a Threshold needs a bound; extractOpsFromCard would otherwise
+    // save the operation without them (or drop a Threshold silently). Output has its own check above.
+    function collectIncompleteOpIssues() {
+      const issues = [];
+      document.querySelectorAll('#op-pipeline .op-card').forEach((card, index) => {
+        const missing = [];
+        card.querySelectorAll('.op-field-label').forEach(label => {
+          const control = label.querySelector('.text-danger') && label.parentElement.querySelector('[data-field]');
+          if (!control || control.dataset.field === 'Output') return;
+          const filled = control.classList.contains('col-drop-zone') ? getZoneValue(control).length > 0 : control.value.trim() !== '';
+          if (!filled) missing.push(control.dataset.field);
+        });
+        const bound = field => card.querySelector(`[data-field="${field}"]`)?.value.trim();
+        if (card.dataset.opType === 'Threshold' && !bound('MinThreshold') && !bound('MaxThreshold')) missing.push('Min or Max threshold');
+        if (missing.length) issues.push(`Op ${index + 1} (${card.dataset.opType}) is missing ${missing.join(', ')}.`);
+      });
+      return issues;
+    }
+
     function parseNumericCsv(value) {
       return parseCsvTokens(value)
         .map(token => Number(token))
@@ -1058,6 +1077,7 @@
     return Object.freeze({
       addOperation,
       collectRequiredOutputIssues,
+      collectIncompleteOpIssues,
       copyJSON,
       extractOp,
       extractOpsFromCard,

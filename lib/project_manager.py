@@ -101,7 +101,9 @@ class ProjectConfig:
     actions: List[str] = field(default_factory=lambda: ["smooth", "stats"])
     pilot: bool = False
     skip_validation: bool = True
-    
+    stats_workers: int = 4
+    bms_models: List[str] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
     

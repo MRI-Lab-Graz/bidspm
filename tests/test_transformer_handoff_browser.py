@@ -130,6 +130,30 @@ class TestTransformerHandoff(unittest.TestCase):
         self.assertIn("/transformer-builder/", self.page.url)
         self.assertIsNone(self.page.evaluate(f"sessionStorage.getItem('{PENDING_KEY}')"))
 
+    def test_apply_with_an_operation_missing_its_input_names_the_field_and_stays(self):
+        self.open_analysis_editor()
+        self.go_to_builder()
+        self.page.click('.btn-add-op[data-op="Filter"]')
+        self.page.fill('#op-1 input[data-field="Query"]', "trial_type == 'a'")
+        self.page.fill('#op-1 input[data-field="Output"]', "only_a")
+        self.page.click("#btn-apply-model")
+        self.page.wait_for_function("document.getElementById('scan-status').textContent.includes('Input')")
+        self.assertIn("Op 1 (Filter)", self.page.inner_text("#scan-status"))
+        self.assertIn("/transformer-builder/", self.page.url)
+        self.assertIsNone(self.page.evaluate(f"sessionStorage.getItem('{PENDING_KEY}')"))
+
+    def test_apply_with_a_threshold_without_bounds_is_refused_not_dropped(self):
+        self.open_analysis_editor()
+        self.go_to_builder()
+        self.page.click('.btn-add-op[data-op="Threshold"]')
+        self.page.click("#op-1 .col-drop-zone")
+        self.page.click(".col-picker-item >> text=trial_type")
+        self.page.fill('#op-1 input[data-field="Output"]', "limited")
+        self.page.click("#btn-apply-model")
+        self.page.wait_for_function("document.getElementById('scan-status').textContent.includes('threshold')")
+        self.assertIn("/transformer-builder/", self.page.url)
+        self.assertIsNone(self.page.evaluate(f"sessionStorage.getItem('{PENDING_KEY}')"))
+
     def test_apply_with_a_missing_output_name_warns_and_stays(self):
         self.open_analysis_editor()
         self.go_to_builder()

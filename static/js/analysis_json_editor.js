@@ -119,11 +119,34 @@ const READONLY_MODEL_PATHS = [
         } else {
             input.addEventListener('change', (e) => {
                 const current = getByPath(modelEditorDraft, path);
+                if (typeof current === 'number') {
+                    const problem = numberInputProblem(e.target.value);
+                    if (problem === 'invalid') {
+                        setModelEditorStatus(`Not a finite number: ${e.target.value}`, 'warning');
+                        e.target.value = String(current);
+                        return;
+                    }
+                    if (problem === 'empty') {
+                        if (deleteByPath(modelEditorDraft, path)) {
+                            renderModelAccordionEditor();
+                        } else {
+                            setModelEditorStatus('A number is required here.', 'warning');
+                            e.target.value = String(current);
+                        }
+                        return;
+                    }
+                }
                 const newValue = parsePrimitiveInput(e.target.value, current);
+
+                if (isModelXEntry && regressorNameProblem(newValue)) {
+                    setModelEditorStatus(regressorNameProblem(newValue), 'warning');
+                    e.target.value = current;
+                    return;
+                }
 
                 if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)) {
                     const status = document.getElementById('model-editor-status');
-                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`;
+                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(newValue)}</div>`;
                     e.target.value = current;
                     return;
                 }
@@ -1024,7 +1047,7 @@ const READONLY_MODEL_PATHS = [
                     if (!Array.isArray(arr)) return;
                     if (arr.includes(value)) {
                         const status = document.getElementById('model-editor-status');
-                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`;
+                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${escapeHtml(value)}</div>`;
                         return;
                     }
                     arr.push(value);
@@ -1205,7 +1228,7 @@ const READONLY_MODEL_PATHS = [
 
         const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
         if (missing.length) {
-            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`;
+            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${escapeHtml(missing.join(', '))}</div>`;
         }
 
         if (!Array.isArray(modelEditorDraft.Input?.task)) {

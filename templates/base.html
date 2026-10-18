@@ -136,6 +136,7 @@
 
     <!-- Scripts -->
     <script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dom_safe.js', v=static_version('js/dom_safe.js')) }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('quitAppBtn')?.addEventListener('click', async function(e) {
