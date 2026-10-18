@@ -12,6 +12,8 @@ import os
 import re
 from pathlib import Path
 
+from lib.tsv import QUOTE_WARNING, duplicates, quoted, read_tsv
+
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 MOTION6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
 NUISANCE_PRESETS = {
@@ -45,7 +47,9 @@ def _contrast_name(ref):
         ref = head
     name = re.sub(r"[^A-Za-z0-9_]+", "_", ref.removeprefix("trial_type.")).strip("_")
     if not name:
-        raise WizardError(f"cannot derive a contrast name from {ref!r}")
+        value = ref.removeprefix("trial_type.")
+        raise WizardError(f"trial_type value {value!r} has no letters, digits or underscores, so no contrast name can be derived from it; "
+                          f"rename it in the events file, rename/merge it with the Merge recipe, or uncheck it in step 1")
     return name
 
 
@@ -67,14 +71,33 @@ def second_level_nodes(names):
     ]
 
 
-def _nuisance(value):
+def _nuisance(value, regressors=()):
     if isinstance(value, str):
         if value not in NUISANCE_PRESETS:
             raise WizardError(f"unknown nuisance preset {value!r}; choose one of {', '.join(NUISANCE_PRESETS)} or a list of columns")
         return list(NUISANCE_PRESETS[value])
-    if isinstance(value, list) and all(isinstance(v, str) and v for v in value):
-        return list(value)
-    raise WizardError("nuisance must be a preset name or a list of confound column names")
+    if not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+        raise WizardError("nuisance must be a preset name or a list of confound column names")
+    out = []
+    for name in (v.strip() for v in value):
+        if not name:
+            raise WizardError("nuisance has an empty confound column name")
+        if name in ("0", "1"):
+            raise WizardError(f"nuisance entry {name!r} is a constant, not a confound column (the model already has its intercept)")
+        if name.startswith("trial_type.") or name in regressors:
+            raise WizardError(f"nuisance entry {name!r} is a regressor of the model, not a confound column")
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _unknown_confounds(nuisance, scan):
+    """Warnings for custom nuisance names (globs allowed, as in the readiness check) missing from the scanned confound columns."""
+    known = scan.get("confound_columns") or []
+    if not known:
+        return []
+    return [f"nuisance column {n!r} is not among the confound columns of the dataset (found {len(known)}); the readiness check will flag it"
+            for n in nuisance if not fnmatch.filter(known, n)]
 
 
 def _run_contrasts(regressors, pmods, spec):
@@ -140,10 +163,10 @@ def _bool_param(label, value):
     return _expect(False if value is None else value, bool, f"recipe {label}")
 
 
-def _safe(label, value, hyphen=False):
+def _safe(label, value, hyphen=False, step="this"):
     if not value or (UNSAFE_HYPHEN_OK if hyphen else UNSAFE).search(value) or not _coerce(value):
         allowed = "letters, digits, underscores and hyphens" if hyphen else "letters, digits and underscores"
-        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (only {allowed} are supported); rename it in the events first")
+        raise WizardError(f"{label} {value!r} cannot be used in the {step} recipe (its filter query and output names support only {allowed}); rename it in the events file or uncheck it in step 1")
 
 
 def _need_condition(state, condition):
@@ -186,7 +209,7 @@ def _second_filter(state, source, column, value, condition, rename):
     return f"{out}.{out}"
 
 
-def _split(state, condition, column, values, keep_original):
+def _split(state, condition, column, values, keep_original, step):
     _str_param("condition", condition)
     _str_param("column", column)
     _str_list_param("values", values)
@@ -200,9 +223,9 @@ def _split(state, condition, column, values, keep_original):
     unknown = [v for v in values if v not in state["columns"][column]]
     if unknown:
         raise WizardError(f"column {column!r} has no value {', '.join(map(repr, unknown))}")
-    _safe("column", column)
+    _safe("column", column, step=step)
     for label, v in [("condition", condition)] + [("value", v) for v in values]:
-        _safe(label, v, hyphen=True)
+        _safe(label, v, hyphen=True, step=step)
     source = _first_filter(state, condition)
     rename = keep_original or len(values) > 1
     state["regressors"] += [_second_filter(state, source, column, v, condition, rename) for v in values]
@@ -217,7 +240,7 @@ def _split(state, condition, column, values, keep_original):
          {"name": "value", "kind": "value", "label": "Keep rows where it equals", "required": True},
          {"name": "keep_original", "kind": "bool", "label": "Keep the original condition too", "required": False}])
 def valid_only(state, p):
-    _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"))
+    _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"), "valid_only")
     others = [v for v in state["columns"][p["column"]] if v != p["value"] and v not in NA]
     if others and not p.get("keep_original"):
         state["warnings"].append(f"{p['condition']}: trials with {p['column']} = {', '.join(others)} are not modelled")
@@ -236,7 +259,7 @@ def split_by_column(state, p):
         if column in state["numeric"]:
             raise WizardError(f"column {column!r} is numeric; choose the values to split by explicitly (or use the parametric modulator recipe)")
         values = [v for v in state["columns"].get(column, []) if v not in NA]
-    _split(state, p.get("condition"), column, values, p.get("keep_original"))
+    _split(state, p.get("condition"), column, values, p.get("keep_original"), "split_by_column")
 
 
 @recipe("merge_rename", "Merge or rename conditions",
@@ -250,8 +273,8 @@ def merge_rename(state, p):
         raise WizardError("pick at least one condition to merge or rename")
     for s in sources:
         _need_condition(state, s)
-        _safe("condition", s, hyphen=True)
-    _safe("new name", target, hyphen=True)
+        _safe("condition", s, hyphen=True, step="merge_rename")
+    _safe("new name", target, hyphen=True, step="merge_rename")
     ref = f"trial_type.{target}"
     if ref not in state["regressors"]:
         if target in state["columns"]["trial_type"]:
@@ -311,7 +334,9 @@ def build_model(choices, scan):
         raise WizardError("exclude must be a list of trial_type values")
     if set(exclude) - set(conditions):
         raise WizardError(f"cannot exclude unknown trial_type values: {', '.join(sorted(set(exclude) - set(conditions)))}")
-    _expect(choices.get("name") or "", str, "name")
+    name = _expect(choices.get("name") or "", str, "name")
+    if len(name) > 200 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):  # a label: any text, but one printable line
+        raise WizardError("name must be a single line of at most 200 characters")
     recipes = _expect(choices.get("recipes", []), list, "recipes")
     state = {"regressors": [f"trial_type.{c}" for c in conditions if c not in exclude], "instructions": [],
              "pmods": [], "warnings": [], "columns": scan["columns"], "numeric": set(scan.get("numeric", []))}
@@ -329,7 +354,9 @@ def build_model(choices, scan):
         if spm_name in seen:
             raise WizardError(f"{seen[spm_name]!r} and {r!r} would get the same name ({spm_name!r}) in SPM; rename or merge one of them")
         seen[spm_name] = r
-    nuisance = _nuisance(choices.get("nuisance", "none"))
+    nuisance = _nuisance(choices.get("nuisance", "none"), regressors)
+    if isinstance(choices.get("nuisance"), list):
+        state["warnings"] += _unknown_confounds(nuisance, scan)
     contrasts = _run_contrasts(regressors, state["pmods"], choices.get("contrasts", {}))
     spm = {"SerialCorrelation": "FAST"}  # lab default (as in studies/141*.json); bidspm's own default is AR(1)
     if state["pmods"]:
@@ -373,14 +400,16 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
     root = Path(bids_dir)
     pattern = f"*task-{task}_*events.tsv"
     files = sorted({p for p in func_files(root) if fnmatch.fnmatchcase(p.name, pattern)} | set(root.glob(f"task-{task}_events.tsv")))
-    values, numeric_bad, truncated, used = {}, set(), set(), 0
+    values, numeric_bad, truncated, used, warnings = {}, set(), set(), 0, []
     for path in files[:max_files]:
         try:
-            with open(path, encoding="utf-8-sig", newline="") as fh:
-                rows = list(csv.DictReader(fh, delimiter="\t"))
+            cols, rows = read_tsv(path)
         except (OSError, UnicodeError, csv.Error):
             continue
         used += 1
+        if QUOTE_WARNING not in warnings and (quoted(cols) or quoted(rows[0].values() if rows else [])):
+            warnings.append(QUOTE_WARNING)
+        warnings += [w for c in duplicates(cols) if (w := f"duplicate column {c} (e.g. {path.name})") and not any(x.startswith(f"duplicate column {c} ") for x in warnings)]
         for row in rows:
             for col, val in row.items():
                 if not col or col in ("onset", "duration") or val is None:
@@ -401,4 +430,4 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
     return {"files_truncated": len(files) > max_files,
             "columns": {c: sorted(v) for c, v in values.items()},
             "numeric": sorted(c for c, v in values.items() if v and c not in numeric_bad),
-            "files": used, "truncated": sorted(truncated)}
+            "files": used, "truncated": sorted(truncated), "warnings": warnings}

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lib.project_manager import ProjectManager
+from lib.project_manager import ConfigImportError, ProjectManager
 
 
 class TestProjectManagerExtra(unittest.TestCase):
@@ -116,12 +116,13 @@ class TestProjectManagerExtra(unittest.TestCase):
         self.assertEqual(reloaded.config.bids_folder, "/legacy/bids")
         self.assertEqual(reloaded.config.fwhm, 8)
 
-    def test_import_config_returns_false_on_malformed_json(self):
+    def test_import_config_raises_on_malformed_json(self):  # the route turns this into a 400 with the reason
         project = self.manager.create_project("Importer3")
         with tempfile.TemporaryDirectory() as tmp:
             config_file = Path(tmp) / "bad.json"
             config_file.write_text("{not valid json", encoding="utf-8")
-            self.assertFalse(self.manager.import_config(project.id, config_file))
+            with self.assertRaises(ConfigImportError):
+                self.manager.import_config(project.id, config_file)
 
     def test_export_config_missing_project_returns_none(self):
         self.assertIsNone(self.manager.export_config("does-not-exist"))

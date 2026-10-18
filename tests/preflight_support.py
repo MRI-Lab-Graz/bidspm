@@ -6,10 +6,15 @@ import nibabel as nib
 import numpy as np
 
 EVENTS = "onset\tduration\ttrial_type\n1\t1\ta\n5\t1\tb\n"
-CONFOUNDS = "trans_x\ttrans_y\ttrans_z\nn/a\t0\t0\n"
 
 
-def make_trees(tmp, subjects=("01",), task="x", space="MNI", events=EVENTS, confounds=CONFOUNDS, tr=2.0, nvols=100):
+def confounds_for(nvols, header="trans_x\ttrans_y\ttrans_z"):
+    """A confounds file with one row per volume (first row n/a, like fMRIPrep's derivatives)."""
+    return header + "\n" + "n/a\t0\t0\n" + "0\t0\t0\n" * (nvols - 1)
+
+
+def make_trees(tmp, subjects=("01",), task="x", space="MNI", events=EVENTS, confounds=None, tr=2.0, nvols=100):
+    confounds = confounds_for(nvols) if confounds is None else confounds
     bids, fmriprep = Path(tmp) / "bids", Path(tmp) / "fmriprep"
     for root in (bids, fmriprep):
         root.mkdir(parents=True, exist_ok=True)

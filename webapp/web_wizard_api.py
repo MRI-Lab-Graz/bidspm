@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request
 
 from lib.model_wizard import NUISANCE_PRESETS, WizardError, bids_tasks, build_model, catalog, scan_events
 from lib.preflight import run_preflight_from_config
+from lib.safe_paths import UnsafePath, safe_target
 from webapp.web_discovery_model_api import _discover_confound_info
 
 
@@ -41,13 +42,13 @@ def _cached_scan(bids_dir, fmriprep_dir, task, refresh=False):
 def _scan(bids_dir, fmriprep_dir, task, with_confounds=True):
     tasks = bids_tasks(bids_dir)
     task = task if task in tasks else (tasks[0] if tasks else "")
-    events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False}
+    events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False, "warnings": []}
     confounds = (_discover_confound_info(Path(fmriprep_dir), [task] if task else None)
                  if with_confounds and fmriprep_dir else {"columns": []})
     return {"tasks": tasks, "task": task, "columns": events["columns"],
             "numeric": events["numeric"], "confound_columns": confounds["columns"],
             "truncated": events["truncated"], "events_files": events["files"],
-            "files_truncated": events.get("files_truncated", False)}
+            "files_truncated": events.get("files_truncated", False), "warnings": events.get("warnings", [])}
 
 
 def _preflight(model, bids_dir, fmriprep_dir, space, task):
@@ -64,7 +65,7 @@ def _preflight(model, bids_dir, fmriprep_dir, space, task):
     return report
 
 
-def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
+def register_wizard_routes(app: Flask, resolve_fs_path, is_inside_bids_dir=None) -> None:
     def _body():
         data = request.get_json(silent=True)
         return data if isinstance(data, dict) else None
@@ -95,7 +96,10 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
             return jsonify({"error": f"BIDS folder not found: {bids_dir}"}), 404
         save_path = str(data.get("save_path") or "").strip()
         if save_path:
-            save_path = os.path.abspath(resolve_fs_path(save_path))
+            try:  # never into the BIDS tree (the request's own folder included), never over dataset files
+                save_path = safe_target(save_path, inside=is_inside_bids_dir, protect=(bids_dir,), resolve=resolve_fs_path)
+            except UnsafePath as exc:
+                return jsonify({"error": str(exc)}), exc.status
             if not save_path.endswith(".json"):
                 return jsonify({"error": "save_path must end with .json"}), 400
             if os.path.exists(save_path) and not data.get("overwrite"):
@@ -103,9 +107,12 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
         try:
             # build_model never reads confound columns, so skip reading every confounds TSV
             scan = _cached_scan(bids_dir, fmriprep_dir, choices.get("task"))
+            if isinstance(choices.get("nuisance"), list) and fmriprep_dir:  # only a custom list needs the columns (headers only)
+                scan = {**scan, "confound_columns": _discover_confound_info(Path(fmriprep_dir), [scan["task"]] if scan["task"] else None)["columns"]}
             result = build_model(choices, scan)
         except WizardError as exc:
             return jsonify({"error": str(exc)}), 400
+        result["preview"]["warnings"] += scan.get("warnings", [])
         if "trial_type" in scan["truncated"]:
             n = len(scan["columns"]["trial_type"])
             result["preview"]["warnings"].append(f"trial_type has more than {n} values; only the first {n} are offered")

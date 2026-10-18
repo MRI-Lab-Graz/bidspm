@@ -12,6 +12,7 @@ Jobs API (progress over SSE). Event contract, one `id: <seq>\\ndata: <json>\\n\\
 The stream ends after the terminal event.
 """
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -22,6 +23,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 from lib.preflight import remember, run_preflight_from_config, signature, validator_error
 
+log = logging.getLogger(__name__)
 MAX_FINISHED_JOBS = 20
 MAX_RUNNING_JOBS = 3
 STREAM_ATTACH_GRACE = 30  # a job nobody streams within this many seconds (page unloaded before start answered) is cancelled
@@ -85,7 +87,7 @@ def _work(job, config, kwargs, model_path):
             except Exception:  # noqa: BLE001
                 pass
     except BaseException as exc:  # noqa: BLE001 - a stream must always get a terminal event (incl. SystemExit)
-        terminal = {"phase": "error", "state": "done", "message": f"{type(exc).__name__}: {exc}"}
+        terminal = {"phase": "error", "state": "done", "message": _unexpected(exc, "the readiness check failed")}
     if model_path:  # before the terminal event: a client seeing it may rely on the file being gone
         try:
             os.remove(model_path)
@@ -96,6 +98,13 @@ def _work(job, config, kwargs, model_path):
         if job.timer is not None:
             job.timer.cancel()
         _evict_finished()
+
+
+def _unexpected(exc, what):
+    """Log an unexpected failure with a traceback and return a message for the client that carries only an error id."""
+    error_id = uuid.uuid4().hex[:8]
+    log.error("%s (error id %s)", what, error_id, exc_info=exc)
+    return f"{what} unexpectedly; details are in the server log (error id {error_id})"
 
 
 def _bad(message):
@@ -145,10 +154,13 @@ def register_preflight_routes(app: Flask) -> None:
         problem = validator_error(data.get('validator'), internal=True)
         if problem:
             return _bad(problem)
-        return jsonify(run_preflight_from_config(
-            config if isinstance(config, dict) else {},
-            model=data.get('model') or '', validator=data.get('validator') or 'auto',
-            actions=actions if isinstance(actions, list) else None))
+        try:
+            return jsonify(run_preflight_from_config(
+                config if isinstance(config, dict) else {},
+                model=data.get('model') or '', validator=data.get('validator') or 'auto',
+                actions=actions if isinstance(actions, list) else None))
+        except Exception as exc:  # noqa: BLE001 - JSON with an error id instead of an HTML 500
+            return jsonify({"error": _unexpected(exc, "the readiness check failed")}), 500
 
     @app.route('/api/preflight/start', methods=['POST'])
     def api_preflight_start():

@@ -1,8 +1,8 @@
-import csv
 import json
+import logging
 import os
 import random
-import secrets
+import tempfile
 from collections import Counter
 from difflib import get_close_matches
 from pathlib import Path
@@ -16,6 +16,8 @@ from lib import (
     validate_bids_model,
 )
 from lib.model_wizard import second_level_nodes
+from lib.safe_paths import UnsafePath, safe_target
+from lib.tsv import QUOTE_WARNING, has_quotes, open_tsv
 
 
 PathResolver = Callable[[str], str]
@@ -211,8 +213,7 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
     for event_file in event_files[:max_files]:
         file_values = {'trial_type': set(), 'condition': set()}
         try:
-            with open(event_file, 'r', encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(event_file) as reader:
                 if not reader.fieldnames:
                     continue
 
@@ -325,8 +326,7 @@ def _discover_confound_info(fmriprep_dir: Path, tasks_filter: Optional[List[str]
     columns = set()
     for confound_file in confound_files[:max_files]:
         try:
-            with open(confound_file, 'r', encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(confound_file) as reader:
                 if not reader.fieldnames:
                     continue
                 columns.update(name.strip() for name in reader.fieldnames if name and name.strip())
@@ -383,8 +383,7 @@ def _discover_participants_info(bids_dir: Path, max_values_per_column: int = 20)
         return (2, token.lower(), token)
 
     try:
-        with open(participants_file, 'r', encoding='utf-8') as stream:
-            reader = csv.DictReader(stream, delimiter='\t')
+        with open_tsv(participants_file) as reader:
             if not reader.fieldnames:
                 return {**default_payload, 'sample_status': 'invalid-header'}
 
@@ -428,6 +427,7 @@ def _discover_participants_info(bids_dir: Path, max_values_per_column: int = 20)
             'sample_values': sample_values,
             'numeric_stats': numeric_stats,
             'sample_status': 'present',
+            'warnings': [QUOTE_WARNING] if has_quotes(participants_file) else [],
         }
     except Exception:
         return {**default_payload, 'sample_status': 'error'}
@@ -495,8 +495,7 @@ def _scan_bids_for_model(bids_dir: str) -> dict:
         if task not in tasks:
             tasks.append(task)
         try:
-            with event_file.open(encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(event_file) as reader:
                 for row in reader:
                     value = (row.get('trial_type') or '').strip()
                     if value and value != 'n/a':
@@ -577,7 +576,7 @@ def _extract_task_name(path: str) -> str:
     return ''
 
 
-def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, app_root: Path) -> None:
+def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, app_root: Path, is_inside_bids_dir=None) -> None:
     @app.route('/get_bids_tasks')
     def get_bids_tasks():
         path = request.args.get('path')
@@ -734,13 +733,17 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
     @app.route('/api/model/create', methods=['POST'])
     def api_model_create():
         data = request.json or {}
-        path = data.get('path', '').strip()
-        bids_dir = data.get('bids_dir', '').strip()
+        path = str(data.get('path') or '').strip()
+        bids_dir = str(data.get('bids_dir') or '').strip()
 
         if not path:
             return jsonify({'success': False, 'error': 'No path provided'}), 400
-
-        path = os.path.abspath(path)
+        try:
+            path = safe_target(path, inside=is_inside_bids_dir, protect=(bids_dir,))
+        except UnsafePath as exc:
+            return jsonify({'success': False, 'error': str(exc)}), exc.status
+        if not path.endswith('.json'):
+            return jsonify({'success': False, 'error': 'Path must end with .json'}), 400
         if os.path.exists(path) and not data.get('overwrite', False):
             return jsonify({'success': False, 'error': 'File already exists. Set overwrite=true to replace it.'}), 409
 
@@ -763,19 +766,28 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
 
     @app.route('/validate_model', methods=['POST'])
     def api_validate_model():
-        data = request.json or {}
-        content = data.get('content')
+        try:  # request.json raises RecursionError (an HTML 500) on absurdly nested bodies
+            data = json.loads(request.get_data(as_text=True) or 'null')
+        except (ValueError, RecursionError):
+            return jsonify({'valid': False, 'error': 'The request body is not valid JSON (or is nested too deeply).'}), 400
+        content = data.get('content') if isinstance(data, dict) else None
         if not content:
             return jsonify({'valid': False, 'error': 'No content provided'}), 400
+        if not isinstance(content, dict):
+            return jsonify({'valid': False, 'error': 'The model must be a JSON object.'}), 400
 
-        temp_path = Path(f"config/temp_model_{secrets.token_hex(4)}.json")
+        # the system temp dir, not a cwd-relative config/ (which may not exist or be writable); always removed
+        handle, name = tempfile.mkstemp(prefix='bidspm_validate_', suffix='.json')
+        temp_path = Path(name)
         try:
-            with open(temp_path, 'w', encoding='utf-8') as file_handle:
+            with os.fdopen(handle, 'w', encoding='utf-8') as file_handle:
                 json.dump(content, file_handle)
             return jsonify(validate_bids_model(temp_path))
+        except Exception:  # noqa: BLE001 - JSON, no internals
+            logging.getLogger(__name__).exception('model validation failed unexpectedly')
+            return jsonify({'valid': False, 'error': 'Validation failed unexpectedly; details are in the server log.'}), 500
         finally:
-            if temp_path.exists():
-                temp_path.unlink()
+            temp_path.unlink(missing_ok=True)
 
     @app.route('/get_model_tasks')
     def get_model_tasks():
@@ -930,8 +942,7 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
 
                 for chosen in candidate_files:
                     try:
-                        with open(chosen, 'r', encoding='utf-8') as file_handle:
-                            reader = csv.DictReader(file_handle, delimiter='\t')
+                        with open_tsv(chosen) as reader:
                             headers = list(reader.fieldnames or [])
                             if not headers:
                                 continue

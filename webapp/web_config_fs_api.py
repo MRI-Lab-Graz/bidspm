@@ -4,7 +4,13 @@ import secrets
 import time
 from typing import Callable
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
+
+from lib.safe_paths import UnsafePath, safe_target
+
+
+def _reject_constant(name):
+    raise ValueError(f'{name} is not valid JSON')
 
 
 PathResolver = Callable[[str], str]
@@ -41,28 +47,50 @@ def register_config_fs_routes(
     resolve_fs_path: PathResolver,
     is_inside_bids_dir: PathGuard,
 ) -> None:
+    def _json_file_response(path):
+        """The parsed JSON file as a response; unreadable/invalid files are JSON errors, never an HTML 500."""
+        try:
+            with open(path, 'r', encoding='utf-8') as file_handle:
+                return jsonify(json.load(file_handle, parse_constant=_reject_constant))
+        except IsADirectoryError:
+            return jsonify({'error': f'{path} is a folder, not a configuration file.'}), 400
+        except (ValueError, RecursionError) as exc:  # JSONDecodeError, UnicodeDecodeError, NaN, too deep
+            return jsonify({'error': f'{path} is not valid JSON: {exc}'}), 422
+        except OSError as exc:
+            return jsonify({'error': f'could not read {path}: {exc.strerror or exc}'}), 400
+
     @app.route('/load_config_file')
     def load_config_file():
         """Load configuration file."""
         path = request.args.get('path', 'config/config.json')
+        if '..' in path.replace('\\', '/').split('/'):
+            return jsonify({'error': "The path must not contain '..'."}), 400
 
         if not os.path.exists(path):
             return jsonify(_default_config_payload())
 
-        with open(path, 'r', encoding='utf-8') as file_handle:
-            return jsonify(json.load(file_handle))
+        return _json_file_response(path)
 
     @app.route('/save_settings', methods=['POST'])
     def save_settings():
         """Save configuration to file."""
-        data = request.json or {}
+        data = request.json if isinstance(request.json, dict) else {}
         filepath = data.get('filepath', 'config/config.json')
         content = data.get('content')
 
-        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        try:
+            filepath = safe_target(filepath, inside=is_inside_bids_dir)
+        except UnsafePath as exc:
+            return jsonify({'status': 'error', 'error': str(exc)}), exc.status
+        if not filepath.endswith('.json'):
+            return jsonify({'status': 'error', 'error': 'The settings file must end with .json'}), 400
 
-        with open(filepath, 'w', encoding='utf-8') as file_handle:
-            json.dump(content, file_handle, indent=4)
+        try:
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as file_handle:
+                json.dump(content, file_handle, indent=4)
+        except (OSError, TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'error': f'could not save: {exc}'}), 400
 
         return jsonify({'status': 'success', 'path': filepath})
 
@@ -126,8 +154,7 @@ def register_config_fs_routes(
         if not os.path.exists(path):
             return jsonify(_default_container_payload())
 
-        with open(path, 'r', encoding='utf-8') as file_handle:
-            return jsonify(json.load(file_handle))
+        return _json_file_response(path)
 
     @app.route('/browse')
     def browse_fs():
@@ -178,14 +205,20 @@ def register_config_fs_routes(
 
         try:
             with open(path, 'r', encoding='utf-8') as file_handle:
-                return file_handle.read()
+                text = file_handle.read()
         except Exception as exc:
             return f'Error reading file: {exc}', 500
+        # file contents are data, never a page: no sniffing to HTML, and a sandbox if one is ever opened directly
+        return Response(text, mimetype='text/plain', headers={
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': 'sandbox',
+        })
 
     @app.route('/file_content', methods=['POST'])
     def save_file_content():
         """Save content to a file (used by in-browser model editor)."""
-        data = request.json or {}
+        data = request.json if isinstance(request.json, dict) else {}
         path = data.get('path')
         content = data.get('content', '')
         validate_json = data.get('validate_json', False)
@@ -193,14 +226,16 @@ def register_config_fs_routes(
         if not path:
             return jsonify({'success': False, 'error': 'No file path provided'}), 400
 
-        if is_inside_bids_dir(path):
-            return jsonify({'success': False, 'error': 'Writing inside the BIDS folder is not allowed.'}), 403
+        try:
+            path = safe_target(path, inside=is_inside_bids_dir)
+        except UnsafePath as exc:
+            return jsonify({'success': False, 'error': str(exc)}), exc.status
 
         try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
 
             if validate_json:
-                parsed = json.loads(content)
+                parsed = json.loads(content, parse_constant=_reject_constant)
                 with open(path, 'w', encoding='utf-8') as file_handle:
                     json.dump(parsed, file_handle, indent=2)
                     file_handle.write('\n')
@@ -209,7 +244,7 @@ def register_config_fs_routes(
                     file_handle.write(content)
 
             return jsonify({'success': True, 'path': path})
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
             return jsonify({'success': False, 'error': f'Invalid JSON: {exc}'}), 400
         except Exception as exc:
             return jsonify({'success': False, 'error': str(exc)}), 500
@@ -217,14 +252,16 @@ def register_config_fs_routes(
     @app.route('/mkdir', methods=['POST'])
     def create_directory():
         """Create a directory."""
-        data = request.json or {}
+        data = request.json if isinstance(request.json, dict) else {}
         path = data.get('path')
 
         if not path:
             return jsonify({'success': False, 'error': 'No path provided'}), 400
 
-        if is_inside_bids_dir(path):
-            return jsonify({'success': False, 'error': 'Creating directories inside the BIDS folder is not allowed.'}), 403
+        try:
+            path = safe_target(path, inside=is_inside_bids_dir)
+        except UnsafePath as exc:
+            return jsonify({'success': False, 'error': str(exc)}), exc.status
 
         try:
             os.makedirs(path, exist_ok=True)
@@ -235,16 +272,25 @@ def register_config_fs_routes(
     @app.route('/save_config', methods=['POST'])
     def save_config():
         """Save configuration (legacy endpoint)."""
-        data = request.json or {}
+        data = request.json if isinstance(request.json, dict) else {}
         config_data = data.get('config')
         folder = data.get('folder', 'configs')
         filename = data.get('filename', f'config_{int(time.time())}.json')
 
-        os.makedirs(folder, exist_ok=True)
-        filepath = os.path.join(folder, filename)
+        try:
+            folder = safe_target(folder, inside=is_inside_bids_dir)
+            filepath = safe_target(filename, base=folder, inside=is_inside_bids_dir)  # a name under the folder, never outside it
+        except UnsafePath as exc:
+            return jsonify({'status': 'error', 'error': str(exc)}), exc.status
+        if not filepath.endswith('.json'):
+            return jsonify({'status': 'error', 'error': 'The configuration file name must end with .json'}), 400
 
-        with open(filepath, 'w', encoding='utf-8') as file_handle:
-            json.dump(config_data, file_handle, indent=4)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as file_handle:
+                json.dump(config_data, file_handle, indent=4)
+        except (OSError, TypeError, ValueError) as exc:
+            return jsonify({'status': 'error', 'error': f'could not save: {exc}'}), 400
 
         return jsonify({'status': 'saved', 'path': filepath})
 
@@ -271,9 +317,11 @@ def register_config_fs_routes(
         if not filename:
             return jsonify({'error': 'No filename provided'}), 400
 
-        filepath = os.path.join(folder, filename)
+        try:
+            filepath = safe_target(filename, base=folder)
+        except UnsafePath as exc:
+            return jsonify({'error': str(exc)}), exc.status
         if not os.path.exists(filepath):
             return jsonify({'error': 'File not found'}), 404
 
-        with open(filepath, 'r', encoding='utf-8') as file_handle:
-            return jsonify(json.load(file_handle))
+        return _json_file_response(filepath)

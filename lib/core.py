@@ -717,12 +717,22 @@ def validate_bids_model(model_path: Path, skip_cache: bool = False) -> Dict[str,
     Returns dict with 'valid' bool, optional 'error' or 'warning'.
     """
     try:
-        with open(model_path, 'r') as f:
+        with open(model_path, 'r', encoding='utf-8') as f:
             model_content = json.load(f)
     except json.JSONDecodeError as e:
         return {"valid": False, "error": f"Invalid JSON: {e}"}
     except FileNotFoundError:
         return {"valid": False, "error": f"Model file not found: {model_path}"}
+    except IsADirectoryError:
+        return {"valid": False, "error": f"The model path is a folder, not a file: {model_path}"}
+    except UnicodeDecodeError:
+        return {"valid": False, "error": f"The model file is not UTF-8 text: {model_path}"}
+    except RecursionError:
+        return {"valid": False, "error": "The model JSON is nested too deeply."}
+    except OSError as e:  # permission denied, symlink loop, ...
+        return {"valid": False, "error": f"Cannot read the model file {model_path}: {e.strerror or e}"}
+    if not isinstance(model_content, dict):
+        return {"valid": False, "error": f"A model must be a JSON object, not {type(model_content).__name__}."}
 
     warnings = []
     compatibility_changes = _prepare_model_content_for_execution(model_content)

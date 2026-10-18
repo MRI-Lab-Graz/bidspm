@@ -20,6 +20,8 @@ from pathlib import Path
 
 from lib.config import clean_path as _path  # one normaliser for the check and the run
 from lib.model_path import resolve_model_file
+from lib.tsv import QUOTE_WARNING, count_lines, duplicates, has_quotes, quoted, read_head
+from lib.tsv import read_tsv as _read_tsv
 
 ERROR, WARN = "error", "warn"
 
@@ -74,19 +76,6 @@ def _match(listing, pattern):
     return sorted(p for p in listing if fnmatch.fnmatchcase(p.name, pattern))
 
 
-def _read_header(path):
-    """Column names only: confounds files are huge and only their header is checked."""
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        return next(csv.reader(fh, delimiter="\t"), [])
-
-
-def _read_tsv(path):
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        rows = list(reader)
-        return list(reader.fieldnames or []), rows
-
-
 def _events_problems(sub, name, cols, rows):
     missing = [c for c in ("onset", "duration") if c not in cols]
     if missing:
@@ -131,7 +120,7 @@ def _model_needs(model_file):
                     conditions.add(x.split(".", 1)[1])
                 elif "." not in x:
                     nuisance.append(x)
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
         return set(), [], False, set()
     return conditions, nuisance, transformed, produced
 
@@ -140,7 +129,7 @@ def _model_tasks(model_file):
     """The model's Input.task as a list of strings; [] when absent or malformed."""
     try:
         task = (json.loads(Path(model_file).read_text()).get("Input") or {}).get("task")
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
         return []
     return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
 
@@ -177,6 +166,51 @@ def _scan_length_warning(sub, preproc, events_rows):
     return []
 
 
+def _column_indices(cols, name):
+    """Indices of the columns a regressor name selects (glob patterns allowed); plain names skip fnmatch (900 columns x 100 files)."""
+    if not any(ch in name for ch in "*?["):
+        return [cols.index(name)] if name in cols else []
+    return [i for i, c in enumerate(cols) if fnmatch.fnmatch(c, name)]
+
+
+def _volumes(preproc, confounds):
+    """Number of volumes of the preproc image this confounds file belongs to; None when unknown (never blocks)."""
+    prefix = confounds.name.split("_desc-confounds")[0] + "_"
+    mine = [p for p in preproc if p.name.startswith(prefix)]
+    if len(mine) != 1:
+        return None
+    try:
+        import nibabel as nib
+        shape = nib.load(mine[0]).shape
+        return shape[3] if len(shape) == 4 else None
+    except Exception:  # corrupt or unreadable image: the row-count check is skipped
+        return None
+
+
+def _confound_data_problems(sub, f, cols, first, nuisance, preproc):
+    """Cheap checks of the confounds data: rows vs BOLD volumes (line count, no CSV parse), first row numeric."""
+    if first is None:
+        return [_item("confound_rows", ERROR, f"{f.name} has a header but no data rows",
+                      "Re-run fMRIPrep to regenerate the confounds file.", sub)]
+    out = []
+    volumes = _volumes(preproc, f)
+    if volumes is not None:
+        rows = count_lines(f)
+        if rows != volumes:
+            out.append(_item("confound_rows", ERROR, f"{f.name}: confounds has {rows} rows but the BOLD has {volumes} volumes",
+                             "Re-run fMRIPrep, or check that the confounds file belongs to this run.", sub))
+    for i in sorted({i for n in nuisance for i in _column_indices(cols, n)}):
+        v = first[i].strip() if i < len(first) else ""
+        try:
+            float(v)
+        except ValueError:
+            if v not in ("n/a", "N/A"):
+                out.append(_item("confound_values", ERROR, f"{f.name}: column {cols[i]} starts with {v!r}, not a number",
+                                 "Confounds must be numeric (or n/a); re-run fMRIPrep to regenerate the file.", sub))
+                break
+    return out
+
+
 def _events_files(bids_dir, bids_listing, task):
     """The subject's events files, else the dataset-level task-<task>_events.tsv (BIDS inheritance)."""
     return _match(bids_listing, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
@@ -210,6 +244,13 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
             events_ok = False
             continue
         event_cols |= set(cols)
+        if has_quotes(path):
+            out.append(_item("tsv_quotes", WARN, QUOTE_WARNING, f"Re-export {path.name} without quoting the fields.", sub))
+        dup = duplicates(cols)
+        if dup:
+            out.append(_item("events_columns", ERROR, f"{path.name} has duplicate column {', '.join(dup)}",
+                             "Rename or remove the repeated column; each column name may appear once.", sub))
+            events_ok = False
         problems = _events_problems(sub, path.name, cols, rows)
         out += problems
         events_ok = events_ok and all(p["severity"] != ERROR for p in problems)
@@ -232,16 +273,20 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
                              f"Re-run fMRIPrep; confounds are needed for {', '.join(nuisance)}.", sub))
         for f in files:
             try:
-                cols = _read_header(f)
+                cols, first = read_head(f)
             except (OSError, UnicodeDecodeError, csv.Error) as e:
                 out.append(_item("confound_columns", ERROR, f"{f.name} header cannot be read as UTF-8 text ({e})",
                                  "Re-run fMRIPrep to regenerate the confounds file.", sub))
                 continue
-            missing = [n for n in nuisance if not any(fnmatch.fnmatch(c, n) for c in cols)]
+            if quoted(cols) or quoted(first or []):
+                out.append(_item("tsv_quotes", WARN, QUOTE_WARNING, f"Re-run fMRIPrep or re-export {f.name} without quoting.", sub))
+            missing = [n for n in nuisance if not _column_indices(cols, n)]
             if missing:
                 out.append(_item("confound_columns", WARN if transformed else ERROR,
                                  f"{f.name} lacks the model's regressors: {', '.join(missing)}",
                                  "Fix the regressor names in the model, or re-run fMRIPrep so they are produced.", sub))
+            else:
+                out += _confound_data_problems(sub, f, cols, first, nuisance, preproc)
     return out, seen, events
 
 
@@ -438,7 +483,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     conditions, _, transformed, _ = needs
     listings = {}  # one directory walk per subject and root, shared by all tasks
     # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
-    index = 0
+    index, quote_reported = 0, False
     for task in tasks:
         seen_by_sub = {}
         for sub in selected:
@@ -448,6 +493,9 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                 if sub not in listings:
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
                 items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub])
+                if quote_reported:  # ONE quote warning per run, not one per subject
+                    items = [i for i in items if i["id"] != "tsv_quotes"]
+                quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
                 checks += items
                 prog.add(items)
                 index += 1
@@ -565,7 +613,7 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         raw = None  # sentinel: missing/unreadable model file
     try:  # canonical JSON: key order/whitespace differ between the browser's model_json and the saved file
         raw = json.dumps(json.loads(raw), sort_keys=True).encode()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         pass
     content = None if raw is None else hashlib.sha256(raw).hexdigest()
     payload = [
