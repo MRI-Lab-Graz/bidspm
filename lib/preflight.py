@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 
+from lib.config import clean_path as _path  # one normaliser for the check and the run
+
 ERROR, WARN = "error", "warn"
 
 
@@ -156,7 +158,7 @@ def validator_error(value, internal=False):
 def resolve_tasks(tasks, model_file, bids_dir):
     """The tasks to check/run: explicit TASKS, else the model's Input.task, else every task of the BIDS folder."""
     from lib.core import discover_tasks  # lazy: keeps module import light
-    return list(tasks or []) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
+    return _as_list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
 
 
 def _scan_length_warning(sub, preproc, events_rows):
@@ -524,9 +526,6 @@ def _as_list(value):
     return [] if value is None or isinstance(value, dict) else [str(value)]
 
 
-def _path(value):
-    """A path setting as typed in a form: surrounding blanks stripped, `~` expanded (once, here, for every entry point)."""
-    return os.path.expanduser(value.strip()) if isinstance(value, str) else value
 
 
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,

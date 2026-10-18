@@ -3,6 +3,7 @@
 import json
 import platform
 import subprocess
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -38,6 +39,11 @@ class ContainerConfig:
     spm_standalone_image: str = ""  # optional SPM standalone image (Docker) or SIF path (Apptainer)
 
 
+def clean_path(value):
+    """A path setting as typed in a form: surrounding blanks stripped, `~` expanded. Shared by the run and the readiness check."""
+    return os.path.expanduser(value.strip()) if isinstance(value, str) else value
+
+
 def load_config(config_file: str) -> Config:
     """Load configuration from JSON file."""
     if not Path(config_file).exists():
@@ -68,11 +74,11 @@ def load_config(config_file: str) -> Config:
             print(f"⚠️  Could not write selection.json: {e}")
 
     # Derive paths
-    wd = Path(data["WD"])
-    bids_dir = Path(data["BIDS_DIR"])
-    derivatives_raw = str(data.get("DERIVATIVES_DIR", "")).strip()
+    wd = Path(clean_path(data["WD"]))
+    bids_dir = Path(clean_path(data["BIDS_DIR"]))
+    derivatives_raw = clean_path(str(data.get("DERIVATIVES_DIR") or ""))
     derivatives_dir = Path(derivatives_raw) if derivatives_raw else wd
-    fmriprep_dir = Path(data["FMRIPREP_DIR"])
+    fmriprep_dir = Path(clean_path(data["FMRIPREP_DIR"]))
     verbosity = data.get("VERBOSITY", 3)
     container_type = str(data.get("container_type", "docker")).lower()
     local_action_timeout_seconds = int(data.get("LOCAL_ACTION_TIMEOUT_SECONDS", 900))
@@ -86,7 +92,7 @@ def load_config(config_file: str) -> Config:
         DERIVATIVES_DIR=derivatives_dir,
         SPACE=data["SPACE"],
         FWHM=data["FWHM"],
-        MODELS_FILE=data.get("MODELS_FILE", None),
+        MODELS_FILE=clean_path(data.get("MODELS_FILE", None)),
         TASKS=data["TASKS"],
         FMRIPREP_DIR=fmriprep_dir,
         VERBOSITY=verbosity,

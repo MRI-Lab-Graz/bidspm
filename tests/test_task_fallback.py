@@ -64,3 +64,24 @@ class TestPipelineUsesFallback(unittest.TestCase):
 
     def test_empty_tasks_and_model_without_task_discover(self):
         self.assertEqual(self._processed_tasks([]), ["found"])
+
+    def test_a_tasks_string_is_one_task(self):
+        self.assertEqual(self._processed_tasks("motor"), ["motor"])
+
+    def test_no_task_anywhere_is_a_failure_not_a_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bids").mkdir()
+            model = root / "m.json"
+            model.write_text("{}")
+            pipeline = Pipeline(PipelineOptions(actions=["stats"], dry_run=True, model_file=str(model)))
+            pipeline.config = replace(_make_config(root), TASKS=[])
+            pipeline.container_config = ContainerConfig(container_type="docker", docker_image="x:latest")
+            pipeline.model_file_path = model
+            with patch.object(Pipeline, "setup", return_value=True), \
+                 patch.object(Pipeline, "_check_standalone_image", return_value=True), \
+                 patch.object(Pipeline, "get_subjects_to_process", return_value=["01"]), \
+                 patch("lib.core.ensure_derivatives_dataset_description"), patch("lib.core.cleanup_tmp_directories"):
+                result = pipeline.run()
+        self.assertFalse(result.success)
+        self.assertTrue(any("task" in e.lower() for e in result.errors))
