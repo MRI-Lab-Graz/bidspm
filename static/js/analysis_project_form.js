@@ -160,6 +160,8 @@ async function saveProjectConfig() {
 
     const fwhm = Number.parseFloat(unifiedStudyConfig.FWHM);
     const verbosity = Number.parseInt(unifiedStudyConfig.VERBOSITY, 10);
+    if (!Number.isFinite(fwhm)) throw new Error('FWHM must be a number (0 or greater).');
+    if (!Number.isFinite(verbosity)) throw new Error('Verbosity must be a number between 0 and 3.');
     if (fwhm < 0) throw new Error('FWHM must be 0 or greater.');
     if (verbosity < 0 || verbosity > 3) throw new Error('Verbosity must be between 0 and 3.');
 
@@ -172,9 +174,9 @@ async function saveProjectConfig() {
         models_file: unifiedStudyConfig.MODELS_FILE || '',
         node_name: (document.getElementById('run_node_name')?.value || '').trim(),
         space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
-        fwhm: Number.isFinite(fwhm) ? fwhm : 6,
+        fwhm,
         tasks: unifiedStudyConfig.TASKS || [],
-        verbosity: Number.isFinite(verbosity) ? verbosity : 2,
+        verbosity,
         container_type: unifiedStudyConfig.container_type || 'docker',
         docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
         apptainer_image: unifiedStudyConfig.apptainer_image === APPTAINER_PLACEHOLDER ? '' : (unifiedStudyConfig.apptainer_image || ''),

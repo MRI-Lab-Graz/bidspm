@@ -177,6 +177,24 @@ class TestProjectFormValues(FidelityCase):
         self.assertEqual(self.project_config()["fwhm"], 5)
 
 
+class TestEmptyRunOptionsRefused(FidelityCase):
+    def refused(self, field, label):
+        self.new_project(fwhm=5, verbosity=1)
+        page = self.open_analysis("options")
+        page.eval_on_selector(f"#input-{field}", "e => { e.value = ''; e.dispatchEvent(new Event('change')); }")
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        page.wait_for_function("t => document.getElementById('validation-result').textContent.includes(t)", arg=label)
+        self.assertEqual(page.input_value(f"#input-{field}"), "")
+        config = self.project_config()
+        self.assertEqual((config["fwhm"], config["verbosity"]), (5, 1))
+
+    def test_empty_fwhm_is_refused_not_saved_as_6(self):
+        self.refused("FWHM", "FWHM")
+
+    def test_empty_verbosity_is_refused_not_saved_as_2(self):
+        self.refused("VERBOSITY", "Verbosity")
+
+
 class TestEditProjectDialog(FidelityCase):
     def test_edit_without_changes_keeps_an_unlisted_space_and_the_other_image(self):
         self.new_project(space="MNI152NLin2009cAsym:res-2", container_type="apptainer",
