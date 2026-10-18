@@ -81,6 +81,6 @@ def start_server(tmp: Path):
 
 def go_to_stage(page, name: str) -> None:
     """Show one analysis stage (folders|model|options|run) and wait until it is the current one."""
-    page.wait_for_function("window.analysisStages !== undefined")
+    page.wait_for_function("document.body.dataset.ready === '1'")  # the late project fill would re-render
     page.evaluate("name => window.analysisStages.goTo(name)", name)
     page.wait_for_function("name => window.analysisStages.current() === name", arg=name)

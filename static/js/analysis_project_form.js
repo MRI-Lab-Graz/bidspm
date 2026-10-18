@@ -91,6 +91,12 @@ function restoreRunOptions(cfg) {
     if (node) { node.value = cfg.node_name || ''; node.dispatchEvent(new Event('input')); }
 }
 
+// Settings fields the user edited (typed, browsed) since the page loaded: the late project fill keeps their values.
+const touchedSettings = new Set();
+const markTouched = e => { if (e.target.matches?.('.dynamic-input')) touchedSettings.add(e.target.dataset.key); };
+document.addEventListener('input', markTouched, true);  // capture: also non-bubbling events
+document.addEventListener('change', markTouched, true);
+
 // --- STATIC FORM INITIALIZATION ---
 async function initApp() {
     try {
@@ -107,9 +113,10 @@ async function initApp() {
 
         if (document.getElementById('input-MODELS_FILE')?.value) {
             await openModelEditor({ scrollIntoView: false, showStatus: false });
-            refreshModelTasks();
+            await refreshModelTasks();  // re-ticks the tasks and clears the status line: part of init, not after it
         }
     } catch (err) { console.error('App init failed:', err); }
+    document.body.dataset.ready = '1';  // first fill, task/space detection and stage render are done (tests wait on it)
 }
 
 async function loadProjectConfig() {
@@ -142,7 +149,11 @@ async function loadProjectConfig() {
             spm_standalone_image: config.spm_standalone_image || '',
             skip_validation: saved.skip_validation !== false
         };
-        
+        touchedSettings.forEach(key => {
+            const el = document.getElementById(`input-${key}`);
+            if (el && key in unifiedStudyConfig) unifiedStudyConfig[key] = el.value;
+        });
+
         await syncInternalToForm();
     } catch (err) {
         console.error('Failed to load project config:', err);

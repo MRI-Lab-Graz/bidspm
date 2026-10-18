@@ -71,9 +71,7 @@ class FidelityCase(unittest.TestCase):
 
     def open_analysis(self, stage=None):
         page = self.open(f"/analysis/{self.pid}", stage)
-        # initApp is done once the model workspace has loaded (it runs after the form was filled from the project)
-        page.wait_for_function("typeof modelEditorDraft === 'object' && modelEditorDraft !== null")
-        page.wait_for_load_state("networkidle")  # the form fill after loadProjectConfig awaits task/space requests
+        page.wait_for_function("document.body.dataset.ready === '1'")  # initApp done: form filled, model loaded
         return page
 
 
