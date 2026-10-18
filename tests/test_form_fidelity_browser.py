@@ -215,6 +215,25 @@ class TestProjectFormValues(FidelityCase):
         self.assertEqual(self.project_config()["fwhm"], 5)
 
 
+class TestStatsWorkersRefused(FidelityCase):
+    def test_a_negative_or_fractional_workers_value_is_refused_and_not_sent(self):
+        self.new_project(stats_workers=3)
+        page = self.open_analysis("run")
+        page.evaluate("document.querySelectorAll('input[name=action]').forEach(c => c.checked = c.value === 'smooth')")
+        runs = []
+        page.route("**/run", lambda route: (runs.append(1), route.abort()))
+        for bad in ("-2", "1.5", "0"):
+            page.eval_on_selector("#stats_workers", "(e, v) => { e.value = v; e.dispatchEvent(new Event('change')); }", bad)
+            page.evaluate("document.getElementById('btn-run-cached').click()")
+            page.wait_for_function("document.getElementById('validation-result').textContent.includes('Parallel subjects')")
+            page.evaluate("document.getElementById('validation-result').innerHTML = ''")
+            page.evaluate("document.getElementById('btn-save-only').click()")
+            page.wait_for_function("document.getElementById('validation-result').textContent.includes('Parallel subjects')")
+            page.evaluate("document.getElementById('validation-result').innerHTML = ''")
+        self.assertEqual(runs, [])
+        self.assertEqual(self.project_config()["stats_workers"], 3)
+
+
 class TestEmptyRunOptionsRefused(FidelityCase):
     def refused(self, field, label):
         self.new_project(fwhm=5, verbosity=1)

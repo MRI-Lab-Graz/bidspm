@@ -3,6 +3,14 @@
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
 // --- FORM DATA HANDLERS ---
+// '' when the parallel-subjects field is usable (empty means the default of 4), else the message to show.
+function statsWorkersProblem() {
+    const raw = (document.getElementById('stats_workers')?.value || '').trim();
+    if (raw === '') return '';
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 ? '' : 'Parallel subjects must be a whole number of 1 or more.';
+}
+
 function getFullFormData() {
     const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
     return {
@@ -174,6 +182,7 @@ async function saveProjectConfig() {
     if (!Number.isFinite(fwhm)) throw new Error('FWHM must be a number (0 or greater).');
     if (!Number.isFinite(verbosity)) throw new Error('Verbosity must be a number between 0 and 3.');
     if (fwhm < 0) throw new Error('FWHM must be 0 or greater.');
+    if (statsWorkersProblem()) throw new Error(statsWorkersProblem());
     if (verbosity < 0 || verbosity > 3) throw new Error('Verbosity must be between 0 and 3.');
 
     // Map back to project config format

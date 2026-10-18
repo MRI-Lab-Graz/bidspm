@@ -98,6 +98,14 @@ function parseFailedSubjects() {
 async function startExecution(payload) {
     if (payload.actions.length === 0) { alert('Please select at least one action.'); return; }
 
+    const workersProblem = statsWorkersProblem();
+    if (workersProblem) {
+        const out = document.getElementById('validation-result');
+        out.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Not started: ${escapeHtml(workersProblem)}</div>`;
+        revealResult(out);
+        return;
+    }
+
     terminal.innerText = '--- EXECUTION TRIGGERED ---\n';
     document.getElementById('run-failure-summary')?.classList.add('d-none');
     execStatus.innerText = 'RUNNING';
