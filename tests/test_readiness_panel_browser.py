@@ -339,6 +339,15 @@ class TestReadinessPanelMocked(unittest.TestCase):
         self.assertIn("(done)", page.text_content("#preflight-panel [data-phase=folders]"))
         self.assertIn("(running)", page.text_content("#preflight-panel [data-phase=subjects]"))
 
+    def test_live_region_is_not_atomic_and_progress_stays_silent(self):
+        page = self.open_page([sse(HEAD), sse([done()], first_seq=7)])
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-lost")
+        self.assertEqual(page.get_attribute("#preflight-panel", "aria-atomic"), "false")
+        self.assertEqual(page.get_attribute("#preflight-panel .rp-progress", "aria-live"), "off")
+        page.click("#preflight-panel .rp-retry")
+        page.wait_for_selector("#preflight-panel[aria-live=polite][aria-atomic=false] .preflight-verdict")
+
     def test_verdict_and_notices_land_inside_the_live_region(self):
         page = self.open_page([sse(HEAD), sse([done()], first_seq=7)])
         page.click("#btn-preflight")
