@@ -262,6 +262,8 @@
             const modelObj = node.Model;
             if (!modelObj || typeof modelObj !== 'object' || Array.isArray(modelObj)) return;
 
+            // Deliberate Run-level normalisation (not an F6 regression): a Model without X gets X: [], HRF.Variables are
+            // trimmed/deduped/limited to Model.X, and HRF.Model defaults to "spm". See syncModelXHrfVariables.
             if (!Array.isArray(modelObj.X)) {
                 modelObj.X = [];
             }

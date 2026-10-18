@@ -118,6 +118,18 @@ class TestModelRoundTrip(FidelityCase):
         saved = self.model_path.read_text()
         self.assertEqual(json.dumps(json.loads(saved)), json.dumps(model))
 
+    def test_empty_contrasts_are_dropped_on_save(self):
+        # Deliberate (not an F6 regression): empty Contrasts lists are invalid per the Stats Models spec.
+        model = copy.deepcopy(MODEL)
+        model["Nodes"][0]["Contrasts"] = []
+        model["Nodes"][0]["DummyContrasts"] = {"Contrasts": [], "Test": "t"}
+        self.new_project(model)
+        page = self.open_model()
+        self.save_model(page)
+        node = json.loads(self.model_path.read_text())["Nodes"][0]
+        self.assertNotIn("Contrasts", node)
+        self.assertEqual(node["DummyContrasts"], {"Test": "t"})
+
     def test_a_cleared_number_field_removes_the_key_instead_of_writing_zero(self):
         model = copy.deepcopy(MODEL)
         model["Nodes"][0]["Model"]["Options"] = {"HighPassFilterCutoffHz": 0.008}
