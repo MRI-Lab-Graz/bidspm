@@ -1,5 +1,6 @@
 """The one TSV reader. BIDS TSVs have no quoting, so a '"' is an ordinary character (csv defaults would merge rows)."""
 import csv
+import re
 from contextlib import contextmanager
 
 
@@ -33,14 +34,30 @@ def read_header(path):
     return read_head(path)[0]
 
 
+_BLANK_LINE = re.compile(rb"\n[ \t\r]*(?=\n)")  # an empty or whitespace-only line terminated by a newline
+QUOTE_WARNING = "values are wrapped in quotes; BIDS TSV files must not quote fields"
+
+
 def count_lines(path):
-    """Number of non-header lines, counted on raw bytes (no CSV parsing)."""
-    n, last = 0, b"\n"
+    """Number of non-header, non-blank lines, counted on raw bytes (no CSV parsing). LF, CRLF and CR-only endings."""
     with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            n += chunk.count(b"\n")
-            last = chunk[-1:]
-    return max(n + (last != b"\n") - 1, 0)
+        data = fh.read()
+    if b"\n" not in data:
+        data = data.replace(b"\r", b"\n")
+    n = data.count(b"\n") - sum(1 for _ in _BLANK_LINE.finditer(data))
+    n += bool(data[data.rfind(b"\n") + 1:].strip())  # last line without a final newline
+    return max(n - 1, 0)
+
+
+def quoted(values):
+    """True when a field is wrapped in double quotes. This module reads quotes literally (as bids-matlab does), so the
+    caller shows QUOTE_WARNING: a stray quote inside a value is data, a wrapped field is a mistake."""
+    return any(isinstance(v, str) and len(v) >= 2 and v[0] == v[-1] == '"' for v in values)
+
+
+def has_quotes(path):
+    header, first = read_head(path)
+    return quoted(header) or quoted(first or [])
 
 
 def duplicates(columns):

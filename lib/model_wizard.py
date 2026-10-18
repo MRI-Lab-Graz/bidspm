@@ -12,7 +12,7 @@ import os
 import re
 from pathlib import Path
 
-from lib.tsv import duplicates, read_tsv
+from lib.tsv import QUOTE_WARNING, duplicates, quoted, read_tsv
 
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 MOTION6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
@@ -410,6 +410,8 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
         except (OSError, UnicodeError, csv.Error):
             continue
         used += 1
+        if QUOTE_WARNING not in warnings and (quoted(cols) or quoted(rows[0].values() if rows else [])):
+            warnings.append(QUOTE_WARNING)
         warnings += [w for c in duplicates(cols) if (w := f"duplicate column {c} (e.g. {path.name})") and not any(x.startswith(f"duplicate column {c} ") for x in warnings)]
         for row in rows:
             for col, val in row.items():

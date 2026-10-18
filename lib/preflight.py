@@ -20,7 +20,7 @@ from pathlib import Path
 
 from lib.config import clean_path as _path  # one normaliser for the check and the run
 from lib.model_path import resolve_model_file
-from lib.tsv import count_lines, duplicates, read_head
+from lib.tsv import QUOTE_WARNING, count_lines, duplicates, has_quotes, quoted, read_head
 from lib.tsv import read_tsv as _read_tsv
 
 ERROR, WARN = "error", "warn"
@@ -244,6 +244,8 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
             events_ok = False
             continue
         event_cols |= set(cols)
+        if has_quotes(path):
+            out.append(_item("tsv_quotes", WARN, QUOTE_WARNING, f"Re-export {path.name} without quoting the fields.", sub))
         dup = duplicates(cols)
         if dup:
             out.append(_item("events_columns", ERROR, f"{path.name} has duplicate column {', '.join(dup)}",
@@ -276,6 +278,8 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
                 out.append(_item("confound_columns", ERROR, f"{f.name} header cannot be read as UTF-8 text ({e})",
                                  "Re-run fMRIPrep to regenerate the confounds file.", sub))
                 continue
+            if quoted(cols) or quoted(first or []):
+                out.append(_item("tsv_quotes", WARN, QUOTE_WARNING, f"Re-run fMRIPrep or re-export {f.name} without quoting.", sub))
             missing = [n for n in nuisance if not _column_indices(cols, n)]
             if missing:
                 out.append(_item("confound_columns", WARN if transformed else ERROR,
@@ -479,7 +483,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     conditions, _, transformed, _ = needs
     listings = {}  # one directory walk per subject and root, shared by all tasks
     # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
-    index = 0
+    index, quote_reported = 0, False
     for task in tasks:
         seen_by_sub = {}
         for sub in selected:
@@ -489,6 +493,9 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                 if sub not in listings:
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
                 items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub])
+                if quote_reported:  # ONE quote warning per run, not one per subject
+                    items = [i for i in items if i["id"] != "tsv_quotes"]
+                quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
                 checks += items
                 prog.add(items)
                 index += 1

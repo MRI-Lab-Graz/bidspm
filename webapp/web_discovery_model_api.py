@@ -17,7 +17,7 @@ from lib import (
 )
 from lib.model_wizard import second_level_nodes
 from lib.safe_paths import UnsafePath, safe_target
-from lib.tsv import open_tsv
+from lib.tsv import QUOTE_WARNING, has_quotes, open_tsv
 
 
 PathResolver = Callable[[str], str]
@@ -427,6 +427,7 @@ def _discover_participants_info(bids_dir: Path, max_values_per_column: int = 20)
             'sample_values': sample_values,
             'numeric_stats': numeric_stats,
             'sample_status': 'present',
+            'warnings': [QUOTE_WARNING] if has_quotes(participants_file) else [],
         }
     except Exception:
         return {**default_payload, 'sample_status': 'error'}
