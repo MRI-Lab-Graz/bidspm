@@ -47,7 +47,9 @@ def _contrast_name(ref):
         ref = head
     name = re.sub(r"[^A-Za-z0-9_]+", "_", ref.removeprefix("trial_type.")).strip("_")
     if not name:
-        raise WizardError(f"cannot derive a contrast name from {ref!r}")
+        value = ref.removeprefix("trial_type.")
+        raise WizardError(f"trial_type value {value!r} has no letters, digits or underscores, so no contrast name can be derived from it; "
+                          f"rename it in the events file, rename/merge it with the Merge recipe, or uncheck it in step 1")
     return name
 
 
@@ -161,10 +163,10 @@ def _bool_param(label, value):
     return _expect(False if value is None else value, bool, f"recipe {label}")
 
 
-def _safe(label, value, hyphen=False):
+def _safe(label, value, hyphen=False, step="this"):
     if not value or (UNSAFE_HYPHEN_OK if hyphen else UNSAFE).search(value) or not _coerce(value):
         allowed = "letters, digits, underscores and hyphens" if hyphen else "letters, digits and underscores"
-        raise WizardError(f"{label} {value!r} cannot be used in a transformer query (only {allowed} are supported); rename it in the events first")
+        raise WizardError(f"{label} {value!r} cannot be used in the {step} recipe (its filter query and output names support only {allowed}); rename it in the events file or uncheck it in step 1")
 
 
 def _need_condition(state, condition):
@@ -207,7 +209,7 @@ def _second_filter(state, source, column, value, condition, rename):
     return f"{out}.{out}"
 
 
-def _split(state, condition, column, values, keep_original):
+def _split(state, condition, column, values, keep_original, step):
     _str_param("condition", condition)
     _str_param("column", column)
     _str_list_param("values", values)
@@ -221,9 +223,9 @@ def _split(state, condition, column, values, keep_original):
     unknown = [v for v in values if v not in state["columns"][column]]
     if unknown:
         raise WizardError(f"column {column!r} has no value {', '.join(map(repr, unknown))}")
-    _safe("column", column)
+    _safe("column", column, step=step)
     for label, v in [("condition", condition)] + [("value", v) for v in values]:
-        _safe(label, v, hyphen=True)
+        _safe(label, v, hyphen=True, step=step)
     source = _first_filter(state, condition)
     rename = keep_original or len(values) > 1
     state["regressors"] += [_second_filter(state, source, column, v, condition, rename) for v in values]
@@ -238,7 +240,7 @@ def _split(state, condition, column, values, keep_original):
          {"name": "value", "kind": "value", "label": "Keep rows where it equals", "required": True},
          {"name": "keep_original", "kind": "bool", "label": "Keep the original condition too", "required": False}])
 def valid_only(state, p):
-    _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"))
+    _split(state, p.get("condition"), p.get("column"), [p.get("value")], p.get("keep_original"), "valid_only")
     others = [v for v in state["columns"][p["column"]] if v != p["value"] and v not in NA]
     if others and not p.get("keep_original"):
         state["warnings"].append(f"{p['condition']}: trials with {p['column']} = {', '.join(others)} are not modelled")
@@ -257,7 +259,7 @@ def split_by_column(state, p):
         if column in state["numeric"]:
             raise WizardError(f"column {column!r} is numeric; choose the values to split by explicitly (or use the parametric modulator recipe)")
         values = [v for v in state["columns"].get(column, []) if v not in NA]
-    _split(state, p.get("condition"), column, values, p.get("keep_original"))
+    _split(state, p.get("condition"), column, values, p.get("keep_original"), "split_by_column")
 
 
 @recipe("merge_rename", "Merge or rename conditions",
@@ -271,8 +273,8 @@ def merge_rename(state, p):
         raise WizardError("pick at least one condition to merge or rename")
     for s in sources:
         _need_condition(state, s)
-        _safe("condition", s, hyphen=True)
-    _safe("new name", target, hyphen=True)
+        _safe("condition", s, hyphen=True, step="merge_rename")
+    _safe("new name", target, hyphen=True, step="merge_rename")
     ref = f"trial_type.{target}"
     if ref not in state["regressors"]:
         if target in state["columns"]["trial_type"]:
@@ -352,11 +354,6 @@ def build_model(choices, scan):
         if spm_name in seen:
             raise WizardError(f"{seen[spm_name]!r} and {r!r} would get the same name ({spm_name!r}) in SPM; rename or merge one of them")
         seen[spm_name] = r
-    for r in regressors:  # names become MATLAB field names / "<column>.<value>" strings in bidspm
-        if r.startswith("trial_type.") and UNSAFE_HYPHEN_OK.search(r[len("trial_type."):]):
-            value = r[len("trial_type."):]
-            raise WizardError(f"trial_type value {value!r} has characters other than letters, digits, underscore and hyphen, which MATLAB/bidspm "
-                              f"field names cannot hold; rename it in the events file or uncheck it in step 1")
     nuisance = _nuisance(choices.get("nuisance", "none"), regressors)
     if isinstance(choices.get("nuisance"), list):
         state["warnings"] += _unknown_confounds(nuisance, scan)

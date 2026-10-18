@@ -60,19 +60,32 @@ def test_route_adds_scan_warnings_to_the_preview(tmp_path):
     assert any("duplicate column trial_type" in w for w in warnings)
 
 
-# ---- M10 ----------------------------------------------------------------------------------------
-def test_non_ascii_trial_type_error_names_the_value_the_reason_and_the_way_out():
+# ---- M10 (relaxed after review: only what really fails is refused) -----------------------------
+def scan_with(*values):
+    return {**SCAN, "columns": {**SCAN["columns"], "trial_type": list(values)}}
+
+
+def test_non_ascii_only_value_gets_a_clear_contrast_name_message():
     with pytest.raises(WizardError) as exc:
         build_model(choices(), UNI)
     msg = str(exc.value)
-    assert "'é'" in msg and "MATLAB" in msg and "rename it in the events file or uncheck it in step 1" in msg
+    assert "'é'" in msg and "contrast name" in msg and "MATLAB" not in msg
+    assert "rename it in the events" in msg and "Merge" in msg and "uncheck it in step 1" in msg
 
 
-@pytest.mark.parametrize("value", ["a b", "x.y", "ü", "naïve", "a/b", "日本"])
-def test_other_unsupported_characters_get_the_same_message(value):
-    scan = {**SCAN, "columns": {**SCAN["columns"], "trial_type": ["a", value]}}
-    with pytest.raises(WizardError, match="uncheck it in step 1"):
-        build_model(choices(), scan)
+@pytest.mark.parametrize("value", ["a b", "x.y", "naïve", "a/b"])
+def test_spaces_dots_and_partly_non_ascii_values_build_as_plain_regressors(value):
+    result = build_model(choices(), scan_with("a", value))
+    assert result["preview"]["regressors"] == ["trial_type.a", f"trial_type.{value}"]
+    names = result["preview"]["contrasts"]
+    assert len(set(names)) == len(names) and all(n.replace("_", "").isalnum() for n in names)
+
+
+def test_values_that_sanitise_to_the_same_contrast_name_are_still_caught():
+    with pytest.raises(WizardError, match="duplicate contrast names"):
+        build_model(choices(), scan_with("a b", "a_b"))
+    assert build_model(choices(contrasts={"auto": False, "pairs": [{"name": "p", "positive": ["trial_type.a b"], "negative": ["trial_type.a_b"]}]}),
+                       scan_with("a b", "a_b"))["preview"]["regressors"] == ["trial_type.a b", "trial_type.a_b"]
 
 
 def test_excluded_unsupported_condition_does_not_block():
@@ -80,15 +93,25 @@ def test_excluded_unsupported_condition_does_not_block():
     assert result["preview"]["regressors"] == ["trial_type.a", "trial_type.b"]
 
 
-def test_condition_consumed_by_a_recipe_does_not_block_at_the_end():
-    # 'a' and 'b' merge away; the unsupported value is excluded: nothing unsupported reaches the model
-    result = build_model(choices(exclude=["é"], recipes=[{"id": "merge_rename", "sources": ["a", "b"], "target": "ab"}]), UNI)
-    assert result["preview"]["regressors"] == ["trial_type.ab"]
+def test_unsupported_value_without_auto_contrasts_builds():
+    result = build_model(choices(contrasts={"auto": False, "pairs": [{"name": "p", "positive": ["trial_type.a"], "negative": ["trial_type.b"]}]}), UNI)
+    assert "trial_type.é" in result["preview"]["regressors"]
+
+
+@pytest.mark.parametrize("recipe", [
+    {"id": "valid_only", "condition": "a b", "column": "response_validity", "value": "valid"},
+    {"id": "split_by_column", "condition": "a b", "column": "response_validity"},
+    {"id": "merge_rename", "sources": ["a b"], "target": "t"},
+])
+def test_value_reaching_a_filter_or_replace_is_rejected_naming_the_recipe(recipe):
+    with pytest.raises(WizardError) as exc:
+        build_model(choices(recipes=[recipe]), scan_with("a b", "b"))
+    msg = str(exc.value)
+    assert "'a b'" in msg and recipe["id"] in msg and "uncheck it in step 1" in msg
 
 
 def test_hyphen_and_underscore_values_are_fine():
-    scan = {**SCAN, "columns": {**SCAN["columns"], "trial_type": ["a-1", "b_2"]}}
-    assert build_model(choices(), scan)["preview"]["regressors"] == ["trial_type.a-1", "trial_type.b_2"]
+    assert build_model(choices(), scan_with("a-1", "b_2"))["preview"]["regressors"] == ["trial_type.a-1", "trial_type.b_2"]
 
 
 # ---- L5 -----------------------------------------------------------------------------------------
