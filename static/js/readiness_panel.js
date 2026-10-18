@@ -16,7 +16,6 @@ window.ReadinessPanel = (function () {
     function reportNodes(report) {
         const tone = {blocked: 'danger', warnings: 'warning', ready: 'success'}[report.verdict] || 'secondary';
         const verdict = el('div', `alert alert-${tone} py-1 mb-1 preflight-verdict`, 'Readiness: ');
-        if (report.failed) verdict.setAttribute('role', 'alert');
         verdict.append(el('strong', '', report.verdict || 'unknown'));
         const list = el('ul', 'list-unstyled mb-0');
         for (const c of report.checks || []) list.append(itemNode(c));
@@ -31,6 +30,9 @@ window.ReadinessPanel = (function () {
     }
 
     function renderReport(target, report) {
+        // The status region is the single announcer: banners inside it carry no role=alert of their own.
+        target.setAttribute('role', 'status');
+        target.setAttribute('aria-live', 'polite');
         target.replaceChildren(...reportNodes(report));
     }
 
@@ -129,16 +131,37 @@ window.ReadinessPanel = (function () {
             }
         }
 
-        // Reload/navigation: free the server slot of a live job (beacons survive the unload, plain fetches may not).
+        // Reload/navigation/bfcache: free the server slot of a live job (beacons survive the unload, plain fetches may not).
+        // Before the start answered there is no id yet: `stopped` makes the start handler cancel the job on arrival.
+        let hiddenCancel = false;
         function onPageHide() {
-            if (!jobId || finished || stopped) return;
+            if (finished || stopped) return;
+            hiddenCancel = true;
+            stopped = true;
+            if (source) source.close();
+            source = null;
+            if (!jobId) return;
             const url = cancelUrl(jobId);
             if (!(navigator.sendBeacon && navigator.sendBeacon(url))) fetch(url, {method: 'POST', keepalive: true}).catch(() => {});
         }
+        // Restored from the back/forward cache: the run was cancelled by the pagehide, do not leave it looking live.
+        function onPageShow(e) {
+            if (!e.persisted || !hiddenCancel) return;
+            hiddenCancel = false;
+            stopListening();
+            notice.replaceChildren();
+            cancelBtn.remove(); bar.remove();
+            status.textContent = 'Cancelled because the page was hidden';
+        }
+        function stopListening() {
+            window.removeEventListener('pagehide', onPageHide);
+            window.removeEventListener('pageshow', onPageShow);
+        }
         window.addEventListener('pagehide', onPageHide);
+        window.addEventListener('pageshow', onPageShow);
 
         function end() {
-            window.removeEventListener('pagehide', onPageHide);
+            stopListening();
             finished = true;
             if (source) source.close();
             source = null;
@@ -157,7 +180,6 @@ window.ReadinessPanel = (function () {
             retry.type = 'button';
             retry.addEventListener('click', () => { if (live()) connect(); });
             const lost = el('div', 'alert alert-warning py-1 mb-1 rp-lost', 'Lost connection to the server.');
-            lost.setAttribute('role', 'alert');
             lost.append(retry);
             notice.replaceChildren(lost);
         }
@@ -222,7 +244,7 @@ window.ReadinessPanel = (function () {
         }
 
         function abandon() {
-            window.removeEventListener('pagehide', onPageHide);
+            stopListening();
             stopped = true;
             if (source) source.close();
             source = null;

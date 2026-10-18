@@ -20,7 +20,7 @@ import uuid
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from lib.preflight import remember, run_preflight_from_config, signature
+from lib.preflight import remember, run_preflight_from_config, signature, validator_error
 
 MAX_FINISHED_JOBS = 20
 MAX_RUNNING_JOBS = 3
@@ -109,6 +109,7 @@ def _parse_start(data):
         (actions is None or isinstance(actions, list), "actions must be a list"),
         (isinstance(model, str), "model must be a string"),
         (isinstance(validator, str), "validator must be a string"),
+        (validator_error(validator, internal=True) is None, validator_error(validator, internal=True)),
     ):
         if not ok:
             return None, None, message
@@ -131,6 +132,9 @@ def register_preflight_routes(app: Flask) -> None:
         data = data if isinstance(data, dict) else {}
         config = data.get('config')
         actions = data.get('actions')
+        problem = validator_error(data.get('validator'), internal=True)
+        if problem:
+            return _bad(problem)
         return jsonify(run_preflight_from_config(
             config if isinstance(config, dict) else {},
             model=data.get('model') or '', validator=data.get('validator') or 'auto',

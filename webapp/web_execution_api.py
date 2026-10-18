@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from lib.preflight import recent, remember, run_preflight_from_config, signature
+from lib.preflight import recent, remember, run_preflight_from_config, signature, validator_error
 from lib.project_manager import GLOBAL_CONFIG_DIR
 
 
@@ -120,6 +120,10 @@ def register_execution_routes(
 
         if not actions:
             return jsonify({'error': 'No actions selected'}), 400
+
+        validator_problem = validator_error(data.get('validator'))
+        if validator_problem:
+            return jsonify({'error': validator_problem}), 400
 
         execution_id = secrets.token_hex(8)
         execution_registry.current_project_id = project_id

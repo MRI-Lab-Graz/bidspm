@@ -574,17 +574,9 @@ def discover_subjects(config: Config) -> List[str]:
 
 
 def discover_tasks(bids_dir: Path) -> List[str]:
-    """Discover tasks from BIDS directory."""
-    tasks = set()
-    for root, dirs, files in os.walk(bids_dir):
-        if 'func' in root:
-            for f in files:
-                if '_task-' in f:
-                    parts = f.split('_task-')
-                    if len(parts) > 1:
-                        task = parts[1].split('_')[0].split('.')[0]
-                        tasks.add(task)
-    return sorted(list(tasks))
+    """Tasks in the file names of sub-*/[ses-*/]func (derivatives and sourcedata are not looked at)."""
+    from .model_wizard import bids_tasks  # lists only the func folders instead of walking the whole tree
+    return bids_tasks(bids_dir)
 
 
 def discover_spaces(fmriprep_dir: Path, tasks: Optional[List[str]] = None) -> List[str]:
@@ -1274,7 +1266,18 @@ class Pipeline:
             subjects_failed = []
             actions_completed = set()
 
-            for task in self.config.TASKS:
+            from .preflight import _as_list, resolve_tasks  # same fallback as the readiness check
+            tasks = resolve_tasks(
+                self.config.TASKS, self.model_file_path or self.options.model_file or self.config.MODELS_FILE,
+                self.config.BIDS_DIR)
+            if not tasks:
+                self._log_error("No task found: set TASKS, the model's Input.task, or check the BIDS folder")
+                return PipelineResult(
+                    success=False, subjects_processed=[], subjects_failed=[], actions_completed=[],
+                    log_file=self.log_file, errors=self.errors, warnings=self.warnings)
+            if not _as_list(self.config.TASKS):
+                self._log(f">>> No TASKS in the config, using: {', '.join(tasks)}")
+            for task in tasks:
                 self._log(f">>> Processing task: {task}")
 
                 if 'smooth' in self.options.actions and self.options.smooth_backend == 'fast':

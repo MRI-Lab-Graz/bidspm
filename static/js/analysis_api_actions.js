@@ -3,13 +3,25 @@
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
 // --- API CALLS ---
+// One request per BIDS folder: concurrent callers share the promise, later ones reuse the answer;
+// `force` re-reads a settled answer (explicit refresh) and a failed request is not remembered.
+const bidsTasksRequests = new Map();
+function fetchBidsTasks(bidsDir, force = false) {
+    const known = bidsTasksRequests.get(bidsDir);
+    if (known && !(force && known.settled)) return known.promise;
+    const entry = {settled: false};
+    entry.promise = fetch(`/get_bids_tasks?path=${encodeURIComponent(bidsDir)}`).then(res => res.json());
+    entry.promise.then(() => { entry.settled = true; }, () => bidsTasksRequests.delete(bidsDir));
+    bidsTasksRequests.set(bidsDir, entry);
+    return entry.promise;
+}
+
 async function refreshTasks() {
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value;
     if (!bidsDir) return;
     const container = document.getElementById('tasks-container');
     try {
-        const res = await fetch(`/get_bids_tasks?path=${encodeURIComponent(bidsDir)}`);
-        const tasks = await res.json();
+        const tasks = await fetchBidsTasks(bidsDir, true);
         container.innerHTML = '';
         if (tasks.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
         tasks.forEach(t => {

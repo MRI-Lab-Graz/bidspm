@@ -202,18 +202,17 @@ class TestReadinessPanelMocked(unittest.TestCase):
     def test_pagehide_cancels_a_live_job_but_not_a_finished_one(self):
         page = self.open_page([sse(HEAD + [subject_step(1)])])
         page.route(STREAM, lambda r: None)  # never answered: the run stays live
-        page.click("#btn-preflight")
-        page.wait_for_function("document.querySelector('#preflight-panel .rp-cancel')")
-        page.wait_for_timeout(300)  # the job id is known once the start answered
-        page.evaluate("window.dispatchEvent(new Event('pagehide'))")
-        page.wait_for_timeout(500)
-        self.assertTrue(any(u.endswith("/api/preflight/cancel/j1") for u in self.requests), self.requests)
+        with page.expect_request(lambda r: "/api/preflight/stream/" in r.url):  # the job id is known once streaming starts
+            page.click("#btn-preflight")
+        with page.expect_request(lambda r: r.url.endswith("/api/preflight/cancel/j1")):
+            page.evaluate("window.dispatchEvent(new Event('pagehide'))")
         done_page = self.open_page([sse(HEAD + [subject_step(1), done()])])
         before = len(self.requests)
         done_page.click("#btn-preflight")
         done_page.wait_for_selector("#preflight-panel .preflight-verdict")
-        done_page.evaluate("window.dispatchEvent(new Event('pagehide'))")
-        done_page.wait_for_timeout(500)
+        with self.assertRaises(Exception):  # no cancel request may follow for a finished job
+            with done_page.expect_request(lambda r: "/cancel/" in r.url, timeout=1000):
+                done_page.evaluate("window.dispatchEvent(new Event('pagehide'))")
         self.assertFalse(any("/cancel/" in u for u in self.requests[before:]), self.requests)
 
     def test_stream_cut_before_terminal_shows_lost_connection_and_retry_resumes(self):
@@ -478,12 +477,46 @@ class TestReadinessPanelMocked(unittest.TestCase):
         page.evaluate(self.SEND, [0, {**done([item("bad")], "blocked"), "seq": 99}])
         self.assertIn("blocked", page.evaluate(self.ANNOUNCED))
 
-    def test_failure_and_lost_connection_banners_are_alerts(self):
+    def test_failure_and_lost_connection_are_announced_once_by_the_status_region(self):
         page = self.open_page([sse(HEAD), sse([ev("error", "done", message="RuntimeError: boom")], first_seq=7)])
         page.click("#btn-preflight")
-        page.wait_for_selector("#preflight-panel .rp-lost[role=alert]")
+        page.wait_for_selector("#preflight-panel[role=status] .rp-lost")
+        self.assertEqual(page.locator("#preflight-panel [role=alert]").count(), 0)
+        self.assertIn("Lost connection", page.text_content("#preflight-panel[aria-live=polite] .rp-lost"))
         page.click("#preflight-panel .rp-retry")
-        page.wait_for_selector("#preflight-panel .preflight-verdict[role=alert]")
+        page.wait_for_selector("#preflight-panel[role=status] .preflight-verdict")
+        self.assertEqual(page.locator("#preflight-panel [role=alert]").count(), 0)
+        self.assertIn("RuntimeError: boom", page.text_content("#preflight-panel[aria-live=polite]"))
+
+    def test_pagehide_persisted_marks_the_cancelled_run_when_the_page_comes_back(self):
+        page = self.open_page([sse(HEAD + [subject_step(1)])])
+        page.route(STREAM, lambda r: None)  # never answered: the run stays live
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-cancel")
+        with page.expect_request(lambda r: r.url.endswith("/api/preflight/cancel/j1")):
+            page.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}))")
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+        page.wait_for_function("document.querySelector('#preflight-panel .rp-status').textContent.includes('page was hidden')")
+        self.assertEqual(page.locator("#preflight-panel .rp-cancel").count(), 0)
+        self.assertIn("text-muted", page.get_attribute("#preflight-panel .rp-status", "class"))
+
+    def test_pageshow_without_a_hidden_cancel_changes_nothing(self):
+        page = self.open_page([sse(HEAD + [subject_step(1)])])
+        page.route(STREAM, lambda r: None)
+        page.click("#btn-preflight")
+        page.wait_for_selector("#preflight-panel .rp-cancel")
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+        self.assertEqual(page.locator("#preflight-panel .rp-cancel").count(), 1)
+
+    def test_pagehide_before_the_start_answers_cancels_as_soon_as_the_id_arrives_and_never_streams(self):
+        page = self.fake_page()
+        page.click("#btn-preflight")
+        page.wait_for_function("window.starts.length === 1")
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}))")
+        page.evaluate("window.starts[0]()")
+        page.wait_for_function("window.cancels.length === 1")
+        self.assertTrue(page.evaluate("window.cancels[0]").endswith("/cancel/j1"))
+        self.assertEqual(page.evaluate("window.sources.length"), 0)
 
     def test_cancel_before_start_returns_cancels_the_late_job(self):
         page = self.fake_page()

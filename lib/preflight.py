@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 
+from lib.config import clean_path as _path  # one normaliser for the check and the run
+
 ERROR, WARN = "error", "warn"
 
 
@@ -142,6 +144,23 @@ def _model_tasks(model_file):
     return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
 
 
+VALIDATOR_MODES = ("auto", "prism", "bids", "skip")  # "off" is internal (wizard) and only the readiness routes accept it
+
+
+def validator_error(value, internal=False):
+    """Error text for a validator value from a request, else None (empty means auto)."""
+    allowed = VALIDATOR_MODES + (("off",) if internal else ())
+    if not value or (isinstance(value, str) and value in allowed):
+        return None
+    return f"validator must be one of: {', '.join(allowed)}"
+
+
+def resolve_tasks(tasks, model_file, bids_dir):
+    """The tasks to check/run: explicit TASKS, else the model's Input.task, else every task of the BIDS folder."""
+    from lib.core import discover_tasks  # lazy: keeps module import light
+    return _as_list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
+
+
 def _scan_length_warning(sub, preproc, events_rows):
     import nibabel as nib
     sidecar = preproc.with_name(preproc.name.replace(".nii.gz", ".json"))
@@ -262,12 +281,16 @@ def _first_json_object(text):
 def _run_killable(cmd, cancelled, timeout=1800):
     """subprocess.run(capture_output, text) that polls `cancelled` and then kills the whole process group (deno children
     included); returns None when cancelled. Raises subprocess.TimeoutExpired after `timeout` seconds."""
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    group = hasattr(os, "killpg")  # POSIX; elsewhere only the child itself is killed
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=group)
     deadline = time.monotonic() + timeout
 
-    def kill(sig):
+    def kill(hard):
         try:
-            os.killpg(proc.pid, sig)
+            if group:
+                os.killpg(proc.pid, signal.SIGKILL if hard else signal.SIGTERM)
+            else:
+                proc.kill() if hard else proc.terminate()
         except OSError:
             pass
     while True:
@@ -278,11 +301,11 @@ def _run_killable(cmd, cancelled, timeout=1800):
             expired = time.monotonic() > deadline
             if not expired and not (cancelled and cancelled()):
                 continue
-        kill(signal.SIGTERM)
+        kill(False)
         try:
             proc.communicate(timeout=1)
         except subprocess.TimeoutExpired:
-            kill(signal.SIGKILL)
+            kill(True)
             proc.communicate()
         if expired:
             raise subprocess.TimeoutExpired(cmd, timeout)
@@ -392,9 +415,7 @@ class _Progress:
 
 def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full, prog):
     checks = []
-    from lib.core import discover_tasks  # lazy: keeps module import light
-    # empty TASKS: the model's own task list, else every task of the BIDS folder
-    tasks = list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
+    tasks = resolve_tasks(tasks, model_file, bids_dir)
     if not tasks:
         checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
                             "check the BIDS folder or set the task in the project settings"))
@@ -505,11 +526,13 @@ def _as_list(value):
     return [] if value is None or isinstance(value, dict) else [str(value)]
 
 
+
+
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,
                               progress=None, cancelled=None):
     return run_preflight(
-        bids_dir=cfg.get("BIDS_DIR", ""), fmriprep_dir=cfg.get("FMRIPREP_DIR", ""),
-        model_file=model or cfg.get("MODELS_FILE", ""), tasks=_as_list(cfg.get("TASKS")),
+        bids_dir=_path(cfg.get("BIDS_DIR", "")), fmriprep_dir=_path(cfg.get("FMRIPREP_DIR", "")),
+        model_file=_path(model or cfg.get("MODELS_FILE", "")), tasks=_as_list(cfg.get("TASKS")),
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
         validator=validator, container_type=cfg.get("container_type", ""),
         skip_model_validation=skip_model_validation, actions=actions,
@@ -524,7 +547,7 @@ _RECENT_LOCK = threading.Lock()
 
 def signature(cfg, model, validator, actions, skip_model_validation):
     """Hash of exactly what run_preflight_from_config reads, normalised; the model by file content, not path."""
-    path = model or cfg.get("MODELS_FILE") or ""
+    path = _path(model or cfg.get("MODELS_FILE") or "")
     try:
         raw = Path(path).read_bytes()
     except (OSError, TypeError, ValueError):
@@ -535,7 +558,7 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         pass
     content = None if raw is None else hashlib.sha256(raw).hexdigest()
     payload = [
-        str(cfg.get("BIDS_DIR") or ""), str(cfg.get("FMRIPREP_DIR") or ""), content,
+        str(_path(cfg.get("BIDS_DIR") or "")), str(_path(cfg.get("FMRIPREP_DIR") or "")), content,
         _as_list(cfg.get("TASKS")), str(cfg.get("SPACE") or ""),
         sorted(s[4:] if s.startswith("sub-") else s for s in _as_list(cfg.get("SUBJECTS"))),
         str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),

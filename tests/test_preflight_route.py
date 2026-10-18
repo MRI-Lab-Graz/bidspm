@@ -116,15 +116,6 @@ def test_run_passes_validator_through(tmp_path):
         assert pf.call_args.kwargs["validator"] == "auto"
 
 
-def test_run_with_bogus_validator_is_blocked(tmp_path):
-    settings = tmp_path / "s.json"
-    settings.write_text(json.dumps(cfg(tmp_path)))
-    with patch("webapp.web_execution_api.subprocess.Popen") as popen:
-        res = _post_run(app.test_client(), actions=["stats"], settings=str(settings), validator="bogus")
-    assert res.status_code == 400 and res.get_json()["preflight"]["verdict"] == "blocked"
-    popen.assert_not_called()
-
-
 def test_run_passes_actions_and_skip_validation_to_preflight(tmp_path):
     settings = tmp_path / "s.json"
     settings.write_text("{}")
@@ -158,3 +149,28 @@ def test_api_preflight_defaults_validator_to_auto():
     with patch("webapp.web_preflight_api.run_preflight_from_config", return_value=BLOCKED) as pf:
         app.test_client().post("/api/preflight", json={"config": {}})
     assert pf.call_args.kwargs["validator"] == "auto"
+
+
+def test_run_rejects_validator_outside_the_whitelist(tmp_path):
+    settings = tmp_path / "s.json"
+    settings.write_text(json.dumps(cfg(tmp_path)))
+    with patch("webapp.web_execution_api.subprocess.Popen") as popen:
+        for bad in ("off", "bogus", ["skip"]):
+            res = app.test_client().post("/run", json={"actions": ["stats"], "settings": str(settings), "validator": bad})
+            assert res.status_code == 400 and "validator" in res.get_json()["error"], bad
+    popen.assert_not_called()
+
+
+def test_sync_route_rejects_unknown_validator_but_allows_off(tmp_path):
+    client = app.test_client()
+    bad = client.post("/api/preflight", json={"config": cfg(tmp_path), "validator": "bogus"})
+    assert bad.status_code == 400 and "validator" in bad.get_json()["error"]
+    assert client.post("/api/preflight", json={"config": cfg(tmp_path), "validator": "off"}).status_code == 200
+
+
+def test_job_route_rejects_unknown_validator_but_allows_off(tmp_path):
+    client = app.test_client()
+    bad = client.post("/api/preflight/start", json={"config": cfg(tmp_path), "validator": "bogus"})
+    assert bad.status_code == 400 and "validator" in bad.get_json()["error"]
+    ok = client.post("/api/preflight/start", json={"config": cfg(tmp_path), "validator": "off"})
+    assert ok.status_code == 200 and ok.get_json()["id"]

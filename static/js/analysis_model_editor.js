@@ -810,8 +810,7 @@ async function loadBidsTasksForModelEditor() {
         throw new Error('Set BIDS Folder before editing model JSON.');
     }
 
-    const res = await fetch(`/get_bids_tasks?path=${encodeURIComponent(bidsDir)}`);
-    const tasks = await res.json();
+    const tasks = await fetchBidsTasks(bidsDir);
     if (!Array.isArray(tasks) || tasks.length === 0) {
         throw new Error('No tasks detected in BIDS folder. Please check BIDS Folder path.');
     }

@@ -17,6 +17,7 @@ from lib import (
     log_debug, run_bms
 )
 from lib.config import load_config
+from lib.preflight import resolve_tasks
 
 
 # Default config file paths
@@ -232,8 +233,8 @@ def handle_estimate_time(config_file: str, actions: list):
     """Estimate processing time and exit."""
     config = load_config(config_file)
     subjects = config.SUBJECTS or discover_subjects(config)
-    tasks = config.TASKS
-    
+    tasks = resolve_tasks(config.TASKS, config.MODELS_FILE, config.BIDS_DIR)
+
     estimate = estimate_processing_time(subjects, actions, tasks)
     
     print(f"\n⏱️  Processing Time Estimate")
@@ -345,7 +346,7 @@ def _handle_report(config_file: str, args, processed_subjects: Optional[List[str
     print("\n📄 Generating HTML reports…")
     index = generate_reports(
         derivatives=config.DERIVATIVES_DIR,
-        tasks=config.TASKS,
+        tasks=resolve_tasks(config.TASKS, args.model or config.MODELS_FILE, config.BIDS_DIR),
         subjects=subjects or None,
         model_name=model_name,
         subjects_to_render=processed_subjects,
