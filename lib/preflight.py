@@ -142,6 +142,17 @@ def _model_tasks(model_file):
     return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
 
 
+VALIDATOR_MODES = ("auto", "prism", "bids", "skip")  # "off" is internal (wizard) and only the readiness routes accept it
+
+
+def validator_error(value, internal=False):
+    """Error text for a validator value from a request, else None (empty means auto)."""
+    allowed = VALIDATOR_MODES + (("off",) if internal else ())
+    if not value or (isinstance(value, str) and value in allowed):
+        return None
+    return f"validator must be one of: {', '.join(allowed)}"
+
+
 def resolve_tasks(tasks, model_file, bids_dir):
     """The tasks to check/run: explicit TASKS, else the model's Input.task, else every task of the BIDS folder."""
     from lib.core import discover_tasks  # lazy: keeps module import light
