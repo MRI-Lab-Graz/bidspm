@@ -21,7 +21,8 @@
                     delete value.Transformations.GeneratedColumns;
                 }
 
-                // An empty Contrasts array is invalid per the BIDS Stats Models spec --
+                // Deliberate (pinned by test_empty_contrasts_are_dropped_on_save): empty Contrasts / DummyContrasts.Contrasts
+                // lists are dropped. An empty Contrasts array is invalid per the BIDS Stats Models spec --
                 // omitting the key (rather than "[]") is what "no contrasts" means.
                 if (Array.isArray(value.Contrasts) && !value.Contrasts.length) {
                     delete value.Contrasts;

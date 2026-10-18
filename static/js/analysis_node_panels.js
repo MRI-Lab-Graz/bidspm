@@ -109,7 +109,7 @@
                 button.type = 'button';
                 const active = currentDatatype === option.dt;
                 button.className = `btn btn-sm ${active ? 'btn-primary' : 'btn-outline-secondary'}`;
-                button.innerHTML = `<i class="fas ${option.icon} me-1"></i>${option.label}`;
+                button.innerHTML = `<i class="fas ${option.icon} me-1"></i>${escapeHtml(option.label)}`;
                 button.addEventListener('click', () => {
                     node.Mask = { desc: 'brain', suffix: 'mask', datatype: option.dt };
                     renderModelAccordionEditor();
@@ -431,12 +431,9 @@
                 ? participantsInfo.sample_values
                 : {};
 
-            if (!node.Model || typeof node.Model !== 'object' || Array.isArray(node.Model)) {
-                node.Model = { Type: 'glm', X: ['1'] };
-            }
-            if (!Array.isArray(node.Model.X)) node.Model.X = [];
-            node.Model.X = normalizeStringArray(node.Model.X);
-            if (!node.Model.X.length) node.Model.X = ['1'];
+            // Display-only copy: the panel must not rewrite the loaded model (unedited saves stay byte-identical).
+            const modelX = (node.Model && typeof node.Model === 'object' && Array.isArray(node.Model.X))
+                ? normalizeStringArray(node.Model.X) : [];
 
             function createFieldRow(labelText) {
                 const row = document.createElement('div');
@@ -482,10 +479,10 @@
             panel.appendChild(presetRow.row);
 
             const defaultGroupVar = node.GroupBy.find((value) => categoricalColumns.includes(String(value)))
-                || node.Model.X.find((value) => categoricalColumns.includes(String(value)))
+                || modelX.find((value) => categoricalColumns.includes(String(value)))
                 || categoricalColumns[0]
                 || '';
-            const defaultCovariate = node.Model.X.find((value) => numericColumns.includes(String(value)))
+            const defaultCovariate = modelX.find((value) => numericColumns.includes(String(value)))
                 || numericColumns[0]
                 || '';
 
@@ -623,12 +620,12 @@
 
             const categoricalText = document.createElement('div');
             categoricalText.className = 'small';
-            categoricalText.innerHTML = `<strong>Categorical:</strong> ${categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected'}`;
+            categoricalText.innerHTML = `<strong>Categorical:</strong> ${escapeHtml(categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected')}`;
             participantsCard.appendChild(categoricalText);
 
             const numericText = document.createElement('div');
             numericText.className = 'small';
-            numericText.innerHTML = `<strong>Numeric:</strong> ${numericColumns.length ? numericColumns.join(', ') : 'none detected'}`;
+            numericText.innerHTML = `<strong>Numeric:</strong> ${escapeHtml(numericColumns.length ? numericColumns.join(', ') : 'none detected')}`;
             participantsCard.appendChild(numericText);
             panel.appendChild(participantsCard);
 
@@ -677,6 +674,11 @@
             nameInput.addEventListener('change', () => {
                 const val = nameInput.value.trim();
                 if (!val) return;
+                if ((modelEditorDraft?.Nodes || []).some(other => other !== node && other?.Name === val)) {
+                    setModelEditorStatus(`A node named "${val}" already exists; node names must be unique.`, 'warning');
+                    nameInput.value = node.Name || '';
+                    return;
+                }
                 const oldName = node.Name;
                 node.Name = val;
                 if (oldName && oldName !== val) {

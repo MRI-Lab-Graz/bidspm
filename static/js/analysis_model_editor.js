@@ -51,7 +51,7 @@ try { showModelAdvancedFields = localStorage.getItem(MODEL_ADVANCED_FIELDS_STORA
 function createAdvancedFieldsBadge(text) {
     const badge = document.createElement('div');
     badge.className = 'small text-muted';
-    badge.innerHTML = `<i class="fas fa-eye-slash me-1"></i>${text} (advanced — enable "Show advanced fields" to edit).`;
+    badge.innerHTML = `<i class="fas fa-eye-slash me-1"></i>${escapeHtml(text)} (advanced — enable "Show advanced fields" to edit).`;
     return badge;
 }
 
@@ -115,6 +115,7 @@ var {
 var {
     addArrayItem,
     addRegressorToModelX,
+    deleteByPath,
     getByPath,
     getModelObjectFromModelXPath,
     getModelObjectPathFromModelXPath,
@@ -128,7 +129,9 @@ var {
     isNuisanceRegressor,
     moveModelXRegressorByStep,
     normalizeModelHrfVariables,
+    numberInputProblem,
     parsePrimitiveInput,
+    regressorNameProblem,
     reorderArrayItem,
     setByPath,
     syncAllModelXHrfVariables,
@@ -511,9 +514,12 @@ function getModelEditorParticipantsInfo() {
 function setModelEditorStatus(message = '', tone = 'info') {
     const status = document.getElementById('model-editor-status');
     if (!status) return;
-    status.innerHTML = message
-        ? `<div class="alert alert-${tone} py-1 x-small mb-2">${message}</div>`
-        : '';
+    status.textContent = '';
+    if (!message) return;
+    const alert = document.createElement('div');
+    alert.className = `alert alert-${tone} py-1 x-small mb-2`;
+    alert.textContent = message;
+    status.appendChild(alert);
 }
 
 function renderModelSectionContent(body, section) {

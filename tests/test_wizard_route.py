@@ -46,7 +46,7 @@ def test_scan_missing_bids_is_404_and_non_dict_400(tmp_path):
 
 
 def test_build_returns_model_preview_and_preflight_without_validator_noise(tmp_path):
-    full = "trans_x\ttrans_y\ttrans_z\trot_x\trot_y\trot_z\n0\t0\t0\t0\t0\t0\n"  # motion6 needs all six
+    full = "trans_x\ttrans_y\ttrans_z\trot_x\trot_y\trot_z\n" + "0\t0\t0\t0\t0\t0\n" * 100  # motion6 needs all six; one row per volume
     res = post("/api/wizard/build", {**paths(tmp_path, confounds=full), "space": "MNI", "choices": choices()})
     data = res.get_json()
     assert res.status_code == 200 and data["preview"]["regressors"] == ["trial_type.a", "trial_type.b"]

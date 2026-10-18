@@ -3,6 +3,14 @@
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
 // --- FORM DATA HANDLERS ---
+// '' when the parallel-subjects field is usable (empty means the default of 4), else the message to show.
+function statsWorkersProblem() {
+    const raw = (document.getElementById('stats_workers')?.value || '').trim();
+    if (raw === '') return '';
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 ? '' : 'Parallel subjects must be a whole number of 1 or more.';
+}
+
 function getFullFormData() {
     const actions = Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value);
     return {
@@ -69,6 +77,34 @@ document.getElementById('suggest_workers')?.addEventListener('click', async () =
     }
 });
 
+function addBmsModelRow(path = '') {
+    const row = document.createElement('div');
+    row.className = 'd-flex gap-1 align-items-center bms-model-row';
+    row.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="/path/to/model_smdl.json"><button type="button" class="btn btn-outline-danger btn-sm bms-model-remove">×</button>';
+    row.querySelector('input').value = path;
+    row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
+    document.getElementById('bms-model-list').appendChild(row);
+}
+
+// Run options saved with the project (the form itself has no other source for them).
+function restoreRunOptions(cfg) {
+    const actions = Array.isArray(cfg.actions) ? cfg.actions : [];
+    document.querySelectorAll('input[name="action"]').forEach(cb => { cb.checked = actions.includes(cb.value); });
+    document.getElementById('bms-models-section')?.classList.toggle('d-none', !actions.includes('bms'));
+    document.getElementById('bms-model-list').textContent = '';
+    (cfg.bms_models || []).forEach(path => addBmsModelRow(path));
+    document.getElementById('pilot').checked = !!cfg.pilot;
+    if (cfg.stats_workers) document.getElementById('stats_workers').value = cfg.stats_workers;
+    const node = document.getElementById('run_node_name');
+    if (node) { node.value = cfg.node_name || ''; node.dispatchEvent(new Event('input')); }
+}
+
+// Settings fields the user edited (typed, browsed) since the page loaded: the late project fill keeps their values.
+const touchedSettings = new Set();
+const markTouched = e => { if (e.target.matches?.('.dynamic-input')) touchedSettings.add(e.target.dataset.key); };
+document.addEventListener('input', markTouched, true);  // capture: also non-bubbling events
+document.addEventListener('change', markTouched, true);
+
 // --- STATIC FORM INITIALIZATION ---
 async function initApp() {
     try {
@@ -85,15 +121,18 @@ async function initApp() {
 
         if (document.getElementById('input-MODELS_FILE')?.value) {
             await openModelEditor({ scrollIntoView: false, showStatus: false });
-            refreshModelTasks();
+            await refreshModelTasks();  // re-ticks the tasks and clears the status line: part of init, not after it
         }
     } catch (err) { console.error('App init failed:', err); }
+    document.body.dataset.ready = '1';  // first fill, task/space detection and stage render are done (tests wait on it)
 }
 
 async function loadProjectConfig() {
     try {
         const res = await fetch(`/api/projects/${currentProjectId}/export`);
         const config = await res.json();
+        const saved = await (await fetch(`/api/projects/${currentProjectId}/config`)).json();
+        restoreRunOptions(saved);
 
         // A fresh/different project invalidates any participant selection made
         // against the previous project's subjects.
@@ -109,26 +148,43 @@ async function loadProjectConfig() {
             MODELS_FILE: config.MODELS_FILE || '',
             NODE_NAME: config.NODE_NAME || '',
             SPACE: config.SPACE || 'MNI152NLin2009cAsym',
-            FWHM: config.FWHM || 6,
+            FWHM: config.FWHM ?? 6,  // 0 is a valid value
             TASKS: config.TASKS || [],
-            VERBOSITY: config.VERBOSITY || 2,
+            VERBOSITY: config.VERBOSITY ?? 2,
             container_type: config.container_type || 'docker',
             docker_image: config.docker_image || 'bidspm/bidspm:latest',
-            apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif',
-            spm_standalone_image: config.spm_standalone_image || ''
+            apptainer_image: config.apptainer_image || '',
+            spm_standalone_image: config.spm_standalone_image || '',
+            skip_validation: saved.skip_validation !== false
         };
-        
+        touchedSettings.forEach(key => {
+            const el = document.getElementById(`input-${key}`);
+            if (el && key in unifiedStudyConfig) unifiedStudyConfig[key] = el.value;
+        });
+
         await syncInternalToForm();
     } catch (err) {
         console.error('Failed to load project config:', err);
     }
 }
 
+// The shipped placeholder text of the Apptainer image field: never a real value (older saves may hold it).
+const APPTAINER_PLACEHOLDER = '/path/to/your/bidspm.sif';
+
+// Throws an Error with a user-facing message when the values are unusable or the server refuses them.
 async function saveProjectConfig() {
     if (!currentProjectId) return;
-    
+
     updateInternalState();
-    
+
+    const fwhm = Number.parseFloat(unifiedStudyConfig.FWHM);
+    const verbosity = Number.parseInt(unifiedStudyConfig.VERBOSITY, 10);
+    if (!Number.isFinite(fwhm)) throw new Error('FWHM must be a number (0 or greater).');
+    if (!Number.isFinite(verbosity)) throw new Error('Verbosity must be a number between 0 and 3.');
+    if (fwhm < 0) throw new Error('FWHM must be 0 or greater.');
+    if (statsWorkersProblem()) throw new Error(statsWorkersProblem());
+    if (verbosity < 0 || verbosity > 3) throw new Error('Verbosity must be between 0 and 3.');
+
     // Map back to project config format
     const config = {
         bids_folder: unifiedStudyConfig.BIDS_DIR || '',
@@ -136,28 +192,30 @@ async function saveProjectConfig() {
         fmriprep_folder: unifiedStudyConfig.FMRIPREP_DIR || '',
         output_folder: unifiedStudyConfig.WD || '',
         models_file: unifiedStudyConfig.MODELS_FILE || '',
-        node_name: unifiedStudyConfig.NODE_NAME || '',
+        node_name: (document.getElementById('run_node_name')?.value || '').trim(),
         space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
-        fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
+        fwhm,
         tasks: unifiedStudyConfig.TASKS || [],
-        verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
+        verbosity,
         container_type: unifiedStudyConfig.container_type || 'docker',
         docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
-        apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
+        apptainer_image: unifiedStudyConfig.apptainer_image === APPTAINER_PLACEHOLDER ? '' : (unifiedStudyConfig.apptainer_image || ''),
         spm_standalone_image: unifiedStudyConfig.spm_standalone_image || '',
         actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
         pilot: document.getElementById('pilot').checked,
-        skip_validation: true
+        stats_workers: Number(document.getElementById('stats_workers')?.value) || 4,
+        bms_models: Array.from(document.querySelectorAll('#bms-model-list input')).map(i => i.value.trim()).filter(Boolean),
+        skip_validation: document.getElementById('skip_validation').checked
     };
     
-    try {
-        await fetch(`/api/projects/${currentProjectId}/config`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(config)
-        });
-    } catch (err) {
-        console.error('Failed to save project config:', err);
+    const res = await fetch(`/api/projects/${currentProjectId}/config`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+    });
+    if (!res.ok) {
+        const detail = await res.json().then((body) => body.error, () => '');
+        throw new Error(detail || `the server answered ${res.status}`);
     }
 }
 
@@ -199,13 +257,7 @@ function setupStaticListeners() {
             document.getElementById('bms-models-section').classList.toggle('d-none', !bmsCheckbox.checked);
         });
     }
-    document.getElementById('btn-add-bms-model')?.addEventListener('click', () => {
-        const row = document.createElement('div');
-        row.className = 'd-flex gap-1 align-items-center bms-model-row';
-        row.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="/path/to/model_smdl.json"><button type="button" class="btn btn-outline-danger btn-sm bms-model-remove">×</button>';
-        row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
-        document.getElementById('bms-model-list').appendChild(row);
-    });
+    document.getElementById('btn-add-bms-model')?.addEventListener('click', () => addBmsModelRow());
 
     // Node-name input: show resolved output folder as a hint
     const runNodeNameInput = document.getElementById('run_node_name');
@@ -238,7 +290,7 @@ function setupStaticListeners() {
     const modelInput = document.getElementById('input-MODELS_FILE');
     if (modelInput) modelInput.addEventListener('change', async () => {
         // Persist the new path so it survives page reloads (e.g. returning from transformer builder).
-        if (hasProject && currentProjectId) await saveProjectConfig();
+        if (hasProject && currentProjectId) await saveProjectConfig().catch((err) => console.error('Saving the model path failed:', err));
         await openModelEditor({ scrollIntoView: false, showStatus: false });
         refreshModelTasks();
     });
@@ -312,6 +364,9 @@ function updateInternalState() {
 }
 
 async function syncInternalToForm() {
+    // before anything calls updateInternalState(), which reads the checkbox back into the config
+    const skipVal = document.getElementById('skip_validation');
+    if (skipVal && 'skip_validation' in unifiedStudyConfig) skipVal.checked = !!unifiedStudyConfig.skip_validation;
     // Settings details
     for (const [key, val] of Object.entries(unifiedStudyConfig)) {
         const el = document.getElementById(`input-${key}`);
@@ -322,8 +377,9 @@ async function syncInternalToForm() {
         if (key === 'TASKS' && Array.isArray(val)) {
             await refreshTasks();
             val.forEach(t => {
-                const cb = document.getElementById(`task-${t}`);
-                if (cb) cb.checked = true;
+                const cb = document.getElementById(`task-${t}`)
+                    || appendTaskCheckbox(document.getElementById('tasks-container'), t, tasksDetected);
+                cb.checked = true;
             });
             await refreshSpaces();
         }
@@ -341,8 +397,6 @@ async function syncInternalToForm() {
     document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
     document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';
 
-    const skipVal = document.getElementById('skip_validation');
-    if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
     window.analysisStages?.refresh();  // values were assigned without events
 }
 

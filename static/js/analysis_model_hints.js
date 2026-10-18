@@ -111,16 +111,17 @@
         return normalizeHintArray(fallbackValues);
     }
 
+    // The format* helpers return markup: values are escaped here, the placeholder spans are constants.
     function formatHintValues(values, status, emptyLabel) {
-        if (values.length) return values.join(', ');
+        if (values.length) return escapeHtml(values.join(', '));
         if (status === 'invalid') return '<span class="text-warning">could not extract from model</span>';
-        return `<span class="text-muted">${emptyLabel}</span>`;
+        return `<span class="text-muted">${escapeHtml(emptyLabel)}</span>`;
     }
 
     function formatEventSample(values, status, missingColumnLabel) {
         const normalized = normalizeHintArray(values).slice(0, 10);
-        if (normalized.length) return normalized.join(', ');
-        if (status === 'missing-column') return `<span class="text-muted">${missingColumnLabel}</span>`;
+        if (normalized.length) return escapeHtml(normalized.join(', '));
+        if (status === 'missing-column') return `<span class="text-muted">${escapeHtml(missingColumnLabel)}</span>`;
         if (status === 'empty-column') return '<span class="text-muted">column present but no values sampled</span>';
         return '<span class="text-warning">sample not available</span>';
     }
@@ -150,17 +151,17 @@
         const sampleStatus = events.sample_status || {};
 
         const warningHtml = warnings.length
-            ? `<div class="alert alert-warning py-2 px-3 mb-2 x-small border-0 shadow-sm"><strong>Potential issues:</strong><br>${warnings.map(w => `- ${w}`).join('<br>')}</div>`
+            ? `<div class="alert alert-warning py-2 px-3 mb-2 x-small border-0 shadow-sm"><strong>Potential issues:</strong><br>${warnings.map(w => `- ${escapeHtml(w)}`).join('<br>')}</div>`
             : '<div class="alert alert-success py-2 px-3 mb-2 x-small border-0 shadow-sm">No obvious task/condition mismatches found.</div>';
 
         panel.innerHTML = `
             ${warningHtml}
             <div class="small text-muted">
-                <div><strong>Detected BIDS tasks:</strong> ${normalizeHintArray(dataset.bids_tasks).join(', ') || '<span class="text-muted">none detected</span>'}</div>
+                <div><strong>Detected BIDS tasks:</strong> ${formatHintValues(normalizeHintArray(dataset.bids_tasks), 'present', 'none detected')}</div>
                 <div><strong>Model tasks:</strong> ${formatHintValues(model.model_tasks, model.field_status.model_tasks, 'not set in model')}</div>
                 <div><strong>Model contrast levels:</strong> ${formatHintValues(model.contrast_levels, model.field_status.contrast_levels, 'not defined in model')}</div>
                 <div><strong>Replace values in model:</strong> ${formatHintValues(model.replace_values, model.field_status.replace_values, 'not used in model')}</div>
-                <div><strong>Event columns:</strong> ${normalizeHintArray(events.event_columns).join(', ') || '<span class="text-muted">none detected</span>'}</div>
+                <div><strong>Event columns:</strong> ${formatHintValues(normalizeHintArray(events.event_columns), 'present', 'none detected')}</div>
                 <div><strong>Sample trial_type:</strong> ${formatEventSample(sampleValues.trial_type, sampleStatus.trial_type, 'trial_type column not present')}</div>
                 <div><strong>Sample condition:</strong> ${formatEventSample(sampleValues.condition, sampleStatus.condition, 'condition column not present')}</div>
             </div>
@@ -197,13 +198,13 @@
             });
             const data = await response.json();
             if (data.error) {
-                panel.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${data.error}</div>`;
+                panel.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${escapeHtml(data.error)}</div>`;
                 panel.style.display = 'block';
                 return;
             }
             renderModelHints(config, data, modelContent);
         } catch (e) {
-            panel.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Hint generation failed: ${e.message}</div>`;
+            panel.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Hint generation failed: ${escapeHtml(e.message)}</div>`;
             panel.style.display = 'block';
         }
     }

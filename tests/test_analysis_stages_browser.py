@@ -58,7 +58,7 @@ class TestAnalysisStages(unittest.TestCase):
         if init_script:
             page.add_init_script(init_script)
         page.goto(f"{self.base}/analysis/{pid or self.full_id}{suffix}", wait_until="load")
-        page.wait_for_function("window.analysisStages !== undefined")
+        page.wait_for_function("document.body.dataset.ready === '1'")
         return page
 
     def current(self, page):
@@ -164,6 +164,27 @@ class TestAnalysisStages(unittest.TestCase):
         go_to_stage(page, "run")
         self.assertIn("newbids", page.inner_text("#stage-summary"))
 
+    def test_fields_typed_before_the_late_project_fill_survive_it(self):
+        page = self.browser.new_page()
+        self.pages.append(page)
+        held = []  # the project-config GET is held until the user has typed
+        page.route("**/api/projects/*/config",
+                   lambda r: held.append(r) if r.request.method == "GET" else r.continue_())
+        page.goto(f"{self.base}/analysis/{self.partial_id}", wait_until="load")
+        page.wait_for_function("window.analysisStages !== undefined")
+        page.fill("#input-WD", "/typed/wd")
+        page.fill("#input-FMRIPREP_DIR", "/typed/fp")
+        page.wait_for_function("document.getElementById('stage-next').getAttribute('aria-disabled') === 'false'")
+        while not held:  # the export fetch comes first; wait (event-driven) until the config GET is in flight
+            page.wait_for_event("request")
+        self.assertNotEqual(page.evaluate("document.body.dataset.ready"), "1")
+        held[0].continue_()
+        page.wait_for_function("document.body.dataset.ready === '1'")
+        self.assertEqual(page.input_value("#input-WD"), "/typed/wd")
+        self.assertEqual(page.input_value("#input-FMRIPREP_DIR"), "/typed/fp")
+        self.assertEqual(page.inner_text("#stage-hint").strip(), "")
+        self.assertEqual(page.get_attribute("#stage-next", "aria-disabled"), "false")
+
     def test_browse_dialog_selection_updates_the_gate(self):
         page = self.open_page(self.partial_id)
         for key in ("WD", "FMRIPREP_DIR"):
@@ -218,14 +239,14 @@ class TestAnalysisStages(unittest.TestCase):
         page = self.open_page()
         go_to_stage(page, "options")
         page.reload(wait_until="load")
-        page.wait_for_function("window.analysisStages !== undefined")
+        page.wait_for_function("document.body.dataset.ready === '1'")
         self.assertEqual(self.current(page), "options")
 
     def test_remembered_stage_never_skips_an_incomplete_one(self):
         page = self.open_page(self.partial_id)
         page.evaluate("localStorage.setItem('bidspm_stage_' + currentProjectId, 'run')")
         page.reload(wait_until="load")
-        page.wait_for_function("window.analysisStages !== undefined")
+        page.wait_for_function("document.body.dataset.ready === '1'")
         self.assertEqual(self.current(page), "folders")
 
     def test_deep_link_wins_over_the_stored_stage(self):

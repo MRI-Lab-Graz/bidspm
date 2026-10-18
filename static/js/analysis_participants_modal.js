@@ -43,7 +43,7 @@ var selectedParticipants = null;
             tasks: unifiedStudyConfig.TASKS || [],
             actions: actions,
             space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
-            fwhm: unifiedStudyConfig.FWHM || 6
+            fwhm: Number.isFinite(unifiedStudyConfig.FWHM) ? unifiedStudyConfig.FWHM : 6
         };
         const response = await fetch('/api/participants_status', {
             method: 'POST',
@@ -53,14 +53,34 @@ var selectedParticipants = null;
         return await response.json();
     }
 
-    function participantRowHtml(entry) {
+    // Built from DOM properties, never markup: the subject id (a folder name) must reach selectedParticipants unchanged.
+    function participantRow(entry, index) {
         const subject = entry.subject;
-        const checked = selectedParticipants ? selectedParticipants.has(subject) : entry.status !== 'computed';
-        const title = Array.isArray(entry.pending) && entry.pending.length ? `Pending: ${entry.pending.join(', ')}` : '';
-        return `<div class="form-check">
-            <input class="form-check-input participant-checkbox" type="checkbox" value="${subject}" id="participant-row-${subject}" ${checked ? 'checked' : ''}>
-            <label class="form-check-label small" for="participant-row-${subject}" title="${title}">sub-${subject}</label>
-        </div>`;
+        const row = document.createElement('div');
+        row.className = 'form-check';
+        const box = document.createElement('input');
+        box.className = 'form-check-input participant-checkbox';
+        box.type = 'checkbox';
+        box.value = subject;
+        box.id = `participant-row-${index}`;
+        box.checked = selectedParticipants ? selectedParticipants.has(subject) : entry.status !== 'computed';
+        const label = document.createElement('label');
+        label.className = 'form-check-label small';
+        label.htmlFor = box.id;
+        label.title = Array.isArray(entry.pending) && entry.pending.length ? `Pending: ${entry.pending.join(', ')}` : '';
+        label.textContent = `sub-${subject}`;
+        row.append(box, label);
+        return row;
+    }
+
+    function fillParticipantList(list, entries) {
+        if (!list) return;
+        list.textContent = '';
+        if (!entries.length) {
+            list.innerHTML = '<span class="small text-muted">none</span>';
+            return;
+        }
+        entries.forEach((entry, index) => list.appendChild(participantRow(entry, index)));
     }
 
     function renderParticipantsModal(report) {
@@ -86,8 +106,8 @@ var selectedParticipants = null;
         const missingEntries = details.filter(d => d.status !== 'computed');
         const computedEntries = details.filter(d => d.status === 'computed');
 
-        if (missingList) missingList.innerHTML = missingEntries.length ? missingEntries.map(participantRowHtml).join('') : '<span class="small text-muted">none</span>';
-        if (computedList) computedList.innerHTML = computedEntries.length ? computedEntries.map(participantRowHtml).join('') : '<span class="small text-muted">none</span>';
+        fillParticipantList(missingList, missingEntries);
+        fillParticipantList(computedList, computedEntries);
         if (missingCountEl) missingCountEl.textContent = `(${missingEntries.length})`;
         if (computedCountEl) computedCountEl.textContent = `(${computedEntries.length})`;
 

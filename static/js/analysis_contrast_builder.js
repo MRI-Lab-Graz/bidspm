@@ -163,7 +163,7 @@
             chip.className = 'cb-condition-chip';
             chip.draggable = true;
             chip.dataset.cond = condition;
-            chip.innerHTML = `<i class="fas fa-grip-vertical cb-chip-icon"></i><span>${conditionLabel(condition)}</span>`;
+            chip.innerHTML = `<i class="fas fa-grip-vertical cb-chip-icon"></i><span>${escapeHtml(conditionLabel(condition))}</span>`;
             chip.addEventListener('dragstart', (event) => {
                 dragChip = condition;
                 dragFromCardIdx = null;
@@ -419,8 +419,13 @@
             weightInput.value = weight;
             weightInput.title = 'Custom weight';
             weightInput.addEventListener('change', () => {
-                const numericValue = parseFloat(weightInput.value);
-                cbDraft[cardIdx].Weights[condIdx] = Number.isNaN(numericValue) ? 0 : numericValue;
+                const numericValue = weightInput.value.trim() === '' || weightInput.validity.badInput ? NaN : Number(weightInput.value);
+                if (!Number.isFinite(numericValue)) {
+                    showStatus('Weight must be a finite number', 'warn');
+                    weightInput.value = cbDraft[cardIdx].Weights[condIdx];
+                    return;
+                }
+                cbDraft[cardIdx].Weights[condIdx] = numericValue;
                 renderContrastList();
             });
             controls.appendChild(weightInput);
@@ -555,7 +560,7 @@
                 danger: 'text-danger',
                 warn: 'text-warning'
             };
-            cbStatus.innerHTML = `<span class="${classMap[type] || 'text-muted'}">${message}</span>`;
+            cbStatus.innerHTML = `<span class="${classMap[type] || 'text-muted'}">${escapeHtml(message)}</span>`;
             if (type === 'success') {
                 setTimeout(() => {
                     if (cbStatus) cbStatus.innerHTML = '';
@@ -604,10 +609,30 @@
             bootstrapImpl?.Modal?.getOrCreateInstance(modal)?.show();
         }
 
+        // bidspm needs a unique, non-empty name and at least one condition per contrast.
+        function contrastProblems(contrasts) {
+            const problems = [];
+            const seen = new Set();
+            contrasts.forEach((contrast, index) => {
+                const name = String(contrast.Name ?? '').trim();
+                if (!name) problems.push(`Contrast ${index + 1} has no name.`);
+                else if (seen.has(name)) problems.push(`Contrast names must be unique: "${name}" is used twice.`);
+                seen.add(name);
+                if (!(contrast.ConditionList || []).length) problems.push(`Contrast "${name || index + 1}" has no conditions.`);
+            });
+            return problems;
+        }
+
         function applyToModel() {
             const nodes = getNodes();
             if (!nodes[cbNodeIdx]) {
                 showStatus('No node to apply to.', 'danger');
+                return;
+            }
+
+            const problems = contrastProblems(cbDraft);
+            if (problems.length) {
+                showStatus(problems.join(' '), 'danger');
                 return;
             }
 

@@ -2,6 +2,31 @@
 // Extracted from templates/analysis.html: API-backed actions: refresh tasks/spaces, validate/create/open/save model, transformer-builder launch, load latest study.
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
+// A task checkbox; `missing` marks one that is saved in the project but not found in the BIDS folder.
+function appendTaskCheckbox(container, task, missing = false) {
+    const div = document.createElement('div');
+    div.className = 'form-check form-check-inline mb-0';
+    const box = document.createElement('input');
+    box.className = 'form-check-input task-checkbox';
+    box.type = 'checkbox';
+    box.value = task;
+    box.id = `task-${task}`;
+    box.addEventListener('change', () => { updateInternalState(); refreshSpaces(); });
+    const label = document.createElement('label');
+    label.className = 'form-check-label x-small';
+    label.htmlFor = box.id;
+    label.textContent = task;
+    div.append(box, ' ', label);
+    if (missing) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-warning text-dark x-small ms-1';
+        badge.textContent = 'not found in BIDS';
+        div.appendChild(badge);
+    }
+    container.appendChild(div);
+    return box;
+}
+
 // --- API CALLS ---
 // One request per BIDS folder: concurrent callers share the promise, later ones reuse the answer;
 // `force` re-reads a settled answer (explicit refresh) and a failed request is not remembered.
@@ -16,24 +41,28 @@ function fetchBidsTasks(bidsDir, force = false) {
     return entry.promise;
 }
 
+// False when the last refreshTasks() failed: saved tasks must not then be called missing (the detection broke, not the task).
+let tasksDetected = true;
+
 async function refreshTasks() {
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value;
     if (!bidsDir) return;
     const container = document.getElementById('tasks-container');
     try {
         const tasks = await fetchBidsTasks(bidsDir, true);
+        tasksDetected = true;
+        // a ticked task the dataset does not have stays visible (and saved) until the user unticks it
+        const keep = Array.from(container.querySelectorAll('.task-checkbox:checked')).map(cb => cb.value).filter(t => !tasks.includes(t));
         container.innerHTML = '';
-        if (tasks.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
-        tasks.forEach(t => {
-            const div = document.createElement('div');
-            div.className = 'form-check form-check-inline mb-0';
-            div.innerHTML = `<input class="form-check-input task-checkbox" type="checkbox" value="${t}" id="task-${t}" onchange="updateInternalState(); refreshSpaces()">
-                             <label class="form-check-label x-small" for="task-${t}">${t}</label>`;
-            container.appendChild(div);
-        });
+        if (tasks.length === 0 && keep.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
+        tasks.forEach(t => appendTaskCheckbox(container, t));
+        keep.forEach(t => { appendTaskCheckbox(container, t, true).checked = true; });
         const modelVal = document.getElementById('input-MODELS_FILE')?.value;
         if (modelVal) refreshModelTasks();
-    } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }
+    } catch (e) {
+        tasksDetected = false;
+        container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>';
+    }
 }
 
 async function getModelContentFromPath(modelPath) {
@@ -221,7 +250,7 @@ async function openModelEditor(options = {}) {
             const tone = pendingTransformerResult.tone === 'success' ? 'success'
                 : pendingTransformerResult.tone === 'warning' ? 'warning'
                 : 'info';
-            status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${pendingTransformerResult.message}</div>`;
+            status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${escapeHtml(pendingTransformerResult.message)}</div>`;
         } else if (status && showStatus) {
             status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model workspace loaded.</div>';
         } else if (status && !showStatus) {
@@ -235,7 +264,7 @@ async function openModelEditor(options = {}) {
         modelEditorDraft = null;
         renderModelAccordionEditor();
         if (status) {
-            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Could not load model: ${e.message}</div>`;
+            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Could not load model: ${escapeHtml(e.message)}</div>`;
         }
         if (pathLabel) pathLabel.textContent = modelPath;
     }
@@ -368,7 +397,7 @@ async function saveModelEditor() {
 
     const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
     if (missing.length) {
-        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Missing required keys: ${missing.join(', ')}</div>`;
+        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Missing required keys: ${escapeHtml(missing.join(', '))}</div>`;
         return;
     }
 
@@ -391,7 +420,7 @@ async function saveModelEditor() {
         });
         const result = await res.json();
         if (!result.success) {
-            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${result.error}</div>`;
+            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${escapeHtml(result.error)}</div>`;
             return;
         }
 
@@ -400,7 +429,7 @@ async function saveModelEditor() {
         // Refresh task and hint state in the background (no await)
         refreshModelTasks();
     } catch (e) {
-        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${e.message}</div>`;
+        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${escapeHtml(e.message)}</div>`;
     }
 }
 

@@ -119,11 +119,41 @@ const READONLY_MODEL_PATHS = [
         } else {
             input.addEventListener('change', (e) => {
                 const current = getByPath(modelEditorDraft, path);
+                if (typeof current === 'number') {
+                    const label = path.split('.').pop();
+                    // a type=number field reports garbage such as "-" as '' with badInput: not the same as cleared
+                    const problem = e.target.validity?.badInput ? 'invalid' : numberInputProblem(e.target.value);
+                    if (problem === 'invalid') {
+                        setModelEditorStatus(`${label} must be a finite number`, 'warning');
+                        e.target.value = String(current);
+                        return;
+                    }
+                    if (problem === '' && /\.HighPassFilterCutoffHz$/.test(path) && Number(e.target.value) <= 0) {
+                        setModelEditorStatus(`${label} must be greater than 0`, 'warning');
+                        e.target.value = String(current);
+                        return;
+                    }
+                    if (problem === 'empty') {
+                        if (deleteByPath(modelEditorDraft, path)) {
+                            renderModelAccordionEditor();
+                        } else {
+                            setModelEditorStatus(`${label} must be a finite number`, 'warning');
+                            e.target.value = String(current);
+                        }
+                        return;
+                    }
+                }
                 const newValue = parsePrimitiveInput(e.target.value, current);
+
+                if (isModelXEntry && regressorNameProblem(newValue)) {
+                    setModelEditorStatus(regressorNameProblem(newValue), 'warning');
+                    e.target.value = current;
+                    return;
+                }
 
                 if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)) {
                     const status = document.getElementById('model-editor-status');
-                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`;
+                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(newValue)}</div>`;
                     e.target.value = current;
                     return;
                 }
@@ -1024,7 +1054,7 @@ const READONLY_MODEL_PATHS = [
                     if (!Array.isArray(arr)) return;
                     if (arr.includes(value)) {
                         const status = document.getElementById('model-editor-status');
-                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`;
+                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${escapeHtml(value)}</div>`;
                         return;
                     }
                     arr.push(value);
@@ -1205,7 +1235,7 @@ const READONLY_MODEL_PATHS = [
 
         const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
         if (missing.length) {
-            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`;
+            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${escapeHtml(missing.join(', '))}</div>`;
         }
 
         if (!Array.isArray(modelEditorDraft.Input?.task)) {

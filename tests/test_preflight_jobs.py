@@ -217,7 +217,7 @@ def test_runner_exception_ends_stream_with_error_event():
         job = start(client, {"config": {}})
         _, events = stream(client, job)
     last = events[-1][1]
-    assert last["phase"] == "error" and last["state"] == "done" and "validator exploded" in last["message"]
+    assert last["phase"] == "error" and last["state"] == "done" and "validator exploded" not in last["message"] and "error id" in last["message"]  # details go to the server log
     assert finished(job)
     assert client.post(f"/api/preflight/cancel/{job}").get_json() == {"status": "finished"}
 

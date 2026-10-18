@@ -25,6 +25,22 @@
         cursor[tokens[tokens.length - 1]] = value;
     }
 
+    // A cleared number field means "no value" (the key is removed), never 0; Infinity/NaN are refused.
+    function numberInputProblem(raw) {
+        if (String(raw).trim() === '') return 'empty';
+        return Number.isFinite(Number(raw)) ? '' : 'invalid';
+    }
+
+    // Removes an object key; false for an array element (deleting it would shift its siblings).
+    function deleteByPath(root, path) {
+        const tokens = pathTokens(path);
+        const last = tokens[tokens.length - 1];
+        const parent = tokens.slice(0, -1).reduce((acc, tk) => (acc == null ? acc : acc[tk]), root);
+        if (!parent || typeof parent !== 'object' || Array.isArray(parent) || typeof last !== 'string') return false;
+        delete parent[last];
+        return true;
+    }
+
     function parsePrimitiveInput(raw, original) {
         if (typeof original === 'number') {
             const parsed = Number(raw);
@@ -183,8 +199,8 @@
         const arr = getByPath(modelEditorDraft, arrayPath);
         if (!Array.isArray(arr)) return false;
 
-        const normalized = String(candidate || '').trim();
-        return arr.some((val, idx) => idx !== index && String(val || '').trim() === normalized);
+        const normalized = normalizeRegressorName(candidate);
+        return arr.some((val, idx) => idx !== index && normalizeRegressorName(val) === normalized);
     }
 
     function getModelObjectPathFromModelXPath(path) {
@@ -246,10 +262,12 @@
             const modelObj = node.Model;
             if (!modelObj || typeof modelObj !== 'object' || Array.isArray(modelObj)) return;
 
+            // Deliberate Run-level normalisation (not an F6 regression): a Model without X gets X: [], HRF.Variables are
+            // trimmed/deduped/limited to Model.X, and HRF.Model defaults to "spm". See syncModelXHrfVariables.
             if (!Array.isArray(modelObj.X)) {
                 modelObj.X = [];
             }
-            modelObj.X = Array.from(new Set(modelObj.X.map(value => String(value || '').trim()).filter(Boolean)));
+            // Model.X is left exactly as the file has it: numbers stay numbers, nothing is trimmed or de-duplicated.
             syncModelXHrfVariables(`Nodes[${idx}].Model.X`);
         });
     }
@@ -287,7 +305,7 @@
             } else {
                 delete modelObj.HRF;
             }
-            status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF off for ${regressor}</div>`;
+            status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF off for ${escapeHtml(regressor)}</div>`;
             renderModelAccordionEditor();
             return;
         }
@@ -297,8 +315,18 @@
         }
         modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
         modelObj.HRF.Variables = Array.from(new Set([...current, regressor]));
-        status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF on for ${regressor}</div>`;
+        status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF on for ${escapeHtml(regressor)}</div>`;
         renderModelAccordionEditor();
+    }
+
+    // Names are compared in Unicode NFC (a precomposed and a decomposed "é" are the same regressor);
+    // control characters (NUL, tabs, newlines) can never be part of one.
+    function normalizeRegressorName(value) {
+        return String(value ?? '').trim().normalize('NFC');
+    }
+
+    function regressorNameProblem(value) {
+        return /[\u0000-\u001f\u007f]/.test(String(value ?? '')) ? 'Regressor names cannot contain control characters.' : '';
     }
 
     function addRegressorToModelX(arrayPath, regressor, insertIndex = null) {
@@ -306,11 +334,17 @@
         const arr = getByPath(modelEditorDraft, arrayPath);
         if (!Array.isArray(arr)) return;
 
-        const normalized = String(regressor || '').trim();
+        const normalized = normalizeRegressorName(regressor);
         if (!normalized) return;
 
-        if (arr.some(value => String(value || '').trim() === normalized)) {
-            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${normalized}</div>`;
+        const problem = regressorNameProblem(normalized);
+        if (problem) {
+            setModelEditorStatus(problem, 'warning');
+            return;
+        }
+
+        if (arr.some(value => normalizeRegressorName(value) === normalized)) {
+            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(normalized)}</div>`;
             return;
         }
 
@@ -364,6 +398,7 @@
         addArrayItem,
         addRegressorToModelX,
         defaultArrayItemForPath,
+        deleteByPath,
         getByPath,
         getModelObjectFromModelXPath,
         getModelObjectPathFromModelXPath,
@@ -377,8 +412,10 @@
         isNuisanceRegressor,
         moveModelXRegressorByStep,
         normalizeModelHrfVariables,
+        numberInputProblem,
         parsePrimitiveInput,
         pathTokens,
+        regressorNameProblem,
         reorderArrayItem,
         setByPath,
         syncAllModelXHrfVariables,

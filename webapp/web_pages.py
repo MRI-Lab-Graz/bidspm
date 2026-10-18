@@ -1,10 +1,16 @@
-import os
 from typing import Callable, List, Optional, Tuple
 
 from flask import Flask, redirect, render_template
 
 
 ProjectManagerGetter = Callable[[], object]
+
+
+def wizard_models_dir(derivatives: str, work_dir: str) -> str:
+    """Where the wizard saves by default: <derivatives>/models (derivatives defaults to the working folder), the folder
+    lib.model_path.resolve_model_file looks in first for a relative MODELS_FILE. '' when neither is set."""
+    base = (derivatives or work_dir or '').strip()
+    return f'{base.rstrip("/")}/models' if base else ''
 
 
 def _load_page_context(
@@ -82,7 +88,6 @@ def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) 
         """Guided model builder; the work happens in /api/wizard/*."""
         project, projects = _load_page_context(project_id, get_project_manager)
         cfg = project.config if project else None
-        models_file = (cfg.models_file if cfg else '') or ''
         return render_template(
             'model_wizard.html',
             project=project,
@@ -94,6 +99,6 @@ def register_page_routes(app: Flask, get_project_manager: ProjectManagerGetter) 
                 'bidsDir': (cfg.bids_folder if cfg else '') or '',
                 'fmriprepDir': (cfg.fmriprep_folder if cfg else '') or '',
                 'space': (cfg.space if cfg else '') or '',
-                'modelsDir': os.path.dirname(models_file) if models_file else '',
+                'modelsDir': wizard_models_dir(cfg.derivatives_folder if cfg else '', cfg.output_folder if cfg else ''),
             },
         )

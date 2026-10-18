@@ -34,7 +34,7 @@ function excluded() {
 function nuisanceChoice() {
     const v = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
     if (v !== 'custom') return v;
-    return $('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean);
+    return [...new Set($('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean))];  // the server also rejects 1/0 and trial_type.*
 }
 
 // A recipe whose required fields are still empty is not sent to the build (it would only produce "wrong type" errors).
@@ -293,9 +293,16 @@ function renderPairs() {
 }
 
 // ---- scan / setup -------------------------------------------------------------------------------
+// The model name may be anything (it is only a label inside the model); the FILE stem is letters, digits, _ - . only, never
+// starting with - or . and never containing a separator or '..'.
+function fileStem(name) {
+    return name.trim().replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/\.{2,}/g, '.').replace(/^[-.]+/, '') || 'model';
+}
+
+// WIZ.modelsDir is <derivatives>/models, the folder a relative MODELS_FILE is resolved against (lib/model_path.py)
 function defaultSavePath() {
     const dir = (WIZ.modelsDir || 'studies').replace(/\/$/, '');
-    return `${dir}/${$('wiz-name').value.trim() || 'model'}.json`;
+    return `${dir}/${fileStem($('wiz-name').value)}.json`;
 }
 
 async function loadScan(task) {

@@ -12,12 +12,13 @@ This module follows the same patterns as bids_apps_runner for compatibility.
 
 import os
 import json
+import math
 import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field, asdict
+from dataclasses import MISSING, dataclass, field, asdict
 
 # Default data directory
 DATA_DIR = Path.home() / ".bidspm"
@@ -31,6 +32,46 @@ GLOBAL_CONFIG_DIR = DATA_DIR / "config"
 # Single file tracking the last project opened, so the app can resume it
 # without requiring a project id in the URL.
 CURRENT_PROJECT_FILE = DATA_DIR / "current_project.json"
+
+
+class ConfigImportError(ValueError):
+    """The file to import is not a usable configuration; str() says why and names the field."""
+
+
+def _reject_constant(name):
+    raise ConfigImportError(f"{name} is not valid JSON")
+
+
+def _read_import_file(path) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f, parse_constant=_reject_constant)
+    except ConfigImportError:
+        raise
+    except OSError as e:
+        raise ConfigImportError(f"cannot read {path}: {e.strerror or e}")
+    except (ValueError, RecursionError) as e:  # JSONDecodeError, bad bytes, nesting too deep
+        raise ConfigImportError(f"{path} is not valid JSON: {e}")
+    if not isinstance(data, dict):
+        raise ConfigImportError(f"{path} must contain a JSON object, not {type(data).__name__}")
+    return data
+
+
+def _check_config_value(label, field_name, value):
+    """Type-check one imported value against the ProjectConfig field's default (so new fields are covered)."""
+    f = ProjectConfig.__dataclass_fields__[field_name]
+    default = f.default_factory() if f.default_factory is not MISSING else f.default
+    ok = {
+        str: isinstance(value, str),
+        float: isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value),  # 1e999 parses to inf
+        int: isinstance(value, int) and not isinstance(value, bool),
+        bool: isinstance(value, bool),
+        list: isinstance(value, list) and all(isinstance(v, str) for v in value),
+    }.get(type(default), True)
+    if not ok:
+        want = {str: "a string", float: "a number", int: "a whole number", bool: "true or false",
+                list: "a list of strings"}[type(default)]
+        raise ConfigImportError(f"{label} must be {want}")
 
 
 @dataclass
@@ -60,7 +101,9 @@ class ProjectConfig:
     actions: List[str] = field(default_factory=lambda: ["smooth", "stats"])
     pilot: bool = False
     skip_validation: bool = True
-    
+    stats_workers: int = 4
+    bms_models: List[str] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
     
@@ -307,9 +350,8 @@ class ProjectManager:
             return False
         
         try:
-            with open(config_path, "r") as f:
-                config_data = json.load(f)
-            
+            config_data = _read_import_file(config_path)
+
             # Map old config format to new format
             config_mapping = {
                 "WD": "output_folder",
@@ -334,13 +376,20 @@ class ProjectManager:
                     new_config[new_key] = config_data[old_key]
             
             # Also accept new format keys directly
+            fields = ProjectConfig.__dataclass_fields__
             for key in config_data:
-                if key not in config_mapping and hasattr(ProjectConfig, key.lower()):
+                if key not in config_mapping and key.lower() in fields:
                     new_config[key.lower()] = config_data[key]
-            
+
+            # a bad value is rejected with the file's own key name, before the stored config is touched
+            reverse = {new: old for old, new in config_mapping.items()}
+            for name, value in new_config.items():
+                _check_config_value(reverse.get(name, name), name, value)
             project.config = ProjectConfig.from_dict(new_config)
             return self.save_project(project)
-            
+
+        except ConfigImportError:
+            raise
         except Exception as e:
             print(f"Error importing config: {e}")
             return False
