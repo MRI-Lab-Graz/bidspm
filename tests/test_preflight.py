@@ -612,6 +612,24 @@ def test_cancel_kills_the_validator_and_its_children(tmp_path):
     assert not _alive(parent) and not _alive(child)
 
 
+def test_cancel_without_killpg_falls_back_to_killing_the_child(monkeypatch):
+    import os
+    import threading
+    from lib.preflight import _run_killable
+    monkeypatch.delattr(os, "killpg")  # e.g. Windows: any use of it would be an AttributeError
+    flag = threading.Event()
+    threading.Timer(0.3, flag.set).start()
+    children = []
+    real_popen = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        children.append(real_popen(*args, **kwargs))
+        return children[-1]
+    with patch("lib.preflight.subprocess.Popen", spy):
+        result = _run_killable([sys.executable, "-c", "import time; time.sleep(30)"], cancelled=flag.is_set)
+    assert result is None and children[0].poll() is not None
+
+
 # --- empty TASKS: the model's Input.task, else the tasks found in the BIDS folder ---
 
 def _two_task_tree(tmp_path):

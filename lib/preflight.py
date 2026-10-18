@@ -279,12 +279,16 @@ def _first_json_object(text):
 def _run_killable(cmd, cancelled, timeout=1800):
     """subprocess.run(capture_output, text) that polls `cancelled` and then kills the whole process group (deno children
     included); returns None when cancelled. Raises subprocess.TimeoutExpired after `timeout` seconds."""
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    group = hasattr(os, "killpg")  # POSIX; elsewhere only the child itself is killed
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=group)
     deadline = time.monotonic() + timeout
 
-    def kill(sig):
+    def kill(hard):
         try:
-            os.killpg(proc.pid, sig)
+            if group:
+                os.killpg(proc.pid, signal.SIGKILL if hard else signal.SIGTERM)
+            else:
+                proc.kill() if hard else proc.terminate()
         except OSError:
             pass
     while True:
@@ -295,11 +299,11 @@ def _run_killable(cmd, cancelled, timeout=1800):
             expired = time.monotonic() > deadline
             if not expired and not (cancelled and cancelled()):
                 continue
-        kill(signal.SIGTERM)
+        kill(False)
         try:
             proc.communicate(timeout=1)
         except subprocess.TimeoutExpired:
-            kill(signal.SIGKILL)
+            kill(True)
             proc.communicate()
         if expired:
             raise subprocess.TimeoutExpired(cmd, timeout)
