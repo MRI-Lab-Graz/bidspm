@@ -190,7 +190,7 @@ document.getElementById('btn-load-config')?.addEventListener('click', async () =
     }
     
     const folder = document.getElementById('config-folder').value;
-    const res = await fetch(`/configs?folder=${folder}`);
+    const res = await fetch(`/configs?folder=${encodeURIComponent(folder)}`);
     const files = await res.json();
     const list = document.getElementById('config-list');
     list.innerHTML = '';
@@ -202,7 +202,7 @@ document.getElementById('btn-load-config')?.addEventListener('click', async () =
             btn.className = 'list-group-item list-group-item-action small py-2 d-flex justify-content-between align-items-center';
             btn.innerHTML = `<span><i class="fas fa-file-invoice me-2 text-primary"></i> ${escapeHtml(f)}</span> <i class="fas fa-chevron-right text-muted x-small"></i>`;
             btn.onclick = async () => {
-                const r = await fetch(`/load_config?folder=${folder}&filename=${f}`);
+                const r = await fetch(`/load_config?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(f)}`);
                 const data = await r.json();
                 
                 if (data.study_content) {

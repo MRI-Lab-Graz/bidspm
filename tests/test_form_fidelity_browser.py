@@ -5,6 +5,7 @@ saved model file or the project configuration.
 """
 import copy
 import json
+import re
 import tempfile
 import unittest
 import urllib.request
@@ -232,6 +233,22 @@ class TestStatsWorkersRefused(FidelityCase):
             page.evaluate("document.getElementById('validation-result').innerHTML = ''")
         self.assertEqual(runs, [])
         self.assertEqual(self.project_config()["stats_workers"], 3)
+
+
+class TestLoadConfigQuery(FidelityCase):
+    def test_folder_and_filename_are_url_encoded(self):
+        page = self.open("/analysis")
+        page.wait_for_function("document.body.dataset.ready === '1'")
+        seen = []
+        page.route(re.compile(r"/configs\?"), lambda r: (seen.append(r.request.url), r.fulfill(json=["a&b c.json"])))
+        page.route(re.compile(r"/load_config\?"), lambda r: (seen.append(r.request.url), r.fulfill(json={})))
+        page.fill("#config-folder", "my dir/x&y/")
+        page.evaluate("document.getElementById('btn-load-config').click()")
+        page.wait_for_selector("#config-list button")
+        page.click("#config-list button")
+        page.wait_for_function("document.getElementById('study-filename').value === 'a&b c.json'")
+        self.assertEqual([u.split("?", 1)[1] for u in seen],
+                         ["folder=my%20dir%2Fx%26y%2F", "folder=my%20dir%2Fx%26y%2F&filename=a%26b%20c.json"])
 
 
 class TestEmptyRunOptionsRefused(FidelityCase):
