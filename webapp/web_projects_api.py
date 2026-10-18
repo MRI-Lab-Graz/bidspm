@@ -5,17 +5,28 @@ from typing import Callable
 
 from flask import Flask, jsonify, request
 
-from lib.project_manager import ProjectConfig
+from lib.project_manager import ConfigImportError, ProjectConfig
 
 
 ProjectManagerGetter = Callable[[], object]
 
 
+def _as_path(value):
+    """(Path or None, invalid): a stored folder that is not a string, or holds a NUL, is 'invalid', not a crash."""
+    if not value:
+        return None, False
+    if not isinstance(value, str) or '\x00' in value:
+        return None, True
+    return Path(value), False
+
+
 def _build_project_preflight_results(config) -> dict:
     results = {}
 
-    bids_path = Path(config.bids_folder) if config.bids_folder else None
-    if not bids_path or not config.bids_folder:
+    bids_path, bids_bad = _as_path(config.bids_folder)
+    if bids_bad:
+        results['bids_folder'] = {'status': 'error', 'message': 'Path invalid'}
+    elif not bids_path:
         results['bids_folder'] = {'status': 'na', 'message': 'Not configured'}
     elif bids_path.exists():
         if (bids_path / 'dataset_description.json').exists():
@@ -25,8 +36,10 @@ def _build_project_preflight_results(config) -> dict:
     else:
         results['bids_folder'] = {'status': 'error', 'message': 'Folder not found'}
 
-    fmriprep_path = Path(config.fmriprep_folder) if config.fmriprep_folder else None
-    if not fmriprep_path or not config.fmriprep_folder:
+    fmriprep_path, fmriprep_bad = _as_path(config.fmriprep_folder)
+    if fmriprep_bad:
+        results['fmriprep_folder'] = {'status': 'error', 'message': 'Path invalid'}
+    elif not fmriprep_path:
         results['fmriprep_folder'] = {'status': 'na', 'message': 'Not configured'}
     elif fmriprep_path.exists():
         if (fmriprep_path / 'dataset_description.json').exists():
@@ -61,7 +74,7 @@ def _build_project_preflight_results(config) -> dict:
     else:
         results['space'] = {'status': 'na', 'message': 'fMRIPrep folder not available', 'value': space}
 
-    derivatives_path = Path(config.derivatives_folder) if config.derivatives_folder else None
+    derivatives_path, _ = _as_path(config.derivatives_folder)
     if derivatives_path and derivatives_path.exists():
         smooth_found = next((derivatives_path / 'bidspm-preproc').glob('**/*desc-smth*'), None) is not None
         results['smooth'] = {
@@ -94,6 +107,8 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
         """Create a new project."""
         try:
             data = request.json or {}
+            if not isinstance(data.get('name', ''), str) or not isinstance(data.get('description', ''), str):
+                return jsonify({'error': 'Project name and description must be text'}), 400
             name = data.get('name', '').strip()
             description = data.get('description', '').strip()
             config = data.get('config', None)
@@ -130,6 +145,8 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
                 return jsonify({'error': 'Project not found'}), 404
 
             data = request.json or {}
+            if any(k in data and not isinstance(data[k], str) for k in ('name', 'description')):
+                return jsonify({'error': 'Project name and description must be text'}), 400
             if 'name' in data:
                 project.name = data['name']
             if 'description' in data:
@@ -223,7 +240,10 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
             if not config_path or not os.path.exists(config_path):
                 return jsonify({'error': 'Config file not found'}), 400
 
-            success = get_project_manager().import_config(project_id, Path(config_path))
+            try:
+                success = get_project_manager().import_config(project_id, Path(config_path))
+            except ConfigImportError as exc:  # the stored config is untouched
+                return jsonify({'error': str(exc)}), 400
             if not success:
                 return jsonify({'error': 'Failed to import configuration'}), 500
 
