@@ -74,11 +74,20 @@ app.config['SECRET_KEY'] = secrets.token_hex(16)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 
+@app.errorhandler(RecursionError)
+def too_deeply_nested(_exc):
+    """Every route that parses a request body: absurd JSON nesting is the client's mistake, not an HTML 500."""
+    return jsonify({'success': False, 'valid': False, 'error': 'The request is nested too deeply.'}), 400
+
+
 @app.before_request
 def reject_nul_characters():
     """A NUL in any path/value cannot be a real path: answer JSON 400 instead of each route failing in its own way."""
     raw = request.get_data(cache=True) if request.method in ('POST', 'PUT', 'PATCH') else b''
-    nul_in_body = (b'\\u0000' in raw or b'\x00' in raw) and has_nul(request.get_json(silent=True))
+    try:
+        nul_in_body = (b'\\u0000' in raw or b'\x00' in raw) and has_nul(request.get_json(silent=True))
+    except RecursionError:  # absurdly nested body: the route answers it
+        nul_in_body = False
     if nul_in_body or any(has_nul(v) for v in request.args.values()):
         return jsonify({'success': False, 'error': 'Values must not contain NUL characters.'}), 400
 

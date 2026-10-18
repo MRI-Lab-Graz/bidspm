@@ -1,7 +1,8 @@
 import json
+import logging
 import os
 import random
-import secrets
+import tempfile
 from collections import Counter
 from difflib import get_close_matches
 from pathlib import Path
@@ -764,19 +765,28 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
 
     @app.route('/validate_model', methods=['POST'])
     def api_validate_model():
-        data = request.json or {}
-        content = data.get('content')
+        try:  # request.json raises RecursionError (an HTML 500) on absurdly nested bodies
+            data = json.loads(request.get_data(as_text=True) or 'null')
+        except (ValueError, RecursionError):
+            return jsonify({'valid': False, 'error': 'The request body is not valid JSON (or is nested too deeply).'}), 400
+        content = data.get('content') if isinstance(data, dict) else None
         if not content:
             return jsonify({'valid': False, 'error': 'No content provided'}), 400
+        if not isinstance(content, dict):
+            return jsonify({'valid': False, 'error': 'The model must be a JSON object.'}), 400
 
-        temp_path = Path(f"config/temp_model_{secrets.token_hex(4)}.json")
+        # the system temp dir, not a cwd-relative config/ (which may not exist or be writable); always removed
+        handle, name = tempfile.mkstemp(prefix='bidspm_validate_', suffix='.json')
+        temp_path = Path(name)
         try:
-            with open(temp_path, 'w', encoding='utf-8') as file_handle:
+            with os.fdopen(handle, 'w', encoding='utf-8') as file_handle:
                 json.dump(content, file_handle)
             return jsonify(validate_bids_model(temp_path))
+        except Exception:  # noqa: BLE001 - JSON, no internals
+            logging.getLogger(__name__).exception('model validation failed unexpectedly')
+            return jsonify({'valid': False, 'error': 'Validation failed unexpectedly; details are in the server log.'}), 500
         finally:
-            if temp_path.exists():
-                temp_path.unlink()
+            temp_path.unlink(missing_ok=True)
 
     @app.route('/get_model_tasks')
     def get_model_tasks():

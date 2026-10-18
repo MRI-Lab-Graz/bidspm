@@ -121,7 +121,7 @@ def _model_needs(model_file):
                     conditions.add(x.split(".", 1)[1])
                 elif "." not in x:
                     nuisance.append(x)
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
         return set(), [], False, set()
     return conditions, nuisance, transformed, produced
 
@@ -130,7 +130,7 @@ def _model_tasks(model_file):
     """The model's Input.task as a list of strings; [] when absent or malformed."""
     try:
         task = (json.loads(Path(model_file).read_text()).get("Input") or {}).get("task")
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
         return []
     return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
 
@@ -607,7 +607,7 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         raw = None  # sentinel: missing/unreadable model file
     try:  # canonical JSON: key order/whitespace differ between the browser's model_json and the saved file
         raw = json.dumps(json.loads(raw), sort_keys=True).encode()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         pass
     content = None if raw is None else hashlib.sha256(raw).hexdigest()
     payload = [
