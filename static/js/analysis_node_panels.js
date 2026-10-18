@@ -431,12 +431,9 @@
                 ? participantsInfo.sample_values
                 : {};
 
-            if (!node.Model || typeof node.Model !== 'object' || Array.isArray(node.Model)) {
-                node.Model = { Type: 'glm', X: ['1'] };
-            }
-            if (!Array.isArray(node.Model.X)) node.Model.X = [];
-            node.Model.X = normalizeStringArray(node.Model.X);
-            if (!node.Model.X.length) node.Model.X = ['1'];
+            // Display-only copy: the panel must not rewrite the loaded model (unedited saves stay byte-identical).
+            const modelX = (node.Model && typeof node.Model === 'object' && Array.isArray(node.Model.X))
+                ? normalizeStringArray(node.Model.X) : [];
 
             function createFieldRow(labelText) {
                 const row = document.createElement('div');
@@ -482,10 +479,10 @@
             panel.appendChild(presetRow.row);
 
             const defaultGroupVar = node.GroupBy.find((value) => categoricalColumns.includes(String(value)))
-                || node.Model.X.find((value) => categoricalColumns.includes(String(value)))
+                || modelX.find((value) => categoricalColumns.includes(String(value)))
                 || categoricalColumns[0]
                 || '';
-            const defaultCovariate = node.Model.X.find((value) => numericColumns.includes(String(value)))
+            const defaultCovariate = modelX.find((value) => numericColumns.includes(String(value)))
                 || numericColumns[0]
                 || '';
 

@@ -105,6 +105,19 @@ class TestModelRoundTrip(FidelityCase):
         self.assertEqual(saved["Nodes"][0]["Model"]["X"], model["Nodes"][0]["Model"]["X"])
         self.assertIs(type(saved["Nodes"][0]["Model"]["X"][1]), int)
 
+    def test_saving_without_edits_keeps_dataset_nodes_exactly(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"] += [
+            {"Level": "Dataset", "Name": "ds_x", "GroupBy": ["contrast"],
+             "Model": {"X": [1, {"a": 1}, "  padded "], "Type": "glm"}},
+            {"Level": "Dataset", "Name": "ds_nomodel", "GroupBy": ["contrast"]},
+        ]
+        self.new_project(model)
+        page = self.open_model()
+        self.save_model(page)
+        saved = self.model_path.read_text()
+        self.assertEqual(json.dumps(json.loads(saved)), json.dumps(model))
+
     def test_a_cleared_number_field_removes_the_key_instead_of_writing_zero(self):
         model = copy.deepcopy(MODEL)
         model["Nodes"][0]["Model"]["Options"] = {"HighPassFilterCutoffHz": 0.008}
