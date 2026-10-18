@@ -280,6 +280,7 @@ def test_client_disconnect_does_not_stop_job_or_leak_threads():
         release.set()
         assert finished(job)
     job_of(job).thread.join(WAIT)
+    job_of(job).timer.join(WAIT)  # cancelled with the terminal event, no thread left waiting out the grace
     _, events = stream(client, job)  # a new client can still read the whole history
     assert events[-1][1]["phase"] == "done"
     assert threading.active_count() <= before
@@ -360,3 +361,62 @@ def test_thread_start_failure_leaves_no_job_behind():
     assert res.status_code == 500 and res.is_json and "no threads" in res.get_json()["error"]
     with api._JOBS_LOCK:
         assert not api._JOBS
+
+
+def _blocking_runner(started):
+    def runner(config, progress=None, cancelled=None, **kw):
+        started.release()
+        while not cancelled():
+            threading.Event().wait(0.01)
+        return {"verdict": "cancelled", "checks": []}
+    return runner
+
+
+def test_unattended_job_is_cancelled_after_the_grace_and_frees_its_slot():
+    started = threading.Semaphore(0)
+    client = app.test_client()
+    with patch(RUNNER, side_effect=_blocking_runner(started)), patch.object(api, "STREAM_ATTACH_GRACE", 0.1):
+        ids = [start(client, {"config": {}}) for _ in range(api.MAX_RUNNING_JOBS)]
+        assert all(job_of(i).cancel_event.wait(WAIT) for i in ids)  # nobody ever attached
+        assert all(finished(i) for i in ids)
+        assert client.post("/api/preflight/start", json={"config": {}}).status_code == 200
+
+
+def test_job_with_a_stream_attached_in_time_is_not_cancelled():
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(config, progress=None, cancelled=None, **kw):
+        started.set()
+        release.wait(WAIT)
+        return {"verdict": "ready", "checks": []}
+
+    client = app.test_client()
+    with patch(RUNNER, side_effect=runner), patch.object(api, "STREAM_ATTACH_GRACE", 0.3):
+        job = start(client, {"config": {}})
+        assert started.wait(WAIT)
+        reader = threading.Thread(target=lambda: stream(client, job), daemon=True)
+        reader.start()
+        j = job_of(job)
+        pause = threading.Event()
+        for _ in range(WAIT * 100):  # condition wait: the stream attached
+            if j.streamed or pause.wait(0.01):
+                break
+        assert j.streamed
+        j.timer.join(WAIT)  # the grace has passed
+        assert not j.cancel_event.is_set()
+        release.set()
+        reader.join(WAIT)
+        assert finished(job)
+
+
+def test_job_finished_before_the_grace_is_untouched():
+    client = app.test_client()
+    with patch(RUNNER, return_value={"verdict": "ready", "checks": []}), patch.object(api, "STREAM_ATTACH_GRACE", 0.1):
+        job = start(client, {"config": {}})
+        assert finished(job)
+        j = job_of(job)
+        j.timer.join(WAIT)
+        assert not j.cancel_event.is_set()
+        _, events = stream(client, job)  # late attach still replays the real result
+    assert events[-1][1]["report"]["verdict"] == "ready"

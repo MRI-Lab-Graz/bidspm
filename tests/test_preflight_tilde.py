@@ -78,3 +78,74 @@ def test_form_job_then_run_gate_with_tilde_vs_absolute_reuses_the_result(home, t
         client.post("/run", json={"actions": ["stats"], "settings": str(settings), "validator": "skip",
                                   "skip_validation": True})
     rerun.assert_not_called()
+
+
+# --- relative MODELS_FILE: ONE resolver shared by the Pipeline and the readiness check ---
+def _rel_cfg(tmp_path, deriv="derivatives", **extra):
+    make_trees(tmp_path / "ds")
+    cfg = {"BIDS_DIR": str(tmp_path / "ds" / "bids"), "FMRIPREP_DIR": str(tmp_path / "ds" / "fmriprep"),
+           "SPACE": "MNI", "TASKS": ["x"], "WD": str(tmp_path / "wd"), "MODELS_FILE": "m.json", **extra}
+    if deriv:
+        cfg["DERIVATIVES_DIR"] = str(tmp_path / deriv)
+    return cfg
+
+
+def _bad_model(folder):
+    folder.mkdir(parents=True)
+    (folder / "m.json").write_text("not json")
+
+
+def test_relative_model_is_found_under_derivatives_models_by_preflight_and_signature(tmp_path, monkeypatch):
+    from lib.preflight import run_preflight_from_config
+    monkeypatch.chdir(tmp_path)  # cwd has no m.json
+    cfg = _rel_cfg(tmp_path)
+    _bad_model(tmp_path / "derivatives" / "models")
+    report = run_preflight_from_config(cfg, validator="skip")
+    assert any(c["id"].startswith("model") for c in report["checks"]), report["checks"]  # the file's content was read
+    assert not any("not found" in c["message"] for c in report["checks"]), report["checks"]
+    a = signature(cfg, "", "skip", None, False)
+    (tmp_path / "derivatives" / "models" / "m.json").write_text("{}")
+    assert signature(cfg, "", "skip", None, False) != a  # hashes the same file the check read
+
+
+def test_empty_derivatives_falls_back_to_wd_like_load_config(tmp_path, monkeypatch):
+    from lib.model_path import resolve_model_file
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wd" / "models").mkdir(parents=True)
+    (tmp_path / "wd" / "models" / "m.json").write_text("{}")
+    cfg = _rel_cfg(tmp_path, deriv=None, DERIVATIVES_DIR="  ")
+    from lib.preflight import model_path_from_config
+    assert model_path_from_config(cfg) == str(tmp_path / "wd" / "models" / "m.json")
+    assert resolve_model_file("m.json", tmp_path / "wd") == tmp_path / "wd" / "models" / "m.json"
+
+
+def test_pipeline_uses_the_same_resolver(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from lib.core import Pipeline
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "derivatives" / "models").mkdir(parents=True)
+    (tmp_path / "derivatives" / "models" / "m.json").write_text("{}")
+    p = Pipeline.__new__(Pipeline)
+    p.options = SimpleNamespace(model_file=None, actions=[])
+    p.config = SimpleNamespace(MODELS_FILE="m.json", DERIVATIVES_DIR=tmp_path / "derivatives")
+    p._log_error = lambda *a, **k: None
+    p.warnings = []
+    try:
+        p._resolve_model_file()
+    except Exception:
+        pass
+    assert p.model_file_path == tmp_path / "derivatives" / "models" / "m.json"
+
+
+def test_absolute_tilde_and_cwd_paths_are_unchanged(tmp_path, monkeypatch):
+    from lib.model_path import resolve_model_file
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert resolve_model_file("~/a.json", tmp_path / "d") == tmp_path / "a.json"
+    assert resolve_model_file(str(tmp_path / "x.json"), tmp_path / "d") == tmp_path / "x.json"
+    (tmp_path / "m.json").write_text("{}")  # config order: derivatives first, cwd as fallback
+    assert resolve_model_file("m.json", tmp_path / "d") == (tmp_path / "m.json").resolve()
+    (tmp_path / "d" / "models").mkdir(parents=True)
+    (tmp_path / "d" / "models" / "m.json").write_text("{}")
+    assert resolve_model_file("m.json", tmp_path / "d") == tmp_path / "d" / "models" / "m.json"
+    assert resolve_model_file("m.json", tmp_path / "d", cwd_first=True) == (tmp_path / "m.json").resolve()

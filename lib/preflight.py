@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from lib.config import clean_path as _path  # one normaliser for the check and the run
+from lib.model_path import resolve_model_file
 
 ERROR, WARN = "error", "warn"
 
@@ -528,11 +529,21 @@ def _as_list(value):
 
 
 
+def model_path_from_config(cfg, model=""):
+    """The model file the run would use: `model` (command-line style, cwd first) else MODELS_FILE (derivatives first);
+    DERIVATIVES_DIR empty -> WD, as load_config. "" when none is set. Shared by the check and the signature."""
+    value = _path(model or cfg.get("MODELS_FILE") or "")
+    if not value:
+        return ""
+    base = _path(cfg.get("DERIVATIVES_DIR") or "") or _path(cfg.get("WD") or "") or None
+    return str(resolve_model_file(value, base, cwd_first=bool(model)))
+
+
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,
                               progress=None, cancelled=None):
     return run_preflight(
         bids_dir=_path(cfg.get("BIDS_DIR", "")), fmriprep_dir=_path(cfg.get("FMRIPREP_DIR", "")),
-        model_file=_path(model or cfg.get("MODELS_FILE", "")), tasks=_as_list(cfg.get("TASKS")),
+        model_file=model_path_from_config(cfg, model), tasks=_as_list(cfg.get("TASKS")),
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
         validator=validator, container_type=cfg.get("container_type", ""),
         skip_model_validation=skip_model_validation, actions=actions,
@@ -547,7 +558,7 @@ _RECENT_LOCK = threading.Lock()
 
 def signature(cfg, model, validator, actions, skip_model_validation):
     """Hash of exactly what run_preflight_from_config reads, normalised; the model by file content, not path."""
-    path = _path(model or cfg.get("MODELS_FILE") or "")
+    path = model_path_from_config(cfg, model)
     try:
         raw = Path(path).read_bytes()
     except (OSError, TypeError, ValueError):

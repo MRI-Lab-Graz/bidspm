@@ -33,6 +33,7 @@ window.ReadinessPanel = (function () {
         // The status region is the single announcer: banners inside it carry no role=alert of their own.
         target.setAttribute('role', 'status');
         target.setAttribute('aria-live', 'polite');
+        target.setAttribute('aria-atomic', 'false');  // role=status implies true: verdict/failure are separate inserted nodes
         target.replaceChildren(...reportNodes(report));
     }
 
@@ -61,6 +62,7 @@ window.ReadinessPanel = (function () {
         // One persistent live region: verdict, failure and connection notices are announced from inside it.
         target.setAttribute('role', 'status');
         target.setAttribute('aria-live', 'polite');
+        target.setAttribute('aria-atomic', 'false');  // role=status implies true: verdict/failure are separate inserted nodes
         const phaseEls = new Map();
         const phaseList = el('ul', 'list-unstyled mb-1 small rp-phases');
         for (const [key, label] of PHASES) {
