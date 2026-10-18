@@ -35,19 +35,25 @@ def read_header(path):
 
 
 _BLANK_LINE = re.compile(rb"\n[ \t\r]*(?=\n)")  # an empty or whitespace-only line terminated by a newline
+_BLANK_HINTS = (b"\n\n", b"\n\r", b"\n ", b"\n\t")  # a blank line, whatever its ending, contains one of these
 QUOTE_WARNING = "values are wrapped in quotes; BIDS TSV files must not quote fields"
 
 
-def count_lines(path):
-    """Number of non-header, non-blank lines, counted on raw bytes (no CSV parsing). LF, CRLF and CR-only endings."""
+def count_lines(path, expect=None):
+    """Number of non-header, non-blank lines, counted on raw bytes (no CSV parsing). LF, CRLF and CR-only endings.
+
+    expect: the count the caller hopes for. When the quick newline count equals it and the file's last 4 KB holds no
+    blank line, that is returned without the (slow on multi-MB confounds files) blank-line regex pass.
+    # ponytail: a blank line in the middle of a file that otherwise has expect+1 lines goes unnoticed on this fast path."""
     with open(path, "rb") as fh:
         data = fh.read()
     if b"\n" not in data:
         data = data.replace(b"\r", b"\n")
-    n = data.count(b"\n")
-    if any(s in data for s in (b"\n\n", b"\n\r", b"\n ", b"\n\t")):  # regex only when a blank line is possible
-        n -= sum(1 for _ in _BLANK_LINE.finditer(data))
-    n += bool(data[data.rfind(b"\n") + 1:].strip())  # last line without a final newline
+    n = data.count(b"\n") + bool(data[data.rfind(b"\n") + 1:].strip())  # last line without a final newline
+    if expect is not None and n - 1 == expect and not any(b in data[-4096:] for b in _BLANK_HINTS):
+        return expect
+    n = data.count(b"\n") - sum(1 for _ in _BLANK_LINE.finditer(data))
+    n += bool(data[data.rfind(b"\n") + 1:].strip())
     return max(n - 1, 0)
 
 

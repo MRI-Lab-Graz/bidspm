@@ -58,11 +58,17 @@ def test_quote_warning_appears_once_per_run_not_per_subject(tmp_path):
     assert len([c for c in report["checks"] if c["id"] == "tsv_quotes"]) == 1
 
 
-@pytest.mark.parametrize("text", ["a\tb\n1\t2\n3\t4\n", "a\tb\r\n1\t2\r\n3\t4\r\n", "a\tb\r1\t2\r3\t4\r"])
-def test_count_lines_skips_the_blank_line_regex_on_clean_files(tmp_path, monkeypatch, text):
-    """Speed: 100 confounds files are counted per preflight, so the regex only runs when a blank line is possible."""
+@pytest.mark.parametrize("text", ["a\tb\n1\t2\n3\t4\n", "a\tb\r\n1\t2\r\n3\t4\r\n", "a\tb\r1\t2\r3\t4\r", "a\tb\n1\t2\n3\t4"])
+def test_count_lines_skips_the_blank_line_regex_when_the_raw_count_is_the_expected_one(tmp_path, monkeypatch, text):
+    """Speed: 100 multi-MB confounds files are counted per preflight; the regex only runs when the quick count disagrees."""
     import lib.tsv
-    monkeypatch.setattr(lib.tsv, "_BLANK_LINE", None)  # any use raises AttributeError
+    monkeypatch.setattr(lib.tsv, "_BLANK_LINE", None)  # any use raises
     f = tmp_path / "c.tsv"
     f.write_bytes(text.encode())
-    assert count_lines(f) == 2
+    assert count_lines(f, expect=2) == 2
+
+
+def test_count_lines_expect_does_not_hide_a_blank_line_mismatch(tmp_path):
+    f = tmp_path / "c.tsv"
+    f.write_bytes(b"a\tb\n1\t2\n3\t4\n\n\n")
+    assert count_lines(f, expect=4) == 2  # the raw count 4 would match, but trailing lines are blank
