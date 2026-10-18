@@ -1,4 +1,3 @@
-import csv
 import json
 import os
 import random
@@ -16,6 +15,7 @@ from lib import (
     validate_bids_model,
 )
 from lib.model_wizard import second_level_nodes
+from lib.tsv import open_tsv
 
 
 PathResolver = Callable[[str], str]
@@ -211,8 +211,7 @@ def _discover_event_info(bids_dir: Path, tasks_filter: Optional[List[str]] = Non
     for event_file in event_files[:max_files]:
         file_values = {'trial_type': set(), 'condition': set()}
         try:
-            with open(event_file, 'r', encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(event_file) as reader:
                 if not reader.fieldnames:
                     continue
 
@@ -325,8 +324,7 @@ def _discover_confound_info(fmriprep_dir: Path, tasks_filter: Optional[List[str]
     columns = set()
     for confound_file in confound_files[:max_files]:
         try:
-            with open(confound_file, 'r', encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(confound_file) as reader:
                 if not reader.fieldnames:
                     continue
                 columns.update(name.strip() for name in reader.fieldnames if name and name.strip())
@@ -383,8 +381,7 @@ def _discover_participants_info(bids_dir: Path, max_values_per_column: int = 20)
         return (2, token.lower(), token)
 
     try:
-        with open(participants_file, 'r', encoding='utf-8') as stream:
-            reader = csv.DictReader(stream, delimiter='\t')
+        with open_tsv(participants_file) as reader:
             if not reader.fieldnames:
                 return {**default_payload, 'sample_status': 'invalid-header'}
 
@@ -495,8 +492,7 @@ def _scan_bids_for_model(bids_dir: str) -> dict:
         if task not in tasks:
             tasks.append(task)
         try:
-            with event_file.open(encoding='utf-8') as file_handle:
-                reader = csv.DictReader(file_handle, delimiter='\t')
+            with open_tsv(event_file) as reader:
                 for row in reader:
                     value = (row.get('trial_type') or '').strip()
                     if value and value != 'n/a':
@@ -930,8 +926,7 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
 
                 for chosen in candidate_files:
                     try:
-                        with open(chosen, 'r', encoding='utf-8') as file_handle:
-                            reader = csv.DictReader(file_handle, delimiter='\t')
+                        with open_tsv(chosen) as reader:
                             headers = list(reader.fieldnames or [])
                             if not headers:
                                 continue

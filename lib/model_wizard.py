@@ -12,6 +12,8 @@ import os
 import re
 from pathlib import Path
 
+from lib.tsv import duplicates, read_tsv
+
 NAME_RE = re.compile(r"[A-Za-z0-9_]+")
 MOTION6 = ["trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]
 NUISANCE_PRESETS = {
@@ -373,14 +375,14 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
     root = Path(bids_dir)
     pattern = f"*task-{task}_*events.tsv"
     files = sorted({p for p in func_files(root) if fnmatch.fnmatchcase(p.name, pattern)} | set(root.glob(f"task-{task}_events.tsv")))
-    values, numeric_bad, truncated, used = {}, set(), set(), 0
+    values, numeric_bad, truncated, used, warnings = {}, set(), set(), 0, []
     for path in files[:max_files]:
         try:
-            with open(path, encoding="utf-8-sig", newline="") as fh:
-                rows = list(csv.DictReader(fh, delimiter="\t"))
+            cols, rows = read_tsv(path)
         except (OSError, UnicodeError, csv.Error):
             continue
         used += 1
+        warnings += [w for c in duplicates(cols) if (w := f"duplicate column {c} (e.g. {path.name})") and not any(x.startswith(f"duplicate column {c} ") for x in warnings)]
         for row in rows:
             for col, val in row.items():
                 if not col or col in ("onset", "duration") or val is None:
@@ -401,4 +403,4 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
     return {"files_truncated": len(files) > max_files,
             "columns": {c: sorted(v) for c, v in values.items()},
             "numeric": sorted(c for c, v in values.items() if v and c not in numeric_bad),
-            "files": used, "truncated": sorted(truncated)}
+            "files": used, "truncated": sorted(truncated), "warnings": warnings}

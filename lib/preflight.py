@@ -20,6 +20,9 @@ from pathlib import Path
 
 from lib.config import clean_path as _path  # one normaliser for the check and the run
 from lib.model_path import resolve_model_file
+from lib.tsv import duplicates
+from lib.tsv import read_header as _read_header
+from lib.tsv import read_tsv as _read_tsv
 
 ERROR, WARN = "error", "warn"
 
@@ -72,19 +75,6 @@ def _func_listing(root, sub):
 
 def _match(listing, pattern):
     return sorted(p for p in listing if fnmatch.fnmatchcase(p.name, pattern))
-
-
-def _read_header(path):
-    """Column names only: confounds files are huge and only their header is checked."""
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        return next(csv.reader(fh, delimiter="\t"), [])
-
-
-def _read_tsv(path):
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        rows = list(reader)
-        return list(reader.fieldnames or []), rows
 
 
 def _events_problems(sub, name, cols, rows):
@@ -210,6 +200,11 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
             events_ok = False
             continue
         event_cols |= set(cols)
+        dup = duplicates(cols)
+        if dup:
+            out.append(_item("events_columns", ERROR, f"{path.name} has duplicate column {', '.join(dup)}",
+                             "Rename or remove the repeated column; each column name may appear once.", sub))
+            events_ok = False
         problems = _events_problems(sub, path.name, cols, rows)
         out += problems
         events_ok = events_ok and all(p["severity"] != ERROR for p in problems)

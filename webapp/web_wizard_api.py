@@ -41,13 +41,13 @@ def _cached_scan(bids_dir, fmriprep_dir, task, refresh=False):
 def _scan(bids_dir, fmriprep_dir, task, with_confounds=True):
     tasks = bids_tasks(bids_dir)
     task = task if task in tasks else (tasks[0] if tasks else "")
-    events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False}
+    events = scan_events(bids_dir, task) if task else {"columns": {}, "numeric": [], "files": 0, "truncated": [], "files_truncated": False, "warnings": []}
     confounds = (_discover_confound_info(Path(fmriprep_dir), [task] if task else None)
                  if with_confounds and fmriprep_dir else {"columns": []})
     return {"tasks": tasks, "task": task, "columns": events["columns"],
             "numeric": events["numeric"], "confound_columns": confounds["columns"],
             "truncated": events["truncated"], "events_files": events["files"],
-            "files_truncated": events.get("files_truncated", False)}
+            "files_truncated": events.get("files_truncated", False), "warnings": events.get("warnings", [])}
 
 
 def _preflight(model, bids_dir, fmriprep_dir, space, task):
