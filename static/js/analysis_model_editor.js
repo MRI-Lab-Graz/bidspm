@@ -115,6 +115,7 @@ var {
 var {
     addArrayItem,
     addRegressorToModelX,
+    deleteByPath,
     getByPath,
     getModelObjectFromModelXPath,
     getModelObjectPathFromModelXPath,
@@ -128,6 +129,7 @@ var {
     isNuisanceRegressor,
     moveModelXRegressorByStep,
     normalizeModelHrfVariables,
+    numberInputProblem,
     parsePrimitiveInput,
     reorderArrayItem,
     setByPath,

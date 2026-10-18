@@ -89,7 +89,13 @@ document.getElementById('btn-save-start').onclick = async () => {
 
     if (hasProject && currentProjectId) {
         // Save to project
-        await saveProjectConfig();
+        try {
+            await saveProjectConfig();
+        } catch (err) {
+            validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Not started, saving the project failed: ${escapeHtml(err.message)}</div>`;
+            revealResult(validationResult);
+            return;
+        }
         
         const runPayload = {
             ...data,

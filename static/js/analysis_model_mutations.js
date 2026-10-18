@@ -25,6 +25,22 @@
         cursor[tokens[tokens.length - 1]] = value;
     }
 
+    // A cleared number field means "no value" (the key is removed), never 0; Infinity/NaN are refused.
+    function numberInputProblem(raw) {
+        if (String(raw).trim() === '') return 'empty';
+        return Number.isFinite(Number(raw)) ? '' : 'invalid';
+    }
+
+    // Removes an object key; false for an array element (deleting it would shift its siblings).
+    function deleteByPath(root, path) {
+        const tokens = pathTokens(path);
+        const last = tokens[tokens.length - 1];
+        const parent = tokens.slice(0, -1).reduce((acc, tk) => (acc == null ? acc : acc[tk]), root);
+        if (!parent || typeof parent !== 'object' || Array.isArray(parent) || typeof last !== 'string') return false;
+        delete parent[last];
+        return true;
+    }
+
     function parsePrimitiveInput(raw, original) {
         if (typeof original === 'number') {
             const parsed = Number(raw);
@@ -249,7 +265,7 @@
             if (!Array.isArray(modelObj.X)) {
                 modelObj.X = [];
             }
-            modelObj.X = Array.from(new Set(modelObj.X.map(value => String(value || '').trim()).filter(Boolean)));
+            // Model.X is left exactly as the file has it: numbers stay numbers, nothing is trimmed or de-duplicated.
             syncModelXHrfVariables(`Nodes[${idx}].Model.X`);
         });
     }
@@ -364,6 +380,7 @@
         addArrayItem,
         addRegressorToModelX,
         defaultArrayItemForPath,
+        deleteByPath,
         getByPath,
         getModelObjectFromModelXPath,
         getModelObjectPathFromModelXPath,
@@ -377,6 +394,7 @@
         isNuisanceRegressor,
         moveModelXRegressorByStep,
         normalizeModelHrfVariables,
+        numberInputProblem,
         parsePrimitiveInput,
         pathTokens,
         reorderArrayItem,

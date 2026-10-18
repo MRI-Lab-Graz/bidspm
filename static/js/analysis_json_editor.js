@@ -119,6 +119,23 @@ const READONLY_MODEL_PATHS = [
         } else {
             input.addEventListener('change', (e) => {
                 const current = getByPath(modelEditorDraft, path);
+                if (typeof current === 'number') {
+                    const problem = numberInputProblem(e.target.value);
+                    if (problem === 'invalid') {
+                        setModelEditorStatus(`Not a finite number: ${e.target.value}`, 'warning');
+                        e.target.value = String(current);
+                        return;
+                    }
+                    if (problem === 'empty') {
+                        if (deleteByPath(modelEditorDraft, path)) {
+                            renderModelAccordionEditor();
+                        } else {
+                            setModelEditorStatus('A number is required here.', 'warning');
+                            e.target.value = String(current);
+                        }
+                        return;
+                    }
+                }
                 const newValue = parsePrimitiveInput(e.target.value, current);
 
                 if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)) {

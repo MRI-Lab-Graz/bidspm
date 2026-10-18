@@ -109,9 +109,9 @@ async function loadProjectConfig() {
             MODELS_FILE: config.MODELS_FILE || '',
             NODE_NAME: config.NODE_NAME || '',
             SPACE: config.SPACE || 'MNI152NLin2009cAsym',
-            FWHM: config.FWHM || 6,
+            FWHM: config.FWHM ?? 6,  // 0 is a valid value
             TASKS: config.TASKS || [],
-            VERBOSITY: config.VERBOSITY || 2,
+            VERBOSITY: config.VERBOSITY ?? 2,
             container_type: config.container_type || 'docker',
             docker_image: config.docker_image || 'bidspm/bidspm:latest',
             apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif',
@@ -124,11 +124,17 @@ async function loadProjectConfig() {
     }
 }
 
+// Throws an Error with a user-facing message when the values are unusable or the server refuses them.
 async function saveProjectConfig() {
     if (!currentProjectId) return;
-    
+
     updateInternalState();
-    
+
+    const fwhm = Number.parseFloat(unifiedStudyConfig.FWHM);
+    const verbosity = Number.parseInt(unifiedStudyConfig.VERBOSITY, 10);
+    if (fwhm < 0) throw new Error('FWHM must be 0 or greater.');
+    if (verbosity < 0 || verbosity > 3) throw new Error('Verbosity must be between 0 and 3.');
+
     // Map back to project config format
     const config = {
         bids_folder: unifiedStudyConfig.BIDS_DIR || '',
@@ -138,9 +144,9 @@ async function saveProjectConfig() {
         models_file: unifiedStudyConfig.MODELS_FILE || '',
         node_name: unifiedStudyConfig.NODE_NAME || '',
         space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
-        fwhm: parseFloat(unifiedStudyConfig.FWHM) || 6,
+        fwhm: Number.isFinite(fwhm) ? fwhm : 6,
         tasks: unifiedStudyConfig.TASKS || [],
-        verbosity: parseInt(unifiedStudyConfig.VERBOSITY) || 2,
+        verbosity: Number.isFinite(verbosity) ? verbosity : 2,
         container_type: unifiedStudyConfig.container_type || 'docker',
         docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
         apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
@@ -150,14 +156,14 @@ async function saveProjectConfig() {
         skip_validation: true
     };
     
-    try {
-        await fetch(`/api/projects/${currentProjectId}/config`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(config)
-        });
-    } catch (err) {
-        console.error('Failed to save project config:', err);
+    const res = await fetch(`/api/projects/${currentProjectId}/config`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+    });
+    if (!res.ok) {
+        const detail = await res.json().then((body) => body.error, () => '');
+        throw new Error(detail || `the server answered ${res.status}`);
     }
 }
 
@@ -238,7 +244,7 @@ function setupStaticListeners() {
     const modelInput = document.getElementById('input-MODELS_FILE');
     if (modelInput) modelInput.addEventListener('change', async () => {
         // Persist the new path so it survives page reloads (e.g. returning from transformer builder).
-        if (hasProject && currentProjectId) await saveProjectConfig();
+        if (hasProject && currentProjectId) await saveProjectConfig().catch((err) => console.error('Saving the model path failed:', err));
         await openModelEditor({ scrollIntoView: false, showStatus: false });
         refreshModelTasks();
     });

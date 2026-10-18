@@ -765,7 +765,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Edit Project
+    // Edit Project. editShown holds the values the dialog opened with: only fields the user changed are sent, so
+    // values the form cannot show (a space outside the list, the image of the other container type) stay as they are.
+    let editShown = {};
     document.querySelectorAll('.btn-edit-project').forEach(btn => {
         btn.addEventListener('click', async function(e) {
             e.preventDefault();
@@ -782,12 +784,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('edit-bids-folder').value = config.bids_folder || '';
                 document.getElementById('edit-output-folder').value = config.output_folder || '';
                 document.getElementById('edit-fmriprep-folder').value = config.fmriprep_folder || '';
-                document.getElementById('edit-space').value = config.space || 'MNI152NLin2009cAsym';
+                const spaceSelect = document.getElementById('edit-space');
+                const space = config.space || 'MNI152NLin2009cAsym';
+                if (!Array.from(spaceSelect.options).some(o => o.value === space)) {
+                    spaceSelect.add(new Option(space, space));  // keep a space the list does not offer
+                }
+                spaceSelect.value = space;
                 document.getElementById('edit-container-type').value = config.container_type || 'docker';
                 
                 const containerImage = config.container_type === 'apptainer' ? config.apptainer_image :
                                        config.container_type === 'docker' ? config.docker_image : '';
                 document.getElementById('edit-container-image').value = containerImage || '';
+                editShown = {
+                    bids_folder: config.bids_folder || '', output_folder: config.output_folder || '',
+                    fmriprep_folder: config.fmriprep_folder || '', space,
+                    container_type: document.getElementById('edit-container-type').value,
+                    container_image: containerImage || ''
+                };
                 
                 new bootstrap.Modal(document.getElementById('editProjectModal')).show();
             } catch (error) {
@@ -813,16 +826,15 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        const config = {
-            bids_folder: bidsFolder,
-            output_folder: outputFolder,
-            fmriprep_folder: fmriprepFolder,
-            space: space,
-            container_type: containerType,
-            apptainer_image: containerType === 'apptainer' ? containerImage : '',
-            docker_image: containerType === 'docker' ? containerImage : 'bidspm/bidspm:latest'
-        };
-        
+        const now = {bids_folder: bidsFolder, output_folder: outputFolder, fmriprep_folder: fmriprepFolder, space,
+                     container_type: containerType};
+        const config = {};
+        Object.keys(now).forEach(key => { if (now[key] !== editShown[key]) config[key] = now[key]; });
+        if (containerImage !== editShown.container_image) {
+            config[containerType === 'apptainer' ? 'apptainer_image' : 'docker_image'] =
+                containerImage || (containerType === 'docker' ? 'bidspm/bidspm:latest' : '');
+        }
+
         try {
             const response = await fetch(`/api/projects/${projectId}`, {
                 method: 'PUT',

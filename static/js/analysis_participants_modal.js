@@ -43,7 +43,7 @@ var selectedParticipants = null;
             tasks: unifiedStudyConfig.TASKS || [],
             actions: actions,
             space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
-            fwhm: unifiedStudyConfig.FWHM || 6
+            fwhm: Number.isFinite(unifiedStudyConfig.FWHM) ? unifiedStudyConfig.FWHM : 6
         };
         const response = await fetch('/api/participants_status', {
             method: 'POST',
