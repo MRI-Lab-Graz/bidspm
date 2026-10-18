@@ -15,6 +15,7 @@ from lib import (
     validate_bids_model,
 )
 from lib.model_wizard import second_level_nodes
+from lib.safe_paths import UnsafePath, safe_target
 from lib.tsv import open_tsv
 
 
@@ -573,7 +574,7 @@ def _extract_task_name(path: str) -> str:
     return ''
 
 
-def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, app_root: Path) -> None:
+def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, app_root: Path, is_inside_bids_dir=None) -> None:
     @app.route('/get_bids_tasks')
     def get_bids_tasks():
         path = request.args.get('path')
@@ -730,13 +731,17 @@ def register_discovery_model_routes(app: Flask, resolve_fs_path: PathResolver, a
     @app.route('/api/model/create', methods=['POST'])
     def api_model_create():
         data = request.json or {}
-        path = data.get('path', '').strip()
-        bids_dir = data.get('bids_dir', '').strip()
+        path = str(data.get('path') or '').strip()
+        bids_dir = str(data.get('bids_dir') or '').strip()
 
         if not path:
             return jsonify({'success': False, 'error': 'No path provided'}), 400
-
-        path = os.path.abspath(path)
+        try:
+            path = safe_target(path, inside=is_inside_bids_dir, protect=(bids_dir,))
+        except UnsafePath as exc:
+            return jsonify({'success': False, 'error': str(exc)}), exc.status
+        if not path.endswith('.json'):
+            return jsonify({'success': False, 'error': 'Path must end with .json'}), 400
         if os.path.exists(path) and not data.get('overwrite', False):
             return jsonify({'success': False, 'error': 'File already exists. Set overwrite=true to replace it.'}), 409
 

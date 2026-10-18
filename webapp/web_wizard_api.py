@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request
 
 from lib.model_wizard import NUISANCE_PRESETS, WizardError, bids_tasks, build_model, catalog, scan_events
 from lib.preflight import run_preflight_from_config
+from lib.safe_paths import UnsafePath, safe_target
 from webapp.web_discovery_model_api import _discover_confound_info
 
 
@@ -64,7 +65,7 @@ def _preflight(model, bids_dir, fmriprep_dir, space, task):
     return report
 
 
-def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
+def register_wizard_routes(app: Flask, resolve_fs_path, is_inside_bids_dir=None) -> None:
     def _body():
         data = request.get_json(silent=True)
         return data if isinstance(data, dict) else None
@@ -95,7 +96,10 @@ def register_wizard_routes(app: Flask, resolve_fs_path) -> None:
             return jsonify({"error": f"BIDS folder not found: {bids_dir}"}), 404
         save_path = str(data.get("save_path") or "").strip()
         if save_path:
-            save_path = os.path.abspath(resolve_fs_path(save_path))
+            try:  # never into the BIDS tree (the request's own folder included), never over dataset files
+                save_path = safe_target(save_path, inside=is_inside_bids_dir, protect=(bids_dir,), resolve=resolve_fs_path)
+            except UnsafePath as exc:
+                return jsonify({"error": str(exc)}), exc.status
             if not save_path.endswith(".json"):
                 return jsonify({"error": "save_path must end with .json"}), 400
             if os.path.exists(save_path) and not data.get("overwrite"):

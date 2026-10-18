@@ -116,6 +116,16 @@ class TestWizardPage(unittest.TestCase):
         cfg = json.loads(urllib.request.urlopen(f"{self.base}/api/projects/{self.project_id}/config").read())
         self.assertEqual(cfg["models_file"], str(target))
 
+    def test_default_save_path_turns_the_model_name_into_a_safe_file_stem(self):
+        page = self.open_wizard()
+        wizard_go_to(page, "review")
+        page.evaluate("WIZ.modelsDir = '/data/derivatives/models'")
+        for name in ("../../etc/x y", "-x", "1abc", "a/b\\c", "..", "ünï", ""):
+            page.fill("#wiz-name", name)
+            path = page.evaluate("defaultSavePath()")
+            self.assertRegex(path, r"^/data/derivatives/models/[A-Za-z0-9_][A-Za-z0-9_.-]*\.json$", name)
+            self.assertNotIn("..", path)
+
     def test_new_model_button_opens_the_wizard(self):
         page = self.browser.new_page()
         page.goto(f"{self.base}/analysis/{self.project_id}", wait_until="load")

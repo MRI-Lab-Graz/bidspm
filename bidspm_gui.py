@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from waitress import serve
 
 # Import all business logic from core
@@ -47,6 +47,7 @@ from lib import (
     validate_bids_model,
 )
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
+from lib.safe_paths import has_nul
 from webapp.web_config_fs_api import register_config_fs_routes
 from webapp.web_discovery_model_api import (
     _build_model_warnings,
@@ -71,6 +72,15 @@ from webapp.web_wizard_api import register_wizard_routes
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+
+@app.before_request
+def reject_nul_characters():
+    """A NUL in any path/value cannot be a real path: answer JSON 400 instead of each route failing in its own way."""
+    raw = request.get_data(cache=True) if request.method in ('POST', 'PUT', 'PATCH') else b''
+    nul_in_body = (b'\\u0000' in raw or b'\x00' in raw) and has_nul(request.get_json(silent=True))
+    if nul_in_body or any(has_nul(v) for v in request.args.values()):
+        return jsonify({'success': False, 'error': 'Values must not contain NUL characters.'}), 400
 
 # Version info: single source is pyproject.toml
 __version__ = tomllib.loads((Path(__file__).parent / "pyproject.toml").read_text())["project"]["version"]
@@ -335,10 +345,12 @@ def _get_all_bids_dirs() -> list:
 
 def _is_inside_bids_dir(target_path: str) -> bool:
     """Return True if *target_path* is inside any registered BIDS folder."""
-    target = os.path.normpath(os.path.abspath(target_path))
-    for bids_dir in _get_all_bids_dirs():
-        if target == bids_dir or target.startswith(bids_dir + os.sep):
-            return True
+    typed = os.path.normpath(os.path.abspath(target_path))
+    for target in {typed, os.path.realpath(target_path)}:  # a symlink in either direction must not bypass the guard
+        for bids_dir in _get_all_bids_dirs():
+            for root in {bids_dir, os.path.realpath(bids_dir)}:
+                if target == root or target.startswith(root + os.sep):
+                    return True
     return False
 
 
@@ -426,10 +438,12 @@ register_discovery_model_routes(
     app,
     resolve_fs_path=_resolve_fs_path,
     app_root=APP_ROOT,
+    is_inside_bids_dir=_is_inside_bids_dir,
 )
 register_wizard_routes(
     app,
     resolve_fs_path=_resolve_fs_path,
+    is_inside_bids_dir=_is_inside_bids_dir,
 )
 register_utility_stats_routes(
     app,
