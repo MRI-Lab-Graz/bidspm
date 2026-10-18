@@ -364,11 +364,12 @@ class TestLegacySaveRefusals(FidelityCase):
 
     def test_save_and_start_stops_on_a_refusal_and_does_not_start(self):
         page = self.refused_page("save_settings")
-        page.evaluate("window.startExecution = () => { window.__started = true; }")
+        runs = []
+        page.route("**/run", lambda route: (runs.append(route.request.url), route.abort()))
         page.evaluate("runStatsCoverageGate = async () => ({allow: true, subjectsOverride: []})")
         page.evaluate("document.getElementById('btn-save-start').click()")
         self.assert_error_shown(page)
-        self.assertIsNone(page.evaluate("window.__started"))
+        self.assertEqual(runs, [])
 
 
 if __name__ == "__main__":
