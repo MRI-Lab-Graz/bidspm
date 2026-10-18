@@ -287,7 +287,7 @@
             } else {
                 delete modelObj.HRF;
             }
-            status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF off for ${regressor}</div>`;
+            status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF off for ${escapeHtml(regressor)}</div>`;
             renderModelAccordionEditor();
             return;
         }
@@ -297,7 +297,7 @@
         }
         modelObj.HRF.Model = String(modelObj.HRF.Model || 'spm').trim() || 'spm';
         modelObj.HRF.Variables = Array.from(new Set([...current, regressor]));
-        status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF on for ${regressor}</div>`;
+        status.innerHTML = `<div class="alert alert-info py-1 x-small mb-2">HRF on for ${escapeHtml(regressor)}</div>`;
         renderModelAccordionEditor();
     }
 
@@ -310,7 +310,7 @@
         if (!normalized) return;
 
         if (arr.some(value => String(value || '').trim() === normalized)) {
-            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${normalized}</div>`;
+            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(normalized)}</div>`;
             return;
         }
 

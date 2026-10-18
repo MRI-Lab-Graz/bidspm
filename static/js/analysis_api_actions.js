@@ -15,8 +15,17 @@ async function refreshTasks() {
         tasks.forEach(t => {
             const div = document.createElement('div');
             div.className = 'form-check form-check-inline mb-0';
-            div.innerHTML = `<input class="form-check-input task-checkbox" type="checkbox" value="${t}" id="task-${t}" onchange="updateInternalState(); refreshSpaces()">
-                             <label class="form-check-label x-small" for="task-${t}">${t}</label>`;
+            const box = document.createElement('input');
+            box.className = 'form-check-input task-checkbox';
+            box.type = 'checkbox';
+            box.value = t;
+            box.id = `task-${t}`;
+            box.addEventListener('change', () => { updateInternalState(); refreshSpaces(); });
+            const label = document.createElement('label');
+            label.className = 'form-check-label x-small';
+            label.htmlFor = box.id;
+            label.textContent = t;
+            div.append(box, ' ', label);
             container.appendChild(div);
         });
         const modelVal = document.getElementById('input-MODELS_FILE')?.value;
@@ -209,7 +218,7 @@ async function openModelEditor(options = {}) {
             const tone = pendingTransformerResult.tone === 'success' ? 'success'
                 : pendingTransformerResult.tone === 'warning' ? 'warning'
                 : 'info';
-            status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${pendingTransformerResult.message}</div>`;
+            status.innerHTML = `<div class="alert alert-${tone} py-1 x-small mb-0">${escapeHtml(pendingTransformerResult.message)}</div>`;
         } else if (status && showStatus) {
             status.innerHTML = '<div class="alert alert-success py-1 x-small mb-0">Model workspace loaded.</div>';
         } else if (status && !showStatus) {
@@ -223,7 +232,7 @@ async function openModelEditor(options = {}) {
         modelEditorDraft = null;
         renderModelAccordionEditor();
         if (status) {
-            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Could not load model: ${e.message}</div>`;
+            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Could not load model: ${escapeHtml(e.message)}</div>`;
         }
         if (pathLabel) pathLabel.textContent = modelPath;
     }
@@ -356,7 +365,7 @@ async function saveModelEditor() {
 
     const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
     if (missing.length) {
-        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Missing required keys: ${missing.join(', ')}</div>`;
+        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Missing required keys: ${escapeHtml(missing.join(', '))}</div>`;
         return;
     }
 
@@ -379,7 +388,7 @@ async function saveModelEditor() {
         });
         const result = await res.json();
         if (!result.success) {
-            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${result.error}</div>`;
+            status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">${escapeHtml(result.error)}</div>`;
             return;
         }
 
@@ -388,7 +397,7 @@ async function saveModelEditor() {
         // Refresh task and hint state in the background (no await)
         refreshModelTasks();
     } catch (e) {
-        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${e.message}</div>`;
+        status.innerHTML = `<div class="alert alert-danger py-1 x-small mb-0">Save failed: ${escapeHtml(e.message)}</div>`;
     }
 }
 

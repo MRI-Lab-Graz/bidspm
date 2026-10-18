@@ -109,7 +109,7 @@
                 button.type = 'button';
                 const active = currentDatatype === option.dt;
                 button.className = `btn btn-sm ${active ? 'btn-primary' : 'btn-outline-secondary'}`;
-                button.innerHTML = `<i class="fas ${option.icon} me-1"></i>${option.label}`;
+                button.innerHTML = `<i class="fas ${option.icon} me-1"></i>${escapeHtml(option.label)}`;
                 button.addEventListener('click', () => {
                     node.Mask = { desc: 'brain', suffix: 'mask', datatype: option.dt };
                     renderModelAccordionEditor();
@@ -623,12 +623,12 @@
 
             const categoricalText = document.createElement('div');
             categoricalText.className = 'small';
-            categoricalText.innerHTML = `<strong>Categorical:</strong> ${categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected'}`;
+            categoricalText.innerHTML = `<strong>Categorical:</strong> ${escapeHtml(categoricalColumns.length ? categoricalColumns.join(', ') : 'none detected')}`;
             participantsCard.appendChild(categoricalText);
 
             const numericText = document.createElement('div');
             numericText.className = 'small';
-            numericText.innerHTML = `<strong>Numeric:</strong> ${numericColumns.length ? numericColumns.join(', ') : 'none detected'}`;
+            numericText.innerHTML = `<strong>Numeric:</strong> ${escapeHtml(numericColumns.length ? numericColumns.join(', ') : 'none detected')}`;
             participantsCard.appendChild(numericText);
             panel.appendChild(participantsCard);
 

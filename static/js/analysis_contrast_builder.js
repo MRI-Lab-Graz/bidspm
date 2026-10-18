@@ -163,7 +163,7 @@
             chip.className = 'cb-condition-chip';
             chip.draggable = true;
             chip.dataset.cond = condition;
-            chip.innerHTML = `<i class="fas fa-grip-vertical cb-chip-icon"></i><span>${conditionLabel(condition)}</span>`;
+            chip.innerHTML = `<i class="fas fa-grip-vertical cb-chip-icon"></i><span>${escapeHtml(conditionLabel(condition))}</span>`;
             chip.addEventListener('dragstart', (event) => {
                 dragChip = condition;
                 dragFromCardIdx = null;
@@ -555,7 +555,7 @@
                 danger: 'text-danger',
                 warn: 'text-warning'
             };
-            cbStatus.innerHTML = `<span class="${classMap[type] || 'text-muted'}">${message}</span>`;
+            cbStatus.innerHTML = `<span class="${classMap[type] || 'text-muted'}">${escapeHtml(message)}</span>`;
             if (type === 'success') {
                 setTimeout(() => {
                     if (cbStatus) cbStatus.innerHTML = '';

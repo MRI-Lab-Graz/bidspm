@@ -16,7 +16,7 @@
         function renderBrowseError(message) {
             const list = getElement('browse-list');
             if (list) {
-                list.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">${message}</div>`;
+                list.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">${escapeHtml(message)}</div>`;
             }
         }
 
@@ -44,7 +44,7 @@
             (data.items || []).forEach((item) => {
                 const button = document.createElement('button');
                 button.className = 'list-group-item list-group-item-action d-flex align-items-center small py-2';
-                button.innerHTML = `<i class="fas fa-${item.type === 'dir' ? 'folder text-warning' : (item.name.endsWith('.sif') ? 'box text-success' : 'file-code text-primary')} me-2"></i> ${item.name}`;
+                button.innerHTML = `<i class="fas fa-${item.type === 'dir' ? 'folder text-warning' : (item.name.endsWith('.sif') ? 'box text-success' : 'file-code text-primary')} me-2"></i> ${escapeHtml(item.name)}`;
                 button.addEventListener('click', () => {
                     if (item.type === 'dir') fetchBrowse(item.path, onlyDirs);
                     else selectPath(item.path);
@@ -76,7 +76,7 @@
                         if (result.success) {
                             fetchBrowse(currentBrowsingPath, onlyDirs);
                         } else {
-                            list.insertAdjacentHTML('afterbegin', `<div class="alert alert-danger py-2 px-3 small mb-1">${result.error}</div>`);
+                            list.insertAdjacentHTML('afterbegin', `<div class="alert alert-danger py-2 px-3 small mb-1">${escapeHtml(result.error)}</div>`);
                         }
                     } catch (error) {
                         list.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger py-2 px-3 small mb-1">Failed to create folder.</div>');

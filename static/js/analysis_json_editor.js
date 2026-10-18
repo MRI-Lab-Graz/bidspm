@@ -123,7 +123,7 @@ const READONLY_MODEL_PATHS = [
 
                 if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)) {
                     const status = document.getElementById('model-editor-status');
-                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${newValue}</div>`;
+                    status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(newValue)}</div>`;
                     e.target.value = current;
                     return;
                 }
@@ -1024,7 +1024,7 @@ const READONLY_MODEL_PATHS = [
                     if (!Array.isArray(arr)) return;
                     if (arr.includes(value)) {
                         const status = document.getElementById('model-editor-status');
-                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${value}</div>`;
+                        status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">GroupBy already selected: ${escapeHtml(value)}</div>`;
                         return;
                     }
                     arr.push(value);
@@ -1205,7 +1205,7 @@ const READONLY_MODEL_PATHS = [
 
         const missing = REQUIRED_ROOT_KEYS.filter(k => !(k in modelEditorDraft));
         if (missing.length) {
-            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${missing.join(', ')}</div>`;
+            status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Missing required keys: ${escapeHtml(missing.join(', '))}</div>`;
         }
 
         if (!Array.isArray(modelEditorDraft.Input?.task)) {

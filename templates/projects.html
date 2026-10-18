@@ -630,9 +630,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 accumulated += '/' + part;
                 const isLast = i === parts.length - 1;
                 if (isLast) {
-                    breadcrumb.innerHTML += `<li class="breadcrumb-item active">${part}</li>`;
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item active">${escapeHtml(part)}</li>`;
                 } else {
-                    breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" data-path="${accumulated}">${part}</a></li>`;
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" data-path="${escapeHtml(accumulated)}">${escapeHtml(part)}</a></li>`;
                 }
             });
             
@@ -660,7 +660,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const icon = item.name === '..' ? 'fa-level-up-alt text-secondary' : 'fa-folder text-warning';
                 const bidsIndicator = '';  // We'll check this async
                 
-                el.innerHTML = `<i class="fas ${icon} me-3"></i> <span class="flex-grow-1">${item.name}</span>`;
+                el.innerHTML = `<i class="fas ${icon} me-3"></i> <span class="flex-grow-1">${escapeHtml(item.name)}</span>`;
                 
                 el.addEventListener('click', function(e) {
                     e.preventDefault();
@@ -961,9 +961,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 accumulated += '/' + part;
                 const isLast = i === parts.length - 1;
                 if (isLast) {
-                    breadcrumb.innerHTML += `<li class="breadcrumb-item active">${part}</li>`;
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item active">${escapeHtml(part)}</li>`;
                 } else {
-                    breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" data-path="${accumulated}">${part}</a></li>`;
+                    breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" data-path="${escapeHtml(accumulated)}">${escapeHtml(part)}</a></li>`;
                 }
             });
             
@@ -979,7 +979,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 el.href = '#';
                 el.dataset.path = item.path;
                 el.dataset.type = item.type;
-                el.innerHTML = `<i class="fas ${icon} me-3"></i> ${item.name}`;
+                el.innerHTML = `<i class="fas ${icon} me-3"></i> ${escapeHtml(item.name)}`;
                 
                 el.addEventListener('click', function(e) {
                     e.preventDefault();

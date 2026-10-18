@@ -40,14 +40,19 @@ function renderRunIssues() {
         warningCount ? `${warningCount} warning(s)` : ''
     ].filter(Boolean).join(', ');
 
-    list.innerHTML = runIssues.map(issue => {
+    list.textContent = '';
+    runIssues.forEach(issue => {  // log text: DOM nodes, never markup
         const tone = issue.level === 'error' ? 'danger' : 'warning';
-        const subjectLabel = issue.subject ? `sub-${issue.subject}` : 'unknown subject';
-        return `<div class="small border-start border-3 border-${tone} ps-2">
-            <span class="badge bg-${tone} text-uppercase me-1">${issue.level}</span>
-            <strong>${subjectLabel}</strong> &mdash; ${issue.message}
-        </div>`;
-    }).join('');
+        const item = document.createElement('div');
+        item.className = `small border-start border-3 border-${tone} ps-2`;
+        const badge = document.createElement('span');
+        badge.className = `badge bg-${tone} text-uppercase me-1`;
+        badge.textContent = issue.level;
+        const who = document.createElement('strong');
+        who.textContent = issue.subject ? `sub-${issue.subject}` : 'unknown subject';
+        item.append(badge, ' ', who, ` \u2014 ${issue.message}`);
+        list.appendChild(item);
+    });
 
     row.classList.remove('d-none');
 }

@@ -12,9 +12,11 @@ document.getElementById('btn-validate').onclick = async () => {
         body: JSON.stringify({content: unifiedStudyConfig})
     });
     const result = await res.json();
-    validationResult.innerHTML = result.valid
-        ? '<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i> Valid JSON configuration</div>'
-        : `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i> ${result.error}</div>`;
+    if (result.valid) {
+        validationResult.innerHTML = '<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i> Valid JSON configuration</div>';
+    } else {
+        validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i> ${escapeHtml(result.error)}</div>`;
+    }
     revealResult(validationResult);
 };
 
@@ -30,7 +32,7 @@ document.getElementById('btn-check-paths').onclick = async () => {
     for (const [k, exists] of Object.entries(results)) {
         const div = document.createElement('div');
         div.className = `alert alert-${exists ? 'success' : 'danger'} py-1 x-small mb-1 shadow-sm border-0`;
-        div.innerHTML = `<i class="fas fa-${exists ? 'check' : 'times'} me-1"></i> ${k}: ${exists ? 'Path found' : 'Path not found'}`;
+        div.innerHTML = `<i class="fas fa-${exists ? 'check' : 'times'} me-1"></i> ${escapeHtml(k)}: ${exists ? 'Path found' : 'Path not found'}`;
         pathAlerts.appendChild(div);
     }
     revealResult(pathAlerts);
@@ -59,10 +61,10 @@ document.getElementById('btn-save-only').onclick = async () => {
                 body: JSON.stringify({filepath: studyPath, content: unifiedStudyConfig})
             });
 
-            validationResult.innerHTML = `<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i>Configuration saved to ${studyPath}</div>`;
+            validationResult.innerHTML = `<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i>Configuration saved to ${escapeHtml(studyPath)}</div>`;
         }
     } catch (err) {
-        validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Save failed: ${err.message}</div>`;
+        validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Save failed: ${escapeHtml(err.message)}</div>`;
     }
     revealResult(validationResult);
 };
@@ -184,7 +186,7 @@ document.getElementById('btn-load-config')?.addEventListener('click', async () =
         files.forEach(f => {
             const btn = document.createElement('button');
             btn.className = 'list-group-item list-group-item-action small py-2 d-flex justify-content-between align-items-center';
-            btn.innerHTML = `<span><i class="fas fa-file-invoice me-2 text-primary"></i> ${f}</span> <i class="fas fa-chevron-right text-muted x-small"></i>`;
+            btn.innerHTML = `<span><i class="fas fa-file-invoice me-2 text-primary"></i> ${escapeHtml(f)}</span> <i class="fas fa-chevron-right text-muted x-small"></i>`;
             btn.onclick = async () => {
                 const r = await fetch(`/load_config?folder=${folder}&filename=${f}`);
                 const data = await r.json();
