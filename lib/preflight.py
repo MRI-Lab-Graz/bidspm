@@ -142,6 +142,12 @@ def _model_tasks(model_file):
     return [task] if isinstance(task, str) and task else [t for t in task if isinstance(t, str) and t] if isinstance(task, list) else []
 
 
+def resolve_tasks(tasks, model_file, bids_dir):
+    """The tasks to check/run: explicit TASKS, else the model's Input.task, else every task of the BIDS folder."""
+    from lib.core import discover_tasks  # lazy: keeps module import light
+    return list(tasks or []) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
+
+
 def _scan_length_warning(sub, preproc, events_rows):
     import nibabel as nib
     sidecar = preproc.with_name(preproc.name.replace(".nii.gz", ".json"))
@@ -392,9 +398,7 @@ class _Progress:
 
 def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full, prog):
     checks = []
-    from lib.core import discover_tasks  # lazy: keeps module import light
-    # empty TASKS: the model's own task list, else every task of the BIDS folder
-    tasks = list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
+    tasks = resolve_tasks(tasks, model_file, bids_dir)
     if not tasks:
         checks.append(_item("no_tasks", ERROR, "no task found in the BIDS dataset",
                             "check the BIDS folder or set the task in the project settings"))

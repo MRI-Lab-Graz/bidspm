@@ -1274,7 +1274,13 @@ class Pipeline:
             subjects_failed = []
             actions_completed = set()
 
-            for task in self.config.TASKS:
+            from .preflight import resolve_tasks  # same fallback as the readiness check
+            tasks = resolve_tasks(
+                self.config.TASKS, self.model_file_path or self.options.model_file or self.config.MODELS_FILE,
+                self.config.BIDS_DIR)
+            if not self.config.TASKS:
+                self._log(f">>> No TASKS in the config, using: {', '.join(tasks) or 'none'}")
+            for task in tasks:
                 self._log(f">>> Processing task: {task}")
 
                 if 'smooth' in self.options.actions and self.options.smooth_backend == 'fast':
