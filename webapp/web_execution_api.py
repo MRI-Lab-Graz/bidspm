@@ -125,6 +125,10 @@ def register_execution_routes(
         if validator_problem:
             return jsonify({'error': validator_problem}), 400
 
+        workers = data.get('stats_workers')
+        if workers not in (None, '') and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
+            return jsonify({'error': 'stats_workers must be a whole number of at least 1'}), 400
+
         execution_id = secrets.token_hex(8)
         execution_registry.current_project_id = project_id
         project_manager = get_project_manager()
@@ -235,8 +239,8 @@ def register_execution_routes(
             command.append('--results')
         if data.get('estimation_engine') in ('octave', 'standalone'):
             command.extend(['--estimation-engine', data['estimation_engine']])
-        if data.get('stats_workers'):
-            command.extend(['--stats-workers', str(data.get('stats_workers'))])
+        if workers not in (None, ''):
+            command.extend(['--stats-workers', str(workers)])
         bms_model_files = data.get('bms_model_files') or []
         if bms_model_files:
             command.extend(['--models'] + bms_model_files)

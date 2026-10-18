@@ -48,7 +48,7 @@ def _contrast_name(ref):
     name = re.sub(r"[^A-Za-z0-9_]+", "_", ref.removeprefix("trial_type.")).strip("_")
     if not name:
         value = ref.removeprefix("trial_type.")
-        raise WizardError(f"trial_type value {value!r} has no letters, digits or underscores, so no contrast name can be derived from it; "
+        raise WizardError(f"trial_type value {value!r} has no ASCII letter, digit or underscore characters, so no contrast name can be derived from it; "
                           f"rename it in the events file, rename/merge it with the Merge recipe, or uncheck it in step 1")
     return name
 

@@ -1,3 +1,4 @@
+import errno
 import os
 from datetime import datetime
 from pathlib import Path
@@ -5,7 +6,7 @@ from typing import Callable
 
 from flask import Flask, jsonify, request
 
-from lib.project_manager import ConfigImportError, ProjectConfig
+from lib.project_manager import ConfigImportError, ProjectConfig, _check_config_value
 
 
 ProjectManagerGetter = Callable[[], object]
@@ -17,7 +18,32 @@ def _as_path(value):
         return None, False
     if not isinstance(value, str) or '\x00' in value:
         return None, True
+    try:
+        os.stat(value)
+    except OSError as exc:
+        if exc.errno == errno.ENAMETOOLONG:  # a component over 255 characters
+            return None, True
     return Path(value), False
+
+
+def _json_object():
+    """The request body as a dict ({} when empty); ConfigImportError when it is not a JSON object."""
+    if not request.get_data().strip():
+        return {}
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        raise ConfigImportError("The request body must be a JSON object")
+    return data
+
+
+def _checked_config(config):
+    """Type-check a project config dict with the same checker the config import uses (unknown keys are ignored later)."""
+    if not isinstance(config, dict):
+        raise ConfigImportError("config must be a JSON object")
+    for name, value in config.items():
+        if name in ProjectConfig.__dataclass_fields__:
+            _check_config_value(name, name, value)
+    return config
 
 
 def _build_project_preflight_results(config) -> dict:
@@ -106,12 +132,14 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
     def api_create_project():
         """Create a new project."""
         try:
-            data = request.json or {}
+            data = _json_object()
             if not isinstance(data.get('name', ''), str) or not isinstance(data.get('description', ''), str):
                 return jsonify({'error': 'Project name and description must be text'}), 400
             name = data.get('name', '').strip()
             description = data.get('description', '').strip()
-            config = data.get('config', None)
+            config = data.get('config')
+            if config is not None:
+                _checked_config(config)
 
             if not name:
                 return jsonify({'error': 'Project name is required'}), 400
@@ -121,6 +149,8 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
                 'project': project.to_dict(),
                 'message': f"Project '{name}' created successfully",
             }), 201
+        except ConfigImportError as exc:
+            return jsonify({'error': str(exc)}), 400
         except Exception as exc:
             return jsonify({'error': str(exc)}), 500
 
@@ -144,7 +174,7 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
             if not project:
                 return jsonify({'error': 'Project not found'}), 404
 
-            data = request.json or {}
+            data = _json_object()
             if any(k in data and not isinstance(data[k], str) for k in ('name', 'description')):
                 return jsonify({'error': 'Project name and description must be text'}), 400
             if 'name' in data:
@@ -153,7 +183,7 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
                 project.description = data['description']
             if 'config' in data:
                 existing_config = project.config.to_dict()
-                existing_config.update(data['config'])
+                existing_config.update(_checked_config(data['config']))
                 project.config = ProjectConfig.from_dict(existing_config)
 
             manager.save_project(project)
@@ -161,6 +191,8 @@ def register_project_routes(app: Flask, get_project_manager: ProjectManagerGette
                 'project': project.to_dict(),
                 'message': 'Project updated successfully',
             })
+        except ConfigImportError as exc:
+            return jsonify({'error': str(exc)}), 400
         except Exception as exc:
             return jsonify({'error': str(exc)}), 500
 

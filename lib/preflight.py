@@ -195,7 +195,7 @@ def _confound_data_problems(sub, f, cols, first, nuisance, preproc):
     out = []
     volumes = _volumes(preproc, f)
     if volumes is not None:
-        rows = count_lines(f)
+        rows = count_lines(f, expect=volumes)
         if rows != volumes:
             out.append(_item("confound_rows", ERROR, f"{f.name}: confounds has {rows} rows but the BOLD has {volumes} volumes",
                              "Re-run fMRIPrep, or check that the confounds file belongs to this run.", sub))

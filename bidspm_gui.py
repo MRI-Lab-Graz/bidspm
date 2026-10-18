@@ -38,6 +38,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException, InternalServerError
 from waitress import serve
 
 # Import all business logic from core
@@ -78,6 +79,24 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 def too_deeply_nested(_exc):
     """Every route that parses a request body: absurd JSON nesting is the client's mistake, not an HTML 500."""
     return jsonify({'success': False, 'valid': False, 'error': 'The request is nested too deeply.'}), 400
+
+
+_PAGE_PATHS = ('/projects', '/analysis', '/model_editor', '/transformer-builder', '/model-wizard')
+
+
+@app.errorhandler(Exception)
+def json_errors(exc):
+    """HTML pages keep the normal error pages. Every other route answers JSON: an HTTP error on /api/* keeps its status,
+    an unexpected exception is a generic 500 with a short id that is also in the log next to the traceback."""
+    if isinstance(exc, HTTPException):
+        if request.path.startswith('/api/'):
+            return jsonify({'error': exc.description, 'success': False}), exc.code
+        return exc
+    error_id = secrets.token_hex(4)
+    app.logger.error("Unhandled exception %s on %s %s", error_id, request.method, request.path, exc_info=exc)
+    if request.path == '/' or request.path.startswith(_PAGE_PATHS):
+        return InternalServerError()
+    return jsonify({'error': 'Unexpected server error; details are in the server log.', 'id': error_id, 'success': False}), 500
 
 
 @app.before_request
