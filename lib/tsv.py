@@ -44,7 +44,9 @@ def count_lines(path):
         data = fh.read()
     if b"\n" not in data:
         data = data.replace(b"\r", b"\n")
-    n = data.count(b"\n") - sum(1 for _ in _BLANK_LINE.finditer(data))
+    n = data.count(b"\n")
+    if any(s in data for s in (b"\n\n", b"\n\r", b"\n ", b"\n\t")):  # regex only when a blank line is possible
+        n -= sum(1 for _ in _BLANK_LINE.finditer(data))
     n += bool(data[data.rfind(b"\n") + 1:].strip())  # last line without a final newline
     return max(n - 1, 0)
 
