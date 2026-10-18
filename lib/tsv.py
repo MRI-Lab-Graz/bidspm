@@ -22,10 +22,25 @@ def read_tsv(path):
         return list(reader.fieldnames or []), rows
 
 
-def read_header(path):
-    """Column names only: confounds files are huge."""
+def read_head(path):
+    """(column names, first data row or None): two lines only, confounds files are huge."""
     with open(path, newline="", encoding="utf-8-sig") as fh:
-        return next(csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE), [])
+        reader = csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
+        return next(reader, []), next(reader, None)
+
+
+def read_header(path):
+    return read_head(path)[0]
+
+
+def count_lines(path):
+    """Number of non-header lines, counted on raw bytes (no CSV parsing)."""
+    n, last = 0, b"\n"
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            n += chunk.count(b"\n")
+            last = chunk[-1:]
+    return max(n + (last != b"\n") - 1, 0)
 
 
 def duplicates(columns):
