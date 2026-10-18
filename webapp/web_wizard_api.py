@@ -107,9 +107,12 @@ def register_wizard_routes(app: Flask, resolve_fs_path, is_inside_bids_dir=None)
         try:
             # build_model never reads confound columns, so skip reading every confounds TSV
             scan = _cached_scan(bids_dir, fmriprep_dir, choices.get("task"))
+            if isinstance(choices.get("nuisance"), list) and fmriprep_dir:  # only a custom list needs the columns (headers only)
+                scan = {**scan, "confound_columns": _discover_confound_info(Path(fmriprep_dir), [scan["task"]] if scan["task"] else None)["columns"]}
             result = build_model(choices, scan)
         except WizardError as exc:
             return jsonify({"error": str(exc)}), 400
+        result["preview"]["warnings"] += scan.get("warnings", [])
         if "trial_type" in scan["truncated"]:
             n = len(scan["columns"]["trial_type"])
             result["preview"]["warnings"].append(f"trial_type has more than {n} values; only the first {n} are offered")

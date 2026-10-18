@@ -34,7 +34,7 @@ function excluded() {
 function nuisanceChoice() {
     const v = document.querySelector('input[name=wiz-nuisance]:checked')?.value || 'none';
     if (v !== 'custom') return v;
-    return $('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean);
+    return [...new Set($('wiz-nuisance-custom').value.split(',').map((s) => s.trim()).filter(Boolean))];  // the server also rejects 1/0 and trial_type.*
 }
 
 // A recipe whose required fields are still empty is not sent to the build (it would only produce "wrong type" errors).

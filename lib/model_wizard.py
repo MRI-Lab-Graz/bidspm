@@ -69,14 +69,33 @@ def second_level_nodes(names):
     ]
 
 
-def _nuisance(value):
+def _nuisance(value, regressors=()):
     if isinstance(value, str):
         if value not in NUISANCE_PRESETS:
             raise WizardError(f"unknown nuisance preset {value!r}; choose one of {', '.join(NUISANCE_PRESETS)} or a list of columns")
         return list(NUISANCE_PRESETS[value])
-    if isinstance(value, list) and all(isinstance(v, str) and v for v in value):
-        return list(value)
-    raise WizardError("nuisance must be a preset name or a list of confound column names")
+    if not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+        raise WizardError("nuisance must be a preset name or a list of confound column names")
+    out = []
+    for name in (v.strip() for v in value):
+        if not name:
+            raise WizardError("nuisance has an empty confound column name")
+        if name in ("0", "1"):
+            raise WizardError(f"nuisance entry {name!r} is a constant, not a confound column (the model already has its intercept)")
+        if name.startswith("trial_type.") or name in regressors:
+            raise WizardError(f"nuisance entry {name!r} is a regressor of the model, not a confound column")
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _unknown_confounds(nuisance, scan):
+    """Warnings for custom nuisance names (globs allowed, as in the readiness check) missing from the scanned confound columns."""
+    known = scan.get("confound_columns") or []
+    if not known:
+        return []
+    return [f"nuisance column {n!r} is not among the confound columns of the dataset (found {len(known)}); the readiness check will flag it"
+            for n in nuisance if not fnmatch.filter(known, n)]
 
 
 def _run_contrasts(regressors, pmods, spec):
@@ -313,7 +332,9 @@ def build_model(choices, scan):
         raise WizardError("exclude must be a list of trial_type values")
     if set(exclude) - set(conditions):
         raise WizardError(f"cannot exclude unknown trial_type values: {', '.join(sorted(set(exclude) - set(conditions)))}")
-    _expect(choices.get("name") or "", str, "name")
+    name = _expect(choices.get("name") or "", str, "name")
+    if len(name) > 200 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):  # a label: any text, but one printable line
+        raise WizardError("name must be a single line of at most 200 characters")
     recipes = _expect(choices.get("recipes", []), list, "recipes")
     state = {"regressors": [f"trial_type.{c}" for c in conditions if c not in exclude], "instructions": [],
              "pmods": [], "warnings": [], "columns": scan["columns"], "numeric": set(scan.get("numeric", []))}
@@ -331,7 +352,14 @@ def build_model(choices, scan):
         if spm_name in seen:
             raise WizardError(f"{seen[spm_name]!r} and {r!r} would get the same name ({spm_name!r}) in SPM; rename or merge one of them")
         seen[spm_name] = r
-    nuisance = _nuisance(choices.get("nuisance", "none"))
+    for r in regressors:  # names become MATLAB field names / "<column>.<value>" strings in bidspm
+        if r.startswith("trial_type.") and UNSAFE_HYPHEN_OK.search(r[len("trial_type."):]):
+            value = r[len("trial_type."):]
+            raise WizardError(f"trial_type value {value!r} has characters other than letters, digits, underscore and hyphen, which MATLAB/bidspm "
+                              f"field names cannot hold; rename it in the events file or uncheck it in step 1")
+    nuisance = _nuisance(choices.get("nuisance", "none"), regressors)
+    if isinstance(choices.get("nuisance"), list):
+        state["warnings"] += _unknown_confounds(nuisance, scan)
     contrasts = _run_contrasts(regressors, state["pmods"], choices.get("contrasts", {}))
     spm = {"SerialCorrelation": "FAST"}  # lab default (as in studies/141*.json); bidspm's own default is AR(1)
     if state["pmods"]:
