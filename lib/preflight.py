@@ -520,11 +520,16 @@ def _as_list(value):
     return [] if value is None or isinstance(value, dict) else [str(value)]
 
 
+def _path(value):
+    """A path setting as typed in a form: surrounding blanks stripped, `~` expanded (once, here, for every entry point)."""
+    return os.path.expanduser(value.strip()) if isinstance(value, str) else value
+
+
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,
                               progress=None, cancelled=None):
     return run_preflight(
-        bids_dir=cfg.get("BIDS_DIR", ""), fmriprep_dir=cfg.get("FMRIPREP_DIR", ""),
-        model_file=model or cfg.get("MODELS_FILE", ""), tasks=_as_list(cfg.get("TASKS")),
+        bids_dir=_path(cfg.get("BIDS_DIR", "")), fmriprep_dir=_path(cfg.get("FMRIPREP_DIR", "")),
+        model_file=_path(model or cfg.get("MODELS_FILE", "")), tasks=_as_list(cfg.get("TASKS")),
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
         validator=validator, container_type=cfg.get("container_type", ""),
         skip_model_validation=skip_model_validation, actions=actions,
@@ -539,7 +544,7 @@ _RECENT_LOCK = threading.Lock()
 
 def signature(cfg, model, validator, actions, skip_model_validation):
     """Hash of exactly what run_preflight_from_config reads, normalised; the model by file content, not path."""
-    path = model or cfg.get("MODELS_FILE") or ""
+    path = _path(model or cfg.get("MODELS_FILE") or "")
     try:
         raw = Path(path).read_bytes()
     except (OSError, TypeError, ValueError):
@@ -550,7 +555,7 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         pass
     content = None if raw is None else hashlib.sha256(raw).hexdigest()
     payload = [
-        str(cfg.get("BIDS_DIR") or ""), str(cfg.get("FMRIPREP_DIR") or ""), content,
+        str(_path(cfg.get("BIDS_DIR") or "")), str(_path(cfg.get("FMRIPREP_DIR") or "")), content,
         _as_list(cfg.get("TASKS")), str(cfg.get("SPACE") or ""),
         sorted(s[4:] if s.startswith("sub-") else s for s in _as_list(cfg.get("SUBJECTS"))),
         str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),
