@@ -574,17 +574,9 @@ def discover_subjects(config: Config) -> List[str]:
 
 
 def discover_tasks(bids_dir: Path) -> List[str]:
-    """Discover tasks from BIDS directory."""
-    tasks = set()
-    for root, dirs, files in os.walk(bids_dir):
-        if 'func' in root:
-            for f in files:
-                if '_task-' in f:
-                    parts = f.split('_task-')
-                    if len(parts) > 1:
-                        task = parts[1].split('_')[0].split('.')[0]
-                        tasks.add(task)
-    return sorted(list(tasks))
+    """Tasks in the file names of sub-*/[ses-*/]func (derivatives and sourcedata are not looked at)."""
+    from .model_wizard import bids_tasks  # lists only the func folders instead of walking the whole tree
+    return bids_tasks(bids_dir)
 
 
 def discover_spaces(fmriprep_dir: Path, tasks: Optional[List[str]] = None) -> List[str]:

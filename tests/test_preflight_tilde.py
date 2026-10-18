@@ -67,12 +67,14 @@ def test_form_job_then_run_gate_with_tilde_vs_absolute_reuses_the_result(home, t
     client = app.test_client()
     body = {"config": tilde, "validator": "skip", "actions": ["stats"], "skip_model_validation": True}
     job_id = client.post("/api/preflight/start", json=body).get_json()["id"]
-    client.get(f"/api/preflight/stream/{job_id}").get_data()
+    events = parse(client.get(f"/api/preflight/stream/{job_id}").get_data(as_text=True))
+    assert events[-1][1]["report"]["verdict"] in ("ready", "warnings"), events[-1][1]["report"]
     api._JOBS[job_id].thread.join(WAIT)
     settings = home / "export.json"
     settings.write_text(json.dumps(absolute))
     with patch("webapp.web_execution_api.run_preflight_from_config") as rerun, \
-         patch("webapp.web_execution_api.subprocess.Popen"):
+         patch("webapp.web_execution_api.subprocess.Popen") as popen:
+        popen.return_value.pid = 4242
         client.post("/run", json={"actions": ["stats"], "settings": str(settings), "validator": "skip",
                                   "skip_validation": True})
     rerun.assert_not_called()
