@@ -116,6 +116,19 @@ class TestProjectManagerExtra(unittest.TestCase):
         self.assertEqual(reloaded.config.bids_folder, "/legacy/bids")
         self.assertEqual(reloaded.config.fwhm, 8)
 
+    def test_run_options_persist_and_old_projects_get_defaults(self):
+        project = self.manager.create_project("Options")
+        self.assertEqual((project.config.bms_models, project.config.stats_workers), ([], 4))
+        project.config.bms_models = ["/a/model_smdl.json"]
+        project.config.stats_workers = 8
+        self.assertTrue(self.manager.save_project(project))
+        reloaded = self.manager.load_project(project.id)
+        self.assertEqual((reloaded.config.bms_models, reloaded.config.stats_workers), (["/a/model_smdl.json"], 8))
+        # a config saved before these fields existed still loads
+        legacy = {k: v for k, v in reloaded.config.to_dict().items() if k not in ("bms_models", "stats_workers")}
+        from lib.project_manager import ProjectConfig
+        self.assertEqual(ProjectConfig.from_dict(legacy).stats_workers, 4)
+
     def test_import_config_returns_false_on_malformed_json(self):
         project = self.manager.create_project("Importer3")
         with tempfile.TemporaryDirectory() as tmp:

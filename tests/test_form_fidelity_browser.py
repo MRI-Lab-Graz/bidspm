@@ -168,5 +168,208 @@ class TestEditProjectDialog(FidelityCase):
             self.assertEqual(after[key], before[key], key)
 
 
+class TestContrastBuilderValidation(FidelityCase):
+    def model_with_contrast(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"][0]["Contrasts"] = [{"Name": "A", "ConditionList": ["trial_type.a"], "Weights": [1], "Test": "t"}]
+        return model
+
+    def open_builder(self):
+        self.new_project(self.model_with_contrast())
+        page = self.open_analysis("model")
+        page.click("#btn-open-contrast-builder")
+        page.wait_for_selector("#cb-contrast-list .cb-contrast-card")
+        return page
+
+    def test_duplicate_names_and_empty_condition_lists_are_refused(self):
+        page = self.open_builder()
+        page.click("#cb-add-contrast-btn")  # a second, empty contrast
+        page.locator(".cb-contrast-name-input").nth(1).fill("A")
+        page.click("#cb-apply-btn")
+        status = page.inner_text("#cb-status")
+        self.assertIn("unique", status)
+        self.assertIn("no conditions", status)
+        self.assertEqual(len(page.evaluate("modelEditorDraft.Nodes[0].Contrasts")), 1)
+
+    def test_an_empty_name_is_refused(self):
+        page = self.open_builder()
+        page.locator(".cb-contrast-name-input").first.fill("  ")
+        page.click("#cb-apply-btn")
+        self.assertIn("name", page.inner_text("#cb-status"))
+        self.assertEqual(page.evaluate("modelEditorDraft.Nodes[0].Contrasts[0].Name"), "A")
+
+    def test_a_valid_contrast_is_applied(self):
+        page = self.open_builder()
+        page.locator(".cb-contrast-name-input").first.fill("B")
+        page.click("#cb-apply-btn")
+        page.wait_for_function("document.getElementById('cb-status').textContent.includes('Applied')")
+        self.assertEqual(page.evaluate("modelEditorDraft.Nodes[0].Contrasts[0].Name"), "B")
+
+
+class TestProjectRunOptions(FidelityCase):
+    def test_saved_tasks_missing_from_the_dataset_survive_a_save(self):
+        model = copy.deepcopy(MODEL)  # the model lists the task too, and the page syncs the ticks from the model
+        model["Input"]["task"] = ["motor", "ghost"]
+        self.new_project(model, tasks=["motor", "ghost"])
+        page = self.open_analysis("folders")
+        self.assertIn("not found in BIDS", page.inner_text("#tasks-container"))
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        page.wait_for_function("document.getElementById('validation-result').textContent.includes('saved')")
+        self.assertEqual(sorted(self.project_config()["tasks"]), ["ghost", "motor"])
+
+    def test_run_options_are_restored_and_saved(self):
+        self.new_project(actions=["smooth", "bms"], pilot=True, bms_models=["/m/a_smdl.json"], stats_workers=8,
+                         node_name="variant1", skip_validation=False)
+        page = self.open_analysis("options")
+        checked = lambda: page.eval_on_selector_all("input[name=action]:checked", "els => els.map(e => e.value)")
+        self.assertEqual(sorted(checked()), ["bms", "smooth"])
+        self.assertTrue(page.is_checked("#pilot"))
+        self.assertEqual(page.eval_on_selector_all("#bms-model-list input", "els => els.map(e => e.value)"), ["/m/a_smdl.json"])
+        self.assertEqual(page.input_value("#stats_workers"), "8")
+        self.assertEqual(page.input_value("#run_node_name"), "variant1")
+        self.assertFalse(page.is_checked("#skip_validation"))
+        page.fill("#stats_workers", "3")
+        page.fill("#run_node_name", "variant2")
+        page.eval_on_selector("#stats_workers", "e => e.dispatchEvent(new Event('change'))")
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        page.wait_for_function("document.getElementById('validation-result').textContent.includes('saved')")
+        config = self.project_config()
+        self.assertEqual((config["stats_workers"], config["node_name"], config["bms_models"], config["skip_validation"]),
+                         (3, "variant2", ["/m/a_smdl.json"], False))
+        self.assertEqual(sorted(config["actions"]), ["bms", "smooth"])
+        self.assertTrue(config["pilot"])
+
+    def test_a_failing_save_says_so(self):
+        self.new_project()
+        page = self.open_analysis("options")
+        page.route("**/api/projects/*/config", lambda route: route.fulfill(
+            status=500, content_type="application/json", body=json.dumps({"error": "disk full"})))
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        page.wait_for_function("document.getElementById('validation-result').textContent.includes('disk full')")
+        self.assertNotIn("configuration saved", page.inner_text("#validation-result"))
+
+    def test_the_apptainer_placeholder_is_not_saved_as_a_value(self):
+        self.new_project()
+        page = self.open_analysis("options")
+        page.click("#options-advanced > summary")
+        self.assertEqual(page.input_value("#input-apptainer_image"), "")
+        self.assertTrue(page.get_attribute("#input-apptainer_image", "placeholder").endswith(".sif"))
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        page.wait_for_function("document.getElementById('validation-result').textContent.includes('saved')")
+        self.assertEqual(self.project_config()["apptainer_image"], "")
+
+
+class TestModelEditorNames(FidelityCase):
+    def two_node_model(self):
+        model = copy.deepcopy(MODEL)
+        model["Nodes"].append({"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"],
+                               "Model": {"X": [1], "Type": "glm"}, "DummyContrasts": {"Test": "t"}})
+        model["Edges"] = [{"Source": "run", "Destination": "dataset"}]
+        return model
+
+    def test_renaming_a_node_to_an_existing_name_is_refused(self):
+        self.new_project(self.two_node_model())
+        page = self.open_analysis("model")
+        page.evaluate("""() => {
+            const input = Array.from(document.querySelectorAll('input')).filter(i => i.placeholder.startsWith('Node name'))[1];
+            input.value = 'run';
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        }""")
+        page.wait_for_function("document.getElementById('model-editor-status').textContent.includes('already')")
+        self.assertEqual(page.evaluate("modelEditorDraft.Nodes.map(n => n.Name)"), ["run", "dataset"])
+        self.assertEqual(page.evaluate("modelEditorDraft.Edges"), [{"Source": "run", "Destination": "dataset"}])
+
+    def test_regressor_names_are_compared_normalised_and_control_characters_refused(self):
+        self.new_project()
+        page = self.open_analysis("model")
+        x = lambda: page.evaluate("modelEditorDraft.Nodes[0].Model.X")
+        page.evaluate("addRegressorToModelX('Nodes[0].Model.X', 'caf\\u00e9')")
+        page.evaluate("addRegressorToModelX('Nodes[0].Model.X', 'cafe\\u0301')")
+        self.assertEqual(x().count("caf\u00e9"), 1)
+        self.assertEqual(len(x()), 4)
+        page.evaluate("addRegressorToModelX('Nodes[0].Model.X', 'a\\u0000b')")
+        self.assertEqual(len(x()), 4)
+        self.assertIn("control", page.inner_text("#model-editor-status"))
+
+
+class TestProjectsPageDialogs(FidelityCase):
+    def open_projects(self):
+        return self.open("/projects")
+
+    def test_a_description_with_line_breaks_survives_an_edit(self):
+        self.new_project()
+        post_json(f"{self.base}/api/projects", {"name": "multi", "description": "line1\nline2", "config": {}})
+        pid = [p for p in get_json(f"{self.base}/api/projects")["projects"] if p["name"] == "multi"][0]["id"]
+        page = self.open_projects()
+        page.evaluate(f"document.querySelector('.btn-edit-project[data-project-id=\"{pid}\"]').click()")
+        page.wait_for_function("document.getElementById('edit-project-name').value === 'multi'")
+        page.click("#btn-save-project")
+        page.wait_for_function("document.querySelector('#editProjectModal.show') === null")
+        self.assertEqual(get_json(f"{self.base}/api/projects/{pid}")["description"], "line1\nline2")
+
+    def test_a_duplicate_project_name_is_warned_about_but_allowed(self):
+        self.new_project()
+        existing = f"p{self.counter}"
+        page = self.open_projects()
+        page.click("#btn-new-project")
+        page.fill("#project-name", f"  {existing.upper()} ")
+        self.assertIn("already exists", page.inner_text("#project-name-warning"))
+        self.assertTrue(page.is_enabled("#btn-create-project"))
+        page.fill("#project-name", "a brand new name")
+        self.assertEqual(page.inner_text("#project-name-warning").strip(), "")
+
+    def test_editing_warns_about_another_projects_name_but_not_its_own(self):
+        self.new_project()
+        first = f"p{self.counter}"
+        self.new_project()
+        page = self.open_projects()
+        page.evaluate(f"document.querySelector('.btn-edit-project[data-project-id=\"{self.pid}\"]').click()")
+        page.wait_for_function("document.getElementById('edit-project-name').value !== ''")
+        self.assertEqual(page.inner_text("#edit-project-name-warning").strip(), "")
+        page.fill("#edit-project-name", first)
+        self.assertIn("already exists", page.inner_text("#edit-project-name-warning"))
+
+
+@unittest.skipUnless(chromium_available(), "Playwright + Chromium not available")
+class TestValidatorModeStorage(FidelityCase):
+    def test_a_garbage_stored_mode_falls_back_to_auto(self):
+        self.new_project()
+        page = self.browser.new_page()
+        self.pages.append(page)
+        page.add_init_script(f"localStorage.setItem('bidspm_validator_mode_{self.pid}', 'garbage')")
+        page.goto(f"{self.base}/analysis/{self.pid}", wait_until="load")
+        self.assertEqual(page.input_value("#validator-mode"), "auto")
+
+
+class TestLegacySaveRefusals(FidelityCase):
+    HOSTILE = '<img src=x onerror="window.__xss=1">'
+
+    def refused_page(self, endpoint):
+        page = self.open("/analysis")
+        page.route(f"**/{endpoint}", lambda route: route.fulfill(
+            status=400, content_type="application/json", body=json.dumps({"error": self.HOSTILE})))
+        return page
+
+    def assert_error_shown(self, page):
+        page.wait_for_function("document.getElementById('validation-result').textContent.includes('onerror')")
+        text = page.inner_text("#validation-result")
+        self.assertIn(self.HOSTILE, text)
+        self.assertNotIn("saved", text.lower())
+        self.assertIsNone(page.evaluate("window.__xss"))
+
+    def test_save_only_shows_the_servers_refusal(self):
+        page = self.refused_page("save_settings")
+        page.evaluate("document.getElementById('btn-save-only').click()")
+        self.assert_error_shown(page)
+
+    def test_save_and_start_stops_on_a_refusal_and_does_not_start(self):
+        page = self.refused_page("save_settings")
+        page.evaluate("window.startExecution = () => { window.__started = true; }")
+        page.evaluate("runStatsCoverageGate = async () => ({allow: true, subjectsOverride: []})")
+        page.evaluate("document.getElementById('btn-save-start').click()")
+        self.assert_error_shown(page)
+        self.assertIsNone(page.evaluate("window.__started"))
+
+
 if __name__ == "__main__":
     unittest.main()

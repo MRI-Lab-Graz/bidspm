@@ -304,6 +304,13 @@
       return;
     }
 
+    const incompleteIssues = pipelineController.collectIncompleteOpIssues();
+    if (incompleteIssues.length) {
+      const suffix = incompleteIssues.length > 2 ? ` (+${incompleteIssues.length - 2} more)` : '';
+      setStatus(`Complete the operations before applying. ${incompleteIssues.slice(0, 2).join(' ')}${suffix}`, 'warning');
+      return;
+    }
+
     const transformations = getTransformerPayload();
     if (!transformations.Instructions.length) {
       setStatus('Add at least one transformer instruction before applying to the model.', 'warning');

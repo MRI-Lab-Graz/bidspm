@@ -677,6 +677,11 @@
             nameInput.addEventListener('change', () => {
                 const val = nameInput.value.trim();
                 if (!val) return;
+                if ((modelEditorDraft?.Nodes || []).some(other => other !== node && other?.Name === val)) {
+                    setModelEditorStatus(`A node named "${val}" already exists; node names must be unique.`, 'warning');
+                    nameInput.value = node.Name || '';
+                    return;
+                }
                 const oldName = node.Name;
                 node.Name = val;
                 if (oldName && oldName !== val) {

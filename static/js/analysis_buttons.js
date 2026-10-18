@@ -2,6 +2,14 @@
 // Extracted from templates/analysis.html: toolbar/button event wiring (load config, save/start/stop runs, checks, bms list, participants).
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
+// POST JSON; a refusal (4xx/5xx, or {success: false}) becomes an Error carrying the server's message.
+async function postJsonOrThrow(url, body) {
+    const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.success === false || result.error) throw new Error(result.error || `the server answered ${res.status}`);
+    return result;
+}
+
 // --- BUTTON EVENTS ---
 document.getElementById('btn-validate').onclick = async () => {
     updateInternalState();
@@ -55,11 +63,7 @@ document.getElementById('btn-save-only').onclick = async () => {
             const filename = document.getElementById('study-filename')?.value;
             const studyPath = `${folder}${filename}`;
 
-            await fetch('/save_settings', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({filepath: studyPath, content: unifiedStudyConfig})
-            });
+            await postJsonOrThrow('/save_settings', {filepath: studyPath, content: unifiedStudyConfig});
 
             validationResult.innerHTML = `<div class="alert alert-success py-1 x-small shadow-sm border-0"><i class="fas fa-check me-2"></i>Configuration saved to ${escapeHtml(studyPath)}</div>`;
         }
@@ -109,11 +113,13 @@ document.getElementById('btn-save-start').onclick = async () => {
         const folder = data.config_folder;
         const study_path = folder + data.study_filename;
         
-        await fetch('/save_settings', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({filepath: study_path, content: unifiedStudyConfig})
-        });
+        try {
+            await postJsonOrThrow('/save_settings', {filepath: study_path, content: unifiedStudyConfig});
+        } catch (err) {
+            validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Not started, saving the configuration failed: ${escapeHtml(err.message)}</div>`;
+            revealResult(validationResult);
+            return;
+        }
         
         const runPayload = {
             ...data,
@@ -121,11 +127,13 @@ document.getElementById('btn-save-start').onclick = async () => {
         };
         delete runPayload.container;
         
-        await fetch('/save_config', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({config: runPayload, folder: folder, filename: "study_run_meta.json"})
-        });
+        try {
+            await postJsonOrThrow('/save_config', {config: runPayload, folder: folder, filename: "study_run_meta.json"});
+        } catch (err) {
+            validationResult.innerHTML = `<div class="alert alert-danger py-1 x-small shadow-sm border-0"><i class="fas fa-times me-2"></i>Not started, saving the run settings failed: ${escapeHtml(err.message)}</div>`;
+            revealResult(validationResult);
+            return;
+        }
         
         startExecution(runPayload);
     }

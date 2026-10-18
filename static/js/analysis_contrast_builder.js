@@ -604,10 +604,30 @@
             bootstrapImpl?.Modal?.getOrCreateInstance(modal)?.show();
         }
 
+        // bidspm needs a unique, non-empty name and at least one condition per contrast.
+        function contrastProblems(contrasts) {
+            const problems = [];
+            const seen = new Set();
+            contrasts.forEach((contrast, index) => {
+                const name = String(contrast.Name ?? '').trim();
+                if (!name) problems.push(`Contrast ${index + 1} has no name.`);
+                else if (seen.has(name)) problems.push(`Contrast names must be unique: "${name}" is used twice.`);
+                seen.add(name);
+                if (!(contrast.ConditionList || []).length) problems.push(`Contrast "${name || index + 1}" has no conditions.`);
+            });
+            return problems;
+        }
+
         function applyToModel() {
             const nodes = getNodes();
             if (!nodes[cbNodeIdx]) {
                 showStatus('No node to apply to.', 'danger');
+                return;
+            }
+
+            const problems = contrastProblems(cbDraft);
+            if (problems.length) {
+                showStatus(problems.join(' '), 'danger');
                 return;
             }
 

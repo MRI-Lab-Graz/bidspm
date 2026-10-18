@@ -131,6 +131,7 @@ var {
     normalizeModelHrfVariables,
     numberInputProblem,
     parsePrimitiveInput,
+    regressorNameProblem,
     reorderArrayItem,
     setByPath,
     syncAllModelXHrfVariables,

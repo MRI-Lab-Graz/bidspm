@@ -2,6 +2,31 @@
 // Extracted from templates/analysis.html: API-backed actions: refresh tasks/spaces, validate/create/open/save model, transformer-builder launch, load latest study.
 // Classic script (shared globals); loaded before the inline bootstrap script in analysis.html.
 
+// A task checkbox; `missing` marks one that is saved in the project but not found in the BIDS folder.
+function appendTaskCheckbox(container, task, missing = false) {
+    const div = document.createElement('div');
+    div.className = 'form-check form-check-inline mb-0';
+    const box = document.createElement('input');
+    box.className = 'form-check-input task-checkbox';
+    box.type = 'checkbox';
+    box.value = task;
+    box.id = `task-${task}`;
+    box.addEventListener('change', () => { updateInternalState(); refreshSpaces(); });
+    const label = document.createElement('label');
+    label.className = 'form-check-label x-small';
+    label.htmlFor = box.id;
+    label.textContent = task;
+    div.append(box, ' ', label);
+    if (missing) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-warning text-dark x-small ms-1';
+        badge.textContent = 'not found in BIDS';
+        div.appendChild(badge);
+    }
+    container.appendChild(div);
+    return box;
+}
+
 // --- API CALLS ---
 async function refreshTasks() {
     const bidsDir = document.getElementById('input-BIDS_DIR')?.value;
@@ -10,24 +35,12 @@ async function refreshTasks() {
     try {
         const res = await fetch(`/get_bids_tasks?path=${encodeURIComponent(bidsDir)}`);
         const tasks = await res.json();
+        // a ticked task the dataset does not have stays visible (and saved) until the user unticks it
+        const keep = Array.from(container.querySelectorAll('.task-checkbox:checked')).map(cb => cb.value).filter(t => !tasks.includes(t));
         container.innerHTML = '';
-        if (tasks.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
-        tasks.forEach(t => {
-            const div = document.createElement('div');
-            div.className = 'form-check form-check-inline mb-0';
-            const box = document.createElement('input');
-            box.className = 'form-check-input task-checkbox';
-            box.type = 'checkbox';
-            box.value = t;
-            box.id = `task-${t}`;
-            box.addEventListener('change', () => { updateInternalState(); refreshSpaces(); });
-            const label = document.createElement('label');
-            label.className = 'form-check-label x-small';
-            label.htmlFor = box.id;
-            label.textContent = t;
-            div.append(box, ' ', label);
-            container.appendChild(div);
-        });
+        if (tasks.length === 0 && keep.length === 0) container.innerHTML = '<span class="text-muted x-small">No tasks found.</span>';
+        tasks.forEach(t => appendTaskCheckbox(container, t));
+        keep.forEach(t => { appendTaskCheckbox(container, t, true).checked = true; });
         const modelVal = document.getElementById('input-MODELS_FILE')?.value;
         if (modelVal) refreshModelTasks();
     } catch (e) { container.innerHTML = '<span class="text-danger x-small">Error detecting tasks.</span>'; }

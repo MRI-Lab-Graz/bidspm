@@ -138,6 +138,12 @@ const READONLY_MODEL_PATHS = [
                 }
                 const newValue = parsePrimitiveInput(e.target.value, current);
 
+                if (isModelXEntry && regressorNameProblem(newValue)) {
+                    setModelEditorStatus(regressorNameProblem(newValue), 'warning');
+                    e.target.value = current;
+                    return;
+                }
+
                 if (isModelXEntry && isDuplicateModelXRegressor(path, newValue)) {
                     const status = document.getElementById('model-editor-status');
                     status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(newValue)}</div>`;

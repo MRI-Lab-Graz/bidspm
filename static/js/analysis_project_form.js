@@ -69,6 +69,28 @@ document.getElementById('suggest_workers')?.addEventListener('click', async () =
     }
 });
 
+function addBmsModelRow(path = '') {
+    const row = document.createElement('div');
+    row.className = 'd-flex gap-1 align-items-center bms-model-row';
+    row.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="/path/to/model_smdl.json"><button type="button" class="btn btn-outline-danger btn-sm bms-model-remove">×</button>';
+    row.querySelector('input').value = path;
+    row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
+    document.getElementById('bms-model-list').appendChild(row);
+}
+
+// Run options saved with the project (the form itself has no other source for them).
+function restoreRunOptions(cfg) {
+    const actions = Array.isArray(cfg.actions) ? cfg.actions : [];
+    document.querySelectorAll('input[name="action"]').forEach(cb => { cb.checked = actions.includes(cb.value); });
+    document.getElementById('bms-models-section')?.classList.toggle('d-none', !actions.includes('bms'));
+    document.getElementById('bms-model-list').textContent = '';
+    (cfg.bms_models || []).forEach(path => addBmsModelRow(path));
+    document.getElementById('pilot').checked = !!cfg.pilot;
+    if (cfg.stats_workers) document.getElementById('stats_workers').value = cfg.stats_workers;
+    const node = document.getElementById('run_node_name');
+    if (node) { node.value = cfg.node_name || ''; node.dispatchEvent(new Event('input')); }
+}
+
 // --- STATIC FORM INITIALIZATION ---
 async function initApp() {
     try {
@@ -94,6 +116,8 @@ async function loadProjectConfig() {
     try {
         const res = await fetch(`/api/projects/${currentProjectId}/export`);
         const config = await res.json();
+        const saved = await (await fetch(`/api/projects/${currentProjectId}/config`)).json();
+        restoreRunOptions(saved);
 
         // A fresh/different project invalidates any participant selection made
         // against the previous project's subjects.
@@ -114,8 +138,9 @@ async function loadProjectConfig() {
             VERBOSITY: config.VERBOSITY ?? 2,
             container_type: config.container_type || 'docker',
             docker_image: config.docker_image || 'bidspm/bidspm:latest',
-            apptainer_image: config.apptainer_image || '/path/to/your/bidspm.sif',
-            spm_standalone_image: config.spm_standalone_image || ''
+            apptainer_image: config.apptainer_image || '',
+            spm_standalone_image: config.spm_standalone_image || '',
+            skip_validation: saved.skip_validation !== false
         };
         
         await syncInternalToForm();
@@ -123,6 +148,9 @@ async function loadProjectConfig() {
         console.error('Failed to load project config:', err);
     }
 }
+
+// The shipped placeholder text of the Apptainer image field: never a real value (older saves may hold it).
+const APPTAINER_PLACEHOLDER = '/path/to/your/bidspm.sif';
 
 // Throws an Error with a user-facing message when the values are unusable or the server refuses them.
 async function saveProjectConfig() {
@@ -142,18 +170,20 @@ async function saveProjectConfig() {
         fmriprep_folder: unifiedStudyConfig.FMRIPREP_DIR || '',
         output_folder: unifiedStudyConfig.WD || '',
         models_file: unifiedStudyConfig.MODELS_FILE || '',
-        node_name: unifiedStudyConfig.NODE_NAME || '',
+        node_name: (document.getElementById('run_node_name')?.value || '').trim(),
         space: unifiedStudyConfig.SPACE || 'MNI152NLin2009cAsym',
         fwhm: Number.isFinite(fwhm) ? fwhm : 6,
         tasks: unifiedStudyConfig.TASKS || [],
         verbosity: Number.isFinite(verbosity) ? verbosity : 2,
         container_type: unifiedStudyConfig.container_type || 'docker',
         docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
-        apptainer_image: unifiedStudyConfig.apptainer_image || '/path/to/your/bidspm.sif',
+        apptainer_image: unifiedStudyConfig.apptainer_image === APPTAINER_PLACEHOLDER ? '' : (unifiedStudyConfig.apptainer_image || ''),
         spm_standalone_image: unifiedStudyConfig.spm_standalone_image || '',
         actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
         pilot: document.getElementById('pilot').checked,
-        skip_validation: true
+        stats_workers: Number(document.getElementById('stats_workers')?.value) || 4,
+        bms_models: Array.from(document.querySelectorAll('#bms-model-list input')).map(i => i.value.trim()).filter(Boolean),
+        skip_validation: document.getElementById('skip_validation').checked
     };
     
     const res = await fetch(`/api/projects/${currentProjectId}/config`, {
@@ -205,13 +235,7 @@ function setupStaticListeners() {
             document.getElementById('bms-models-section').classList.toggle('d-none', !bmsCheckbox.checked);
         });
     }
-    document.getElementById('btn-add-bms-model')?.addEventListener('click', () => {
-        const row = document.createElement('div');
-        row.className = 'd-flex gap-1 align-items-center bms-model-row';
-        row.innerHTML = '<input type="text" class="form-control form-control-sm" placeholder="/path/to/model_smdl.json"><button type="button" class="btn btn-outline-danger btn-sm bms-model-remove">×</button>';
-        row.querySelector('.bms-model-remove').addEventListener('click', () => row.remove());
-        document.getElementById('bms-model-list').appendChild(row);
-    });
+    document.getElementById('btn-add-bms-model')?.addEventListener('click', () => addBmsModelRow());
 
     // Node-name input: show resolved output folder as a hint
     const runNodeNameInput = document.getElementById('run_node_name');
@@ -318,6 +342,9 @@ function updateInternalState() {
 }
 
 async function syncInternalToForm() {
+    // before anything calls updateInternalState(), which reads the checkbox back into the config
+    const skipVal = document.getElementById('skip_validation');
+    if (skipVal && 'skip_validation' in unifiedStudyConfig) skipVal.checked = !!unifiedStudyConfig.skip_validation;
     // Settings details
     for (const [key, val] of Object.entries(unifiedStudyConfig)) {
         const el = document.getElementById(`input-${key}`);
@@ -328,8 +355,9 @@ async function syncInternalToForm() {
         if (key === 'TASKS' && Array.isArray(val)) {
             await refreshTasks();
             val.forEach(t => {
-                const cb = document.getElementById(`task-${t}`);
-                if (cb) cb.checked = true;
+                const cb = document.getElementById(`task-${t}`)
+                    || appendTaskCheckbox(document.getElementById('tasks-container'), t, true);
+                cb.checked = true;
             });
             await refreshSpaces();
         }
@@ -347,8 +375,6 @@ async function syncInternalToForm() {
     document.getElementById('input-docker_image').value = unifiedStudyConfig.docker_image || '';
     document.getElementById('input-apptainer_image').value = unifiedStudyConfig.apptainer_image || '';
 
-    const skipVal = document.getElementById('skip_validation');
-    if (skipVal) skipVal.checked = !!unifiedStudyConfig.skip_validation;
     window.analysisStages?.refresh();  // values were assigned without events
 }
 

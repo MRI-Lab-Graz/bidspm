@@ -199,8 +199,8 @@
         const arr = getByPath(modelEditorDraft, arrayPath);
         if (!Array.isArray(arr)) return false;
 
-        const normalized = String(candidate || '').trim();
-        return arr.some((val, idx) => idx !== index && String(val || '').trim() === normalized);
+        const normalized = normalizeRegressorName(candidate);
+        return arr.some((val, idx) => idx !== index && normalizeRegressorName(val) === normalized);
     }
 
     function getModelObjectPathFromModelXPath(path) {
@@ -317,15 +317,31 @@
         renderModelAccordionEditor();
     }
 
+    // Names are compared in Unicode NFC (a precomposed and a decomposed "é" are the same regressor);
+    // control characters (NUL, tabs, newlines) can never be part of one.
+    function normalizeRegressorName(value) {
+        return String(value ?? '').trim().normalize('NFC');
+    }
+
+    function regressorNameProblem(value) {
+        return /[\u0000-\u001f\u007f]/.test(String(value ?? '')) ? 'Regressor names cannot contain control characters.' : '';
+    }
+
     function addRegressorToModelX(arrayPath, regressor, insertIndex = null) {
         const status = document.getElementById('model-editor-status');
         const arr = getByPath(modelEditorDraft, arrayPath);
         if (!Array.isArray(arr)) return;
 
-        const normalized = String(regressor || '').trim();
+        const normalized = normalizeRegressorName(regressor);
         if (!normalized) return;
 
-        if (arr.some(value => String(value || '').trim() === normalized)) {
+        const problem = regressorNameProblem(normalized);
+        if (problem) {
+            setModelEditorStatus(problem, 'warning');
+            return;
+        }
+
+        if (arr.some(value => normalizeRegressorName(value) === normalized)) {
             status.innerHTML = `<div class="alert alert-warning py-1 x-small mb-2">Regressor already selected: ${escapeHtml(normalized)}</div>`;
             return;
         }
@@ -397,6 +413,7 @@
         numberInputProblem,
         parsePrimitiveInput,
         pathTokens,
+        regressorNameProblem,
         reorderArrayItem,
         setByPath,
         syncAllModelXHrfVariables,

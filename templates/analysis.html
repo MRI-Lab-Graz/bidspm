@@ -373,7 +373,7 @@
                         <div class="{% if not project or project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">
                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Apptainer Image Path (.sif)</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" value="{{ project.config.apptainer_image if project else '/path/to/your/bidspm.sif' }}">
+                                <input type="text" class="form-control container-input border-secondary-subtle" data-key="apptainer_image" id="input-apptainer_image" placeholder="/path/to/your/bidspm.sif" value="{{ project.config.apptainer_image if project else '' }}">
                                 <button class="btn btn-outline-secondary btn-browse-container px-3" type="button" data-key="apptainer_image" data-type="file"><i class="fas fa-ellipsis-h"></i></button>
                             </div>
                         </div>

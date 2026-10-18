@@ -168,10 +168,11 @@
                         <div class="col-md-6">
                             <label for="project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="project-name" required placeholder="e.g., Study 107 Analysis">
+                            <div class="form-text text-warning" id="project-name-warning" aria-live="polite"></div>
                         </div>
                         <div class="col-md-6">
                             <label for="project-description" class="form-label">Description</label>
-                            <input type="text" class="form-control" id="project-description" placeholder="Brief description...">
+                            <textarea class="form-control" id="project-description" rows="2" placeholder="Brief description..."></textarea>
                         </div>
                     </div>
                     
@@ -267,10 +268,11 @@
                         <div class="col-md-6">
                             <label for="edit-project-name" class="form-label">Project Name <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="edit-project-name" required>
+                            <div class="form-text text-warning" id="edit-project-name-warning" aria-live="polite"></div>
                         </div>
                         <div class="col-md-6">
                             <label for="edit-project-description" class="form-label">Description</label>
-                            <input type="text" class="form-control" id="edit-project-description">
+                            <textarea class="form-control" id="edit-project-description" rows="2"></textarea>
                         </div>
                     </div>
                     
@@ -718,6 +720,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // Select folder button
     document.getElementById('btn-select-folder')?.addEventListener('click', selectFolder);
     
+    // Two projects may share a name (the id is what counts), but it is rarely intended: warn, do not forbid.
+    // The comparison is trimmed and case-insensitive, against the projects listed on this page.
+    function warnAboutDuplicateName(inputId, warningId, ownId) {
+        const typed = document.getElementById(inputId).value.trim().toLowerCase();
+        const clash = typed && Array.from(document.querySelectorAll('.btn-delete-project')).some(
+            btn => btn.dataset.projectId !== ownId && btn.dataset.projectName.trim().toLowerCase() === typed);
+        document.getElementById(warningId).textContent = clash ? 'A project with this name already exists; you can still use it.' : '';
+    }
+    document.getElementById('project-name').addEventListener('input', () => warnAboutDuplicateName('project-name', 'project-name-warning', ''));
+    document.getElementById('edit-project-name').addEventListener('input', () =>
+        warnAboutDuplicateName('edit-project-name', 'edit-project-name-warning', document.getElementById('edit-project-id').value));
+
+    // Single-line fields are trimmed on purpose (the browser already drops line breaks typed or pasted into a text
+    // input); only the description is multi-line.
     // New Project
     document.getElementById('btn-create-project')?.addEventListener('click', async function() {
         const name = document.getElementById('project-name').value.trim();
@@ -780,6 +796,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 document.getElementById('edit-project-id').value = projectId;
                 document.getElementById('edit-project-name').value = project.name;
+                document.getElementById('edit-project-name-warning').textContent = '';
                 document.getElementById('edit-project-description').value = project.description || '';
                 document.getElementById('edit-bids-folder').value = config.bids_folder || '';
                 document.getElementById('edit-output-folder').value = config.output_folder || '';
