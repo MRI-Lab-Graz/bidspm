@@ -1418,9 +1418,15 @@ class Pipeline:
         success = True
 
         if 'smooth' in self.options.actions:
-            self._log(f">>> Smoothing: subject {subject}, task {task}")
-            if not self._run_container_action("smooth", subject, task):
-                success = False
+            # The fast backend already smoothed (or skipped, or reported) this subject up front;
+            # smoothing again in the container is slow and overwrites its output.
+            if self.options.smooth_backend == 'fast' and check_subject_processed(
+                    self.config, subject, task, "smooth"):
+                self._log(f">>> Smoothing: subject {subject}, task {task} already done by the fast backend")
+            else:
+                self._log(f">>> Smoothing: subject {subject}, task {task}")
+                if not self._run_container_action("smooth", subject, task):
+                    success = False
 
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
@@ -1547,6 +1553,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(max(0, self.config.VERBOSITY - 1))
             ]
+            validation_args = []  # bidspm's smooth CLI has no --skip_validation (exit 2)
         elif action == "stats":
             args = [
                 "/raw", "/derivatives", "subject", cli_action or "stats",
@@ -1557,6 +1564,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(self.config.VERBOSITY)
             ]
+            validation_args = self._validation_args()
             args += list(extra_args)
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
@@ -1569,7 +1577,7 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
+            self.container_config, self.config, args + validation_args, self.model_file_path,
             extra_env=self._container_env(),
         )
 
