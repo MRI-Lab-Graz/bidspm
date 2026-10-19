@@ -593,7 +593,9 @@ class TestReadinessPanelRealServer(unittest.TestCase):
         cls.server, cls.base, _ = start_server(root)
         cls.project_id = post_json(cls.base + "/api/projects", {"name": "real", "config": {
             "bids_folder": str(bids), "fmriprep_folder": str(fmriprep), "models_file": str(model),
-            "tasks": ["x"], "space": "MNI"}})["project"]["id"]
+            "tasks": ["x"], "space": "MNI",
+            # a real server inspects the docker image (image_missing); apptainer keeps the verdict host-independent
+            "container_type": "apptainer", "apptainer_image": str(root / "x.sif")}})["project"]["id"]
         cls.pw = sync_playwright().start()
         cls.browser = cls.pw.chromium.launch(headless=True)
 
