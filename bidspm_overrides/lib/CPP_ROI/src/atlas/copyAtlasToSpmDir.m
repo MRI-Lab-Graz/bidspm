@@ -107,8 +107,8 @@ function [sourceAtlasImage, sourceAtlasXml] = atlasPaths(atlas)
   switch atlas
 
     case 'aal'
-      sourceAtlasImage = fullfile(returnAtlasDir(), 'AAL3', 'AAL3v1_1mm.nii.gz');
-      sourceAtlasXml = fullfile(returnAtlasDir(), 'AAL3', 'AAL3v1_1mm.xml');
+      sourceAtlasImage = fullfile(returnAtlasDir(atlas), 'AAL3v1_1mm.nii.gz');
+      sourceAtlasXml = fullfile(returnAtlasDir(atlas), 'AAL3v1_1mm.xml');
 
     case 'hcpex'
       sourceAtlasImage = fullfile(returnAtlasDir(atlas), 'HCPex.nii');

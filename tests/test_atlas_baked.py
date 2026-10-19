@@ -1,5 +1,4 @@
-"""Atlases are unpacked into /opt/spm/atlas at image build time, not per run via host cache dirs."""
-import re
+"""No atlas is baked into the image (licences, see docs/third-party-licenses.md), and none is mounted per run."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,15 +39,19 @@ class TestNoHostAtlasCache(unittest.TestCase):
             self.assertFalse(hasattr(core, name), name)
 
 
-class TestDockerfileBakesAtlases(unittest.TestCase):
+class TestDockerfileShipsNoAtlas(unittest.TestCase):
     def setUp(self):
         self.text = DOCKERFILE.read_text(encoding="utf-8")
 
-    def test_atlases_unpacked_at_build_by_bidspm_init(self):
-        # initCppRoi.m (run by bidspm('init')) copies all five atlases into spm('dir')/atlas
-        self.assertRegex(self.text, r"RUN octave-cli --eval .*bidspm\('init'\)")
+    def test_no_build_time_atlas_unpack(self):
+        self.assertNotIn("bidspm('init')", self.text)
+        self.assertNotIn("/opt/spm/atlas/$f", self.text)
 
-    def test_macs_perms_fixed_after_build_time_init(self):
-        # bidspm('init') runs `git pull` in the MACS clone as root, leaving root-owned files
+    def test_init_no_longer_copies_atlases(self):
+        # initCppRoi.m calls copyAtlasToSpmDir for 5 atlases on every bidspm('init'); with no atlas
+        # data in the image that would fail every run
+        self.assertIn('sed -i "/copyAtlasToSpmDir(/d" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m', self.text)
+
+    def test_macs_perms_fixed_after_its_clone(self):
         self.assertGreater(self.text.rindex("chmod -R a+rwX /opt/spm/toolbox/MACS"),
-                           self.text.index("bidspm('init')"))
+                           self.text.index("git clone /home/neuro/bidspm/lib/MACS"))

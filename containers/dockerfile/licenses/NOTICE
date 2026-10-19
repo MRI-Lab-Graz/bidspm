@@ -1,0 +1,56 @@
+spm-bids-runner -- NOTICE
+=========================
+
+This container image runs BIDS Stats Models with bidspm and SPM on GNU Octave. It is assembled by
+MRI-Lab Graz, University of Graz (https://github.com/MRI-Lab-Graz/bidspm). The scientific software in it
+is NOT ours: all credit goes to its authors.
+
+Upstream software
+-----------------
+- bidspm v4.0.0 -- by the CPP Lab (Crossmodal Perception and Plasticity, UCLouvain), Remi Gau et al.
+  https://github.com/cpp-lln-lab/bidspm   Licence: GPL-3.0 (licenses/bidspm-GPL-3.0.txt)
+  Bundled libraries (git submodules of bidspm v4.0.0):
+    bids-matlab (MIT), CPP_ROI incl. MarsBaR (GPL-3.0 / GPL-2.0), MACS (GPL-3.0), octache + JSONio (MIT),
+    brain_colours (ODC-By-1.0, data by Cyril Pernet), panel 2.14 (BSD), slice_display (MIT),
+    riksneurotools (GPL-3.0), spm_2_bids (GPL-3.0); report templates CC0-1.0.
+- SPM 26.10.01 -- by the Wellcome Centre for Human Neuroimaging (FIL Methods Group), UCL.
+  https://github.com/spm/spm (tag 26.10.01)   Licence: GPL-2.0-or-later (licenses/SPM-GPL-2.0.txt)
+  SPM bundles FieldTrip (GPL-3.0), MNE (BSD-3-Clause), eeprobe/libeep (LGPL-3.0), bemcp (GPL-2.0-or-later)
+  and small libraries under src/external (MIT, BSD-2-Clause, GPL-3.0); their licence files are in /opt/spm.
+- GNU Octave 9.4 and the Octave Forge packages io, image, signal, statistics, struct, parallel, control,
+  symbolic -- by the Octave developers, from Debian trixie (main). https://octave.org
+  Licence: GPL-3.0-or-later (licenses/octave-debian-copyright.txt).
+- Debian trixie base system, Python 3.12 (python:3.12-slim-trixie), Python packages (numpy, scipy, pandas,
+  nibabel, nilearn, pybids, ...) and the bids-validator 1.14.10 npm package: free/open-source licences
+  (Debian packages: /usr/share/doc/<package>/copyright; Python: <site-packages>/*.dist-info;
+  npm: /usr/local/lib/node_modules/bids-validator/**/LICENSE*).
+
+What MRI-Lab Graz changed
+-------------------------
+Bug fixes for running bidspm v4.0.0 with SPM 26 on Octave (bidspm_overrides/ and
+containers/dockerfile/patches/ in https://github.com/MRI-Lab-Graz/bidspm). They modify bidspm and are
+distributed under the same licence, GPL-3.0. The combined program is conveyed under GPL-3.0
+(OCI label org.opencontainers.image.licenses="GPL-3.0-only").
+
+Removed for licence reasons (not in this image)
+-----------------------------------------------
+Only clearly free/open-source content is shipped. Removed: every atlas (Neuromorphometrics labels -- CC BY-NC;
+AAL3, visfAtlas, Wang visual topography and Yeo networks -- no licence; Glasser HCP-MMP1.0 and HCPex -- HCP data
+use terms), SPM's TSSS toolbox (non-commercial only), the CTF, RICOH and YOKOGAWA MEG readers (custom
+permission / EULA), three Brainstorm files marked "for research purposes only", unlicensed File Exchange
+helpers, and bidspm's test/demo data and git history. Evidence for each: docs/third-party-licenses.md in the
+source repository. To use an atlas, build a derived image with your own copy (README, "Atlases").
+
+Corresponding source (GPL)
+--------------------------
+The complete corresponding source of the GPL parts is available from:
+- bidspm v4.0.0 with submodules: https://github.com/cpp-lln-lab/bidspm/tree/v4.0.0
+- SPM 26.10.01: https://github.com/spm/spm/archive/refs/tags/26.10.01.tar.gz
+- GNU Octave and Octave Forge packages: Debian trixie source packages (apt-get source octave), https://octave.org
+- The changes and the build recipe of this image: https://github.com/MRI-Lab-Graz/bidspm
+  (containers/dockerfile/dockerfile, bidspm_overrides/, containers/dockerfile/patches/), at the commit named by
+  the image's org.opencontainers.image.version / revision labels.
+MRI-Lab Graz will also provide this corresponding source on request for at least three years after
+distributing an image: karl.koschutnig@uni-graz.at.
+
+Please cite bidspm and SPM (and the toolboxes you use) in publications.
