@@ -8,6 +8,10 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+# The ONE image-name setting (README, containers/*.json, templates, scripts and CI spell the same value;
+# tests/test_default_image.py keeps them in sync).
+DEFAULT_DOCKER_IMAGE = "ghcr.io/mri-lab-graz/spm-bids-runner:latest"
+
 
 @dataclass
 class Config:

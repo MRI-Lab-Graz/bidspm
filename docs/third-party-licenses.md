@@ -1,7 +1,7 @@
 # Third-party licences of the spm-bids-runner image
 
 Inventory of everything that ends up in the image built from `containers/dockerfile/dockerfile`, made on
-2026-10-19 by inspecting the previous build (`bidspm:spm26-atlas`) file by file, not from memory.
+2026-10-19 by inspecting the previous build (local tag `spm26-atlas` of the SPM 26 image) file by file, not from memory.
 Rule (decided by the user): the image contains **only clearly free/open-source components**. Anything
 restrictive (non-commercial, academic-only, EULA, data use terms) or with an unclear or missing licence is
 removed at build time, and the build fails if one comes back (`find` guard in the Dockerfile,

@@ -25,7 +25,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 REPO_URL="https://github.com/MRI-Lab-Graz/bidspm.git"
 DEFAULT_INSTALL_DIR="${HOME}/bidspm"
-DOCKER_IMAGE="bidspm/bidspm:latest"
+DOCKER_IMAGE="ghcr.io/mri-lab-graz/spm-bids-runner:latest"
 
 # ---------------------------------------------------------------------------
 # Parse arguments

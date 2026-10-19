@@ -1,6 +1,6 @@
 """Opt-in smoke test of a *built* image, run as an arbitrary host uid (the way the pipeline runs it).
 
-    BIDSPM_TEST_IMAGE=bidspm:spm26-atlas python -m pytest tests/test_image_smoke.py
+    BIDSPM_TEST_IMAGE=spm-bids-runner:coldtest python -m pytest tests/test_image_smoke.py
 
 Catches what Dockerfile text checks cannot: files the image tries to write at run time.
 """

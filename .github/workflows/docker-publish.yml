@@ -1,17 +1,21 @@
 name: Publish Docker image
 
-# Manual only, on purpose: the image is a slow, ~4.6GB Octave/SPM build, publishing it is a decision
-# (not a side effect of pushing a tag), and the tag you pick is the version users pin.
+# Manual only, on purpose: the image is a slow Octave/SPM build, publishing it is a decision
+# (not a side effect of pushing a tag), and the version you give is the tag users pin.
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to publish the image as (e.g. spm26-1.0)"
+      version:
+        description: "Version tag to publish (e.g. v2.1.0)"
         required: true
+      latest:
+        description: "Also move the 'latest' tag to this build"
+        type: boolean
+        default: false
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # = lib/config.py DEFAULT_DOCKER_IMAGE without its tag (tests/test_default_image.py keeps them in sync)
+  IMAGE: ghcr.io/mri-lab-graz/spm-bids-runner
 
 jobs:
   build-and-push:
@@ -30,17 +34,19 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine image tags
         id: tags
         run: |
-          IMAGE="${REGISTRY}/${IMAGE_NAME,,}"
-          echo "tags=${IMAGE}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          echo "Publishing: ${IMAGE}:${{ inputs.tag }}"
+          TAGS="${IMAGE}:${{ inputs.version }}"
+          if [ "${{ inputs.latest }}" = "true" ]; then TAGS="${TAGS},${IMAGE}:latest"; fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Publishing: ${TAGS}"
 
+      # OCI labels (title, licences, source, upstream versions) come from the Dockerfile itself.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -48,3 +54,6 @@ jobs:
           file: containers/dockerfile/dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            IMAGE_VERSION=${{ inputs.version }}
+            GIT_REVISION=${{ github.sha }}

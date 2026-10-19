@@ -152,7 +152,7 @@ async function loadProjectConfig() {
             TASKS: config.TASKS || [],
             VERBOSITY: config.VERBOSITY ?? 2,
             container_type: config.container_type || 'docker',
-            docker_image: config.docker_image || 'bidspm/bidspm:latest',
+            docker_image: config.docker_image || 'ghcr.io/mri-lab-graz/spm-bids-runner:latest',
             apptainer_image: config.apptainer_image || '',
             spm_standalone_image: config.spm_standalone_image || '',
             skip_validation: saved.skip_validation !== false
@@ -198,7 +198,7 @@ async function saveProjectConfig() {
         tasks: unifiedStudyConfig.TASKS || [],
         verbosity,
         container_type: unifiedStudyConfig.container_type || 'docker',
-        docker_image: unifiedStudyConfig.docker_image || 'bidspm/bidspm:latest',
+        docker_image: unifiedStudyConfig.docker_image || 'ghcr.io/mri-lab-graz/spm-bids-runner:latest',
         apptainer_image: unifiedStudyConfig.apptainer_image === APPTAINER_PLACEHOLDER ? '' : (unifiedStudyConfig.apptainer_image || ''),
         spm_standalone_image: unifiedStudyConfig.spm_standalone_image || '',
         actions: Array.from(document.querySelectorAll('input[name="action"]:checked')).map(cb => cb.value),
