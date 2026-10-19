@@ -322,13 +322,30 @@ def _pids_listening_on_port(port: int) -> List[int]:
         return []
 
 
+def _command_of(pid: int) -> str:
+    """Command line of a process ('' if unknown)."""
+    try:
+        return subprocess.run(['ps', '-p', str(pid), '-o', 'args='], capture_output=True, text=True,
+                              check=False).stdout.strip()
+    except Exception:
+        return ''
+
+
 def kill_existing_on_port(port: int) -> bool:
-    """Kill any process currently listening on the given port. Returns True if something was killed."""
+    """Stop an old bidspm_gui.py instance listening on the port. Returns True if something was stopped.
+
+    Any other listener is left alone: the message names it and the process exits (use another --port).
+    """
     killed = False
     own_pid = os.getpid()
     pids = [pid for pid in _pids_listening_on_port(port) if pid != own_pid]
 
     for pid in pids:
+        command = _command_of(pid)
+        if 'bidspm_gui.py' not in command:
+            print(f"Error: port {port} is held by PID {pid} ({command or 'unknown command'}), which is not a "
+                  f"bidspm GUI, so it was not stopped. Pick another port: --port N (start_gui.sh: BIDSPM_PORT=N).")
+            sys.exit(1)
         try:
             os.kill(pid, signal.SIGTERM)
             killed = True
@@ -500,7 +517,7 @@ def parse_gui_args(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description='BIDSPM Web Interface')
     parser.add_argument('-p', '--port', type=int, default=None,
-                       help='Port to use (default: 5100; any existing instance on that port is stopped first)')
+                       help='Port to use (default: 5100; an older bidspm GUI on that port is stopped first, any other program is left alone)')
     parser.add_argument('--host', default='127.0.0.1',
                        help='Address to listen on (default: 127.0.0.1, this machine only). The interface has no login: '
                             'on a remote server keep the default and use "ssh -L <port>:localhost:<port>"; '

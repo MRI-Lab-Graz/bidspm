@@ -51,6 +51,7 @@ class TestBidspmGuiHelpers(unittest.TestCase):
 
         with patch("bidspm_gui.os.getpid", return_value=9999), \
              patch("bidspm_gui._pids_listening_on_port", side_effect=[[1111, 2222], [], []]), \
+             patch("bidspm_gui._command_of", return_value="python bidspm_gui.py"), \
              patch("bidspm_gui.os.kill") as mock_kill:
             self.assertTrue(kill_existing_on_port(5100))
 

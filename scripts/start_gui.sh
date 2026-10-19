@@ -24,4 +24,5 @@ fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 cd "$ROOT"
+export PYTHONUNBUFFERED=1   # the startup self-check must show up in a redirected log, not at exit
 exec "$VENV/bin/python" bidspm_gui.py -p "${BIDSPM_PORT:-5100}" "$@"

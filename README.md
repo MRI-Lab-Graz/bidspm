@@ -52,22 +52,18 @@ The tool automatically detects your platform and selects the appropriate contain
 ### 🖥️ **macOS (Development/Piloting)**
 
 - **Auto-detected**: Docker (Apptainer not supported on macOS)
-- **Container**: `container.json` (Docker configuration)
+- **Container**: `containers/container.json` (Docker configuration)
 - **Usage**: Perfect for testing and piloting analyses
 
 ### 🐧 **Linux (Production/HPC)**
 
 - **Auto-detected**: Apptainer (preferred) or Docker
-- **Container**: `container_apptainer.json` (Apptainer) or `container.json` (Docker)
+- **Container**: `containers/container_apptainer.json` (Apptainer) or `containers/container.json` (Docker)
 - **Usage**: Production runs on high-performance computing systems
 
 ### 🚀 **Quick Platform Setup**
 
 ```bash
-# Run platform-specific setup
-./setup_platform.sh
-
-# Or let the tool auto-detect
 python bidspm.py --pilot  # Automatically selects the right container
 ```
 
@@ -75,8 +71,8 @@ python bidspm.py --pilot  # Automatically selects the right container
 
 The tool supports multiple container configurations:
 
-- `container.json` - Docker for macOS/development
-- `container_apptainer.json` - Apptainer for Linux/HPC
+- `containers/container.json` - Docker for macOS/development
+- `containers/container_apptainer.json` - Apptainer for Linux/HPC
 
 **Example Docker config (macOS):**
 ```json
@@ -98,44 +94,48 @@ The tool supports multiple container configurations:
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- Docker or Apptainer
+- No Python needed: `scripts/setup.sh` makes uv download its own Python 3.12 (internet access is needed for the first setup)
+- Docker (your user in the `docker` group) or Apptainer
+- Disk: about 5 GB for the image plus 0.7 GB for the Python environment
 - BIDS-compliant dataset
 - Preprocessed fMRI data (e.g., from fMRIPrep)
 
 ## Installation
 
-### Option 1: Docker image (recommended)
+### Install and start (Docker or Apptainer)
 
 This repo is a Python CLI/webapp that drives a Docker (or Apptainer)
-container where the actual SPM/Octave analysis runs -- you need both parts.
-
-Build the image from this checkout (SPM 26.10.01 is compiled for Octave during the build; the SPM version is a
-build argument, `--build-arg SPM_TAG=26.10.01`):
-
-```bash
-docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .
-```
-
-(`containers/dockerfile/build_mri_lab_container.sh` wraps the same command.)
-
-Then get the Python side running:
+container where the actual SPM/Octave analysis runs -- you need both parts. Follow these steps in order:
 
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
+# build the image from this checkout (about 10 minutes; SPM 26.10.01 is compiled for Octave during the build,
+# the SPM version is a build argument: --build-arg SPM_TAG=26.10.01)
+docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .
 ./scripts/setup.sh        # uv builds .bidspm: its own Python 3.12 (.python-version) + the packages in uv.lock
 ./scripts/start_gui.sh    # or: .bidspm/bin/python bidspm.py --help
 ```
+
+(`containers/dockerfile/build_mri_lab_container.sh` wraps the same docker build.) The default
+`containers/container.json` already points at `bidspm/bidspm:latest`, so nothing needs editing.
+Do not pull the published `ghcr.io/mri-lab-graz/bidspm:latest`; build the image yourself (see Known Issues).
+
+`scripts/setup.sh` downloads uv into `./build/uv` with curl (curl and internet access are required; an uv already
+installed on the system is not used).
 
 The environment is managed entirely by [uv](https://docs.astral.sh/uv/): dependencies live in `pyproject.toml` and are
 locked in `uv.lock`. It uses uv's own Python, never the OS's or FSL's. To change dependencies edit `pyproject.toml`, run
 `uv lock`, then `UV_PROJECT_ENVIRONMENT=.bidspm uv sync --managed-python`.
 
-Point `container.json` at the image you built (`"docker_image": "bidspm/bidspm:latest"`).
-
 **Starting the GUI:** `./scripts/start_gui.sh` activates the project's `.bidspm` virtual environment and starts it
-(port `$BIDSPM_PORT`, default 5100; any options such as `--host` or `--no-browser` are passed on).
+(port `$BIDSPM_PORT`, default 5100; any options such as `--host` or `--no-browser` are passed on). If an older bidspm GUI
+already listens on that port it is stopped and replaced; any other program on the port is left alone and the script exits
+with its PID (choose another port: `BIDSPM_PORT=5101 ./scripts/start_gui.sh`). On start the GUI prints a "Pre-flight check"
+(a list of what is ready or missing); the same check runs on demand with `python bidspm.py --check-environment`.
+There are no web routes for it. A GUI started in the background (`./scripts/start_gui.sh > gui.log 2>&1 &`) ignores Ctrl+C;
+stop it with `kill <pid>` (SIGTERM). The GUI listens on `127.0.0.1:5100` only and has no login: do not expose the port.
+On a shared server each student runs their own instance on their own port.
 
 **VS Code Remote SSH:** VS Code shows "Your application running on port 5100 is available. Open in Browser" every time.
 To open the browser at once instead, add this to the (untracked) `.vscode/settings.json`:
@@ -146,21 +146,7 @@ To open the browser at once instead, add this to the (untracked) `.vscode/settin
 jobs and read files). Forward the port from your own machine instead of exposing it:
 `ssh -L 5100:localhost:5100 you@server`, then open `http://localhost:5100`. Use `--host 0.0.0.0` only on a network you trust.
 
-### Option 2: With setup script (cross-platform)
-
-The included setup script automatically creates a virtual environment (`.bidspm/`) using UV and installs all dependencies:
-
-```bash
-git clone https://github.com/MRI-Lab-Graz/bidspm.git
-cd bidspm
-./scripts/setup.sh
-```
-
-Then activate the environment:
-
-```bash
-source ./scripts/activate_bidspm.sh
-```
+To activate the environment in your shell: `source ./scripts/activate_bidspm.sh`.
 
 **Environment already set up but broken?** `scripts/setup.sh` writes an
 `.install.lock` file after a successful run and skips re-running by default —
@@ -175,11 +161,9 @@ symlink into a system Python that got moved/reinstalled), a plain re-run of
 Alternatively, point the GUI/CLI at any working interpreter directly without
 touching the venv, via `BIDSPM_PYTHON=/path/to/python python bidspm_gui.py`.
 
-### Option 3: Manual installation
+### Manual installation (instead of `scripts/setup.sh`)
 
 ```bash
-git clone https://github.com/MRI-Lab-Graz/bidspm.git
-cd bidspm
 UV_PROJECT_ENVIRONMENT=.bidspm uv sync --managed-python   # needs uv (https://docs.astral.sh/uv/)
 source .bidspm/bin/activate
 ```
@@ -194,7 +178,8 @@ Run the test suite from repository root:
 
 A few tests need extras and skip themselves when they are missing (pandas for `scripts/fix_events_format.py`, GNU Octave on the host
 for the `.m` override tests). The image smoke test runs only with `BIDSPM_TEST_IMAGE=<built image>`. `tests/test_analysis_page_browser.py`, `tests/test_transformer_builder_browser.py` and
-`tests/test_transformer_handoff_browser.py` (the analysis page <-> transformer builder round trip) open the pages in headless Chromium and need `pip install playwright && playwright install chromium` (it skips itself otherwise).
+`tests/test_transformer_handoff_browser.py` (the analysis page <-> transformer builder round trip) open the pages in headless Chromium and need a headless Chromium: run `.bidspm/bin/playwright install chromium` once (about 130 MB). Without it about 200 browser tests skip silently.
+The full suite takes about 5 minutes.
 
 Notes:
 
