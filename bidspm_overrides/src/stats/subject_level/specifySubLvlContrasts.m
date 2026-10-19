@@ -96,8 +96,9 @@ function  [contrasts, count] = crossSesContrast(model, node, thisContrast, contr
       for iCdt = 1:numel(contrastsList{iCon}.ConditionList)
         cdtName = contrastsList{iCon}.ConditionList{iCdt};
         [~, regIdx] = getRegressorIdx(cdtName, model.SPM, sessionList{iSes});
+        % average over the session's runs (upstream summed): s1 > s2 stays zero-sum
         C.C(end, regIdx) = contrastsList{iCon}.Weights(iCdt) * ...
-            thisContrast.Weights(iSes);
+            thisContrast.Weights(iSes) * runAverageWeights(model.SPM, regIdx);
       end
     end
 
@@ -133,7 +134,7 @@ function [contrasts, count] = averageAtSubjectLevel(model, contrasts, count, thi
     if strcmp(thisContrast.Test, 't')
       % average over the runs that have this condition (SPM's replicate-and-scale),
       % so the con image does not scale with the number of runs (upstream sums)
-      C.C(end, regIdx) = thisContrast.Weights(iCdt) / numel(regIdx);
+      C.C(end, regIdx) = thisContrast.Weights(iCdt) * runAverageWeights(model.SPM, regIdx);
 
     elseif strcmp(thisContrast.Test, 'F')
 

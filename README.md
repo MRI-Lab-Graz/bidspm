@@ -202,9 +202,10 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 - the dataset validator (`validator`)
 
 **Multiple runs.** All runs (and sessions) of a subject/task go into ONE subject-level SPM.mat, one SPM session per run
-(own constant, motion regressors and conditions). Subject-level contrasts AVERAGE a condition over the runs that contain it
+(own constant, motion regressors and conditions). Subject-level t contrasts AVERAGE each condition over the runs that contain it
 (weights `1/n` per run, SPM's replicate-and-scale; upstream bidspm summed them, so a 3-run subject's contrast was 3x a 1-run
-subject's), so subjects with different run counts are comparable at the group level. The readiness check pairs events,
+subject's); session-level and cross-session contrasts average the runs within each session, so `ses-1 > ses-2` sums to zero.
+Single-run subjects and F contrasts are unchanged. The readiness check pairs events,
 preprocessed BOLD and confounds per run by their BIDS entities (`ses`, `task`, `acq`, `run`, ...) and checks every run;
 messages name the run, e.g. `sub-01 ses-1 run-2 (task-x) has preprocessed BOLD but no events file` (`run_unpaired`), or
 `... has events but no preprocessed BOLD` (`preproc_missing`), `... has no confounds file` (`confounds_missing`). A run with

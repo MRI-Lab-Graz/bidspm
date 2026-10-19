@@ -68,7 +68,7 @@ function [contrasts, counter] = specifyDummyContrasts(model, node, contrasts, co
           for iCdt = 1:length(conditionList)
             cdtName = conditionList{iCdt};
             [~, regIdx] = getRegressorIdx(cdtName, model.SPM, bidsSessions{iSes});
-            C.C(end, regIdx) = thisContrast.Weights(iCdt);
+            C.C(end, regIdx) = thisContrast.Weights(iCdt) * runAverageWeights(model.SPM, regIdx);
           end
           [contrasts, counter] = appendContrast(contrasts, C, counter, thisContrast.Test);
         end
@@ -102,7 +102,7 @@ function  C = addSubjectLevelContrastBasedOnPreviousLevels(model, thisContrast)
 
     % average over the runs that have this condition (SPM's replicate-and-scale);
     % upstream summed, so con images scaled with the number of runs
-    C.C(end, regIdx{iCdt}) = thisContrast.Weights(iCdt) / numel(regIdx{iCdt});
+    C.C(end, regIdx{iCdt}) = thisContrast.Weights(iCdt) * runAverageWeights(model.SPM, regIdx{iCdt});
 
   end
   clear regIdx;
@@ -136,7 +136,7 @@ function [contrasts, counter] = addExplicitDummyContrasts(model, node, contrasts
       case 'subject'
 
         C = newContrast(model.SPM, cdtName, testType);
-        C.C(end, regIdx) = 1 / nnz(regIdx);  % average over runs, see addSubjectLevelContrastBasedOnPreviousLevels
+        C.C(end, regIdx) = runAverageWeights(model.SPM, regIdx);  % average each condition over its runs
         [contrasts, counter] = appendContrast(contrasts, C, counter, testType);
         clear regIdx;
 
@@ -146,7 +146,7 @@ function [contrasts, counter] = addExplicitDummyContrasts(model, node, contrasts
         for iSes = 1:numel(bidsSessions)
           C = newContrast(model.SPM, [cdtName, '_ses-', bidsSessions{iSes}], testType);
           [~, regIdx] = getRegressorIdx(cdtName, model.SPM, bidsSessions{iSes});
-          C.C(end, regIdx) = 1;
+          C.C(end, regIdx) = runAverageWeights(model.SPM, regIdx);  % average over the session's runs
           [contrasts, counter] = appendContrast(contrasts, C, counter, testType);
           clear regIdx;
         end
