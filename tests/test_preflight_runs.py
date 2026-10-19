@@ -69,3 +69,32 @@ def test_dataset_level_events_apply_to_every_run(tmp_path):
         p.unlink()
     (bids / "task-x_events.tsv").write_text("onset\tduration\ttrial_type\n1\t1\ta\n")
     assert _items(bids, fmri) == []
+
+
+def _model_with_input(tmp_path, **inp):
+    import json
+    path = tmp_path / "model_input.json"
+    path.write_text(json.dumps({"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"], **inp},
+                                "Nodes": [{"Level": "Run", "Name": "run", "GroupBy": ["run", "subject"],
+                                           "Model": {"X": ["trial_type.a", "trans_x", 1], "Type": "glm"}}]}))
+    return path
+
+
+def test_runs_the_model_input_excludes_are_not_checked(tmp_path):
+    """bidspm applies Input run/session/acq... as a query: a deliberately excluded run must not block."""
+    from lib.preflight import run_preflight
+    bids, fmri = make_trees(tmp_path, runs=("1", "2"), sessions=("1", "2"))
+    (bids / "sub-01/ses-1/func/sub-01_ses-1_task-x_run-2_events.tsv").unlink()
+    (fmri / "sub-01/ses-2/func/sub-01_ses-2_task-x_run-1_desc-confounds_timeseries.tsv").unlink()
+    (fmri / "sub-01/ses-2/func/sub-01_ses-2_task-x_run-2_space-MNI_desc-preproc_bold.nii.gz").unlink()
+    args = dict(bids_dir=bids, fmriprep_dir=fmri, tasks=["x"], space="MNI", validator="skip", actions=["stats"],
+                derivatives_dir=tmp_path / "deriv", fwhm=6)
+    for run in ("1",):  # smoothed only for the selected runs
+        d = tmp_path / "deriv/bidspm-preproc/sub-01/ses-1/func"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"sub-01_ses-1_task-x_run-{run}_space-MNI_desc-smth6_bold.nii").write_text("x")
+    report = run_preflight(**args, model_file=_model_with_input(tmp_path, session=["1"], run=[1]))
+    assert [c for c in report["checks"] if c["severity"] == "error"] == []
+    unfiltered = run_preflight(**args, model_file=_model_with_input(tmp_path))
+    errors = {c["id"] for c in unfiltered["checks"] if c["severity"] == "error"}
+    assert {"run_unpaired", "preproc_missing", "confounds_missing", "smoothed_missing"} <= errors

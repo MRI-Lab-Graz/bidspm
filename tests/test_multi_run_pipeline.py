@@ -68,3 +68,16 @@ def test_a_subject_with_one_of_two_runs_smoothed_is_not_already_smoothed(tmp_pat
     assert check_subject_processed(p.config, "01", "motor", "smooth") is False
     _two_runs(p)
     assert check_subject_processed(p.config, "01", "motor", "smooth") is True
+
+
+def test_stats_ignores_runs_the_model_input_excludes(tmp_path):
+    import json
+    from unittest.mock import patch
+    p = _pipeline(tmp_path)
+    _two_runs(p, smoothed=("1",))
+    model = tmp_path / "m.json"
+    model.write_text(json.dumps({"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["motor"], "run": [1]}, "Nodes": []}))
+    p.model_file_path = model
+    with patch.object(p, "_run_container_action", return_value=True), patch.object(p, "_copy_brain_mask"), \
+            patch("lib.core.find_new_spm_mats", return_value=[Path("SPM.mat")]):
+        assert p._process_subject("01", "motor") is True, p.errors

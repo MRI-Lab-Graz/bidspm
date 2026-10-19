@@ -1442,8 +1442,11 @@ class Pipeline:
                     success = False
 
         if 'stats' in self.options.actions and not self.options.dry_run:
+            from .preflight import model_input, run_selected
+            inputs = model_input(self.model_file_path)  # runs the model's Input excludes are never modelled
             missing = missing_smoothed(self.config.FMRIPREP_DIR, self.config.DERIVATIVES_DIR / "bidspm-preproc",
-                                       subject, task, self.config.SPACE, self.config.FWHM)
+                                       subject, task, self.config.SPACE, self.config.FWHM,
+                                       keep=lambda p: run_selected(p, inputs))
             if missing:  # bidspm would silently model only the smoothed runs
                 self._log_error(f"Stats for subject {subject}, task {task}: no smoothed image (FWHM {self.config.FWHM}) for "
                                 + ", ".join(src.name for src, _ in missing)

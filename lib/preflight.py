@@ -259,6 +259,29 @@ def _run_label(path):
     return " ".join(shown) or f"task-{pairs.get('task', '?')}"
 
 
+# model Input entities bidspm turns into its file query (getOptionsFromModel.m), long name -> filename key
+_INPUT_ENTITIES = {"session": "ses", "acquisition": "acq", "ceagent": "ce", "reconstruction": "rec", "direction": "dir",
+                   "run": "run", "echo": "echo", "part": "part"}
+
+
+def model_input(model_file):
+    """{filename key: allowed values} from the model's Input (run, session, acq, ...); {} when none or unreadable."""
+    try:
+        inp = json.loads(Path(model_file).read_text()).get("Input") or {} if model_file else {}
+        return {_INPUT_ENTITIES[k]: {str(x) for x in (v if isinstance(v, list) else [v])}
+                for k, v in inp.items() if k in _INPUT_ENTITIES and v not in (None, [], "")}
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
+        return {}
+
+
+def run_selected(path, inputs):
+    """False when the file's entities contradict the model Input (run 1 == run 01); files without the entity are kept."""
+    have = dict(_run_key(path))
+    def same(a, b):
+        return int(a) == int(b) if a.isdigit() and b.isdigit() else a == b
+    return all(k not in have or any(same(have[k], v) for v in allowed) for k, allowed in inputs.items())
+
+
 def _events_for(preproc, events):
     """The most specific events file that applies to this BOLD run (BIDS inheritance: its entities are a subset)."""
     key = _run_key(preproc)
@@ -308,11 +331,15 @@ def _events_files(bids_dir, bids_listing, task):
     return _match(bids_listing, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
 
 
-def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True, listings=None, filters=()):
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True, listings=None, filters=(), inputs=None):
     """Returns (items, trial_type values seen in this subject's events files, events files).
 
-    listings: optional (bids, fmriprep) _func_listing results, so callers walk each subject tree once."""
+    listings: optional (bids, fmriprep) _func_listing results, so callers walk each subject tree once.
+    inputs: model_input() of the model; runs it excludes are not checked (bidspm never reads them)."""
     bids_listing, fmriprep_listing = listings or (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
+    if inputs:
+        bids_listing = [p for p in bids_listing if run_selected(p, inputs)]
+        fmriprep_listing = [p for p in fmriprep_listing if run_selected(p, inputs)]
     conditions, nuisance, transformed, produced = needs
     out, seen, event_cols = [], set(), set()
     preproc = _match(fmriprep_listing, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii.gz")
@@ -663,6 +690,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     conditions, _, transformed, _ = needs
     filters = _model_filters(model_file) if full else []
     needed = _dataset_contrasts(model_file) if model_file else set()
+    inputs = model_input(model_file)
     listings = {}  # one directory walk per subject and root, shared by all tasks
     # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
     index, quote_reported = 0, False
@@ -674,8 +702,10 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                     return checks
                 if sub not in listings:
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
-                items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub], filters)
-                items += _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, listings[sub][1], actions, needed)
+                items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub], filters,
+                                                         inputs)
+                selected = [p for p in listings[sub][1] if run_selected(p, inputs)]
+                items += _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, selected, actions, needed)
                 if quote_reported:  # ONE quote warning per run, not one per subject
                     items = [i for i in items if i["id"] != "tsv_quotes"]
                 quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
