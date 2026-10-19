@@ -1,20 +1,31 @@
-# BIDSPM Container for MRI Lab Graz
-# Author: Karl Koschutnig
-# Organization: MRI Lab Graz
-# Features: Python slim base, Octave, BIDSPM 4.0, SPM 26, UV package manager
+# spm-bids-runner: GNU Octave + SPM + bidspm, with the MRI-Lab Graz fixes baked in
+# Upstream: bidspm (CPP Lab, Remi Gau et al.), SPM (Wellcome Centre for Human Neuroimaging), GNU Octave.
+# Only clearly free/open-source content is shipped: docs/third-party-licenses.md has the evidence for
+# every component, /usr/share/doc/spm-bids-runner/NOTICE the credits, licence texts and source offer.
 
 FROM python:3.12-slim-trixie
 
-LABEL maintainer="Karl Koschutnig <karl.koschutnig@uni-graz.at>"
-LABEL description="BIDSPM container with Python slim base, Octave 9.x, BIDSPM 4.0, and SPM 26"
-LABEL version="2025.1"
-LABEL author="Karl Koschutnig"
-LABEL organization="MRI Lab Graz"
-# Standard OCI labels: GHCR uses org.opencontainers.image.source to link this
-# published package back to the repo it was built from (Packages sidebar,
-# provenance, etc).
-LABEL org.opencontainers.image.source="https://github.com/MRI-Lab-Graz/bidspm"
-LABEL org.opencontainers.image.description="BIDSPM container: Octave 9.x, BIDSPM 4.0, SPM 26, with lab bug-fix overrides baked in"
+ARG IMAGE_VERSION=dev
+ARG GIT_REVISION=unknown
+ARG SPM_TAG=26.10.01
+ARG BIDSPM_TAG=v4.0.0
+
+# OCI labels: GHCR links the package to the repo via image.source. licenses: the combined program is
+# conveyed under GPL-3.0 (bidspm is GPL-3.0, SPM GPL-2.0-or-later, Octave GPL-3.0-or-later); the
+# components keep their own notices, listed in NOTICE.
+LABEL org.opencontainers.image.title="spm-bids-runner" \
+      org.opencontainers.image.description="Runs BIDS Stats Models with bidspm ${BIDSPM_TAG} and SPM ${SPM_TAG} on GNU Octave 9 (no MATLAB needed), with MRI-Lab Graz bug fixes" \
+      org.opencontainers.image.source="https://github.com/MRI-Lab-Graz/bidspm" \
+      org.opencontainers.image.documentation="https://github.com/MRI-Lab-Graz/bidspm#readme" \
+      org.opencontainers.image.vendor="MRI-Lab Graz, University of Graz" \
+      org.opencontainers.image.authors="Karl Koschutnig <karl.koschutnig@uni-graz.at>" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${GIT_REVISION}" \
+      at.mri-lab-graz.upstream.bidspm="bidspm ${BIDSPM_TAG} by the CPP Lab (Remi Gau et al.), https://github.com/cpp-lln-lab/bidspm, GPL-3.0" \
+      at.mri-lab-graz.upstream.spm="SPM ${SPM_TAG} by the Wellcome Centre for Human Neuroimaging, https://github.com/spm/spm, GPL-2.0-or-later" \
+      at.mri-lab-graz.upstream.octave="GNU Octave 9 (Debian trixie), https://octave.org, GPL-3.0-or-later" \
+      at.mri-lab-graz.notice="/usr/share/doc/spm-bids-runner/NOTICE"
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -76,13 +87,24 @@ RUN apt-get update -qq && \
     
 # Install SPM (released tag, built for Octave -- bin/spm-octave and the
 # PLATFORM=octave build are supported in-tree since SPM25, no patch needed).
-ARG SPM_TAG=26.10.01
 RUN mkdir -p /opt/spm && \
     curl -fsSL https://github.com/spm/spm/archive/refs/tags/${SPM_TAG}.tar.gz | tar -xzC /opt/spm --strip-components=1 && \
     make -C /opt/spm/src PLATFORM=octave distclean && \
     make -C /opt/spm/src PLATFORM=octave && \
     make -C /opt/spm/src PLATFORM=octave install && \
     echo "✅ SPM ${SPM_TAG} installed and compiled for Octave successfully"
+
+# Licences (evidence: docs/third-party-licenses.md): SPM ships a few M/EEG-only parts and one atlas whose
+# terms are not open source -- Neuromorphometrics labels (CC BY-NC), TSSS (non-commercial only), the CTF
+# readers (custom permission), the RICOH/YOKOGAWA readers (EULA), Brainstorm files marked "for research
+# purposes only", and File Exchange helpers without a licence. None is used for fMRI statistics.
+RUN rm -rf /opt/spm/tpm/labels_Neuromorphometrics.* /opt/spm/toolbox/TSSS /opt/spm/external/ctf \
+        /opt/spm/external/ricoh_meg_reader /opt/spm/external/yokogawa_meg_reader \
+        /opt/spm/external/mne/mne_block_diag.m /opt/spm/toolbox/MEEGtools/private/process_fooof.m \
+        /opt/spm/toolbox/MEEGtools/private/bst_prctile.m /opt/spm/toolbox/MEEGtools/private/macro_method.m \
+        /opt/spm/external/fieldtrip/external/fileexchange/arrow.m /opt/spm/external/fieldtrip/external/fileexchange/keep.m \
+        /opt/spm/external/fieldtrip/external/fileexchange/stlwrite.m /opt/spm/external/fieldtrip/external/fileexchange/uimage.m \
+        /opt/spm/external/fieldtrip/external/fileexchange/uimagesc.m
 
 # Real BIDS validator (bidspm's bids.validate shells out to `bids-validator`).
 RUN npm install -g bids-validator@1.14.10 && npm cache clean --force
@@ -94,11 +116,30 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
     chown -R neuro:neuro /opt/spm
 
     # Install BIDSPM 4.0 (stable release with submodules and Python CLI) as root
-    RUN git clone --depth 1 --branch v4.0.0 https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm || \
-        git clone --depth 1 https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm && \
+    RUN git clone --depth 1 --branch ${BIDSPM_TAG} https://github.com/cpp-lln-lab/bidspm.git /home/neuro/bidspm && \
         cd /home/neuro/bidspm && \
-        git submodule update --init --recursive || true && \
-        echo "✅ BIDSPM 4.0 installed successfully"
+        git submodule update --init --recursive && \
+        echo "✅ BIDSPM ${BIDSPM_TAG} installed successfully"
+
+    # Licences (docs/third-party-licenses.md): no atlas ships -- AAL3, visfAtlas, Wang and Yeo have no
+    # licence, Glasser/HCPex carry the HCP data use terms; the Neuromorphometrics label list goes with the
+    # atlas. lib/utils helpers without a redistribution grant go too (renameStructField: own rewrite in
+    # bidspm_overrides/). Test and demo data are not needed at run time and have unclear terms.
+    RUN cd /home/neuro/bidspm/lib/CPP_ROI/atlas && \
+        rm -rf /home/neuro/bidspm/lib/CPP_ROI/atlas/AAL3 /home/neuro/bidspm/lib/CPP_ROI/atlas/Glasser \
+            /home/neuro/bidspm/lib/CPP_ROI/atlas/HCPex /home/neuro/bidspm/lib/CPP_ROI/atlas/visfAtlas \
+            /home/neuro/bidspm/lib/CPP_ROI/atlas/visual_topography_probability_atlas \
+            /home/neuro/bidspm/lib/CPP_ROI/atlas/yeo_7networks \
+            HCPex.xml visual_topography_probability_atlas.zip space-MNI_seg-wang_dseg.xml \
+            space-IXI549Space_desc-neuromorphometrics_dseg.csv \
+            /home/neuro/bidspm/lib/utils/cprintf.m /home/neuro/bidspm/lib/utils/resize_img.m \
+            /home/neuro/bidspm/lib/utils/plot_power_spectra_of_GLM_residuals.m \
+            /home/neuro/bidspm/lib/utils/renameStructField.m && \
+        find /home/neuro/bidspm -path '*/.git' -prune -o -type d \( -name tests -o -name demos \) -prune -exec rm -rf {} +
+
+    # initCppRoi (run on every bidspm init) copies five atlases into SPM's atlas dir; none ships.
+    RUN sed -i "/copyAtlasToSpmDir(/d" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m && \
+        ! grep -q "copyAtlasToSpmDir(" /home/neuro/bidspm/lib/CPP_ROI/initCppRoi.m
 
     # MarsBaR (bundled via CPP_ROI) maps only spm99/2/5/8/12 to a compat dir; SPM25+
     # has no dir of its own and spm5's covers it (verified: bidspm initialises on SPM26).
@@ -153,6 +194,16 @@ RUN useradd -m -u 1000 -s /bin/bash neuro && \
         git config --system --add safe.directory '*' && \
         chmod -R a+rwX /opt/spm/toolbox/MACS
 
+# The checkout's git data holds CPP_ROI's full history (every atlas removed above, HCPex as a nested
+# module) and the deleted test data: not shipped. bidspm reads branch/commit for its reports, so an empty
+# repo stands in; the MACS clone pulls from itself so bidspm's start-up `git pull` stays quiet.
+RUN rm -rf /home/neuro/bidspm/.git && find /home/neuro/bidspm -name .git -prune -exec rm -rf {} + && \
+    git -C /home/neuro/bidspm init -q && \
+    git -C /home/neuro/bidspm -c user.name=spm-bids-runner -c user.email=none@invalid commit -q --allow-empty \
+        -m "bidspm ${BIDSPM_TAG} (upstream git history not shipped)" && \
+    git -C /opt/spm/toolbox/MACS remote set-url origin /opt/spm/toolbox/MACS && \
+    git -C /opt/spm/toolbox/MACS pull -q
+
 # Small fixes to upstream v4.0.0 files are patches (containers/dockerfile/patches, see
 # bidspm_overrides/README.md); larger rewrites are whole-file copies in bidspm_overrides/.
 COPY containers/dockerfile/patches/ /tmp/bidspm_patches/
@@ -170,15 +221,31 @@ COPY bidspm_overrides/ /home/neuro/bidspm/
 RUN grep -rliE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m | xargs sed -i -E "s/(which *\([^)]*), *'-all'\)/\1)/I" && \
     ! grep -rqiE "which *\([^)]*'-all'" /opt/spm /home/neuro/bidspm --include=*.m
 
-# Unpack the CPP_ROI atlases into SPM's atlas dir once, at build time, instead of in every
-# container run (which needed a shared host cache, a seeding step and a serialized
-# "warm-up" subject to avoid races between parallel workers). Fails the build if any is missing.
-RUN octave-cli --eval "addpath('/opt/spm'); cd('/home/neuro/bidspm'); bidspm('init');" && \
-    for f in AAL3v1_1mm.nii AAL3v1_1mm.xml HCPex.nii HCPex.xml \
-             space-MNI152ICBM2009anlin_seg-glasser_dseg.nii space-MNI_seg-visfAtlas_dseg.nii \
-             space-MNI_seg-wang_dseg.nii; do test -s /opt/spm/atlas/$f || exit 1; done && \
-    chmod -R a+rX /opt/spm/atlas && \
+# Fail the build if anything removed for licence reasons is (back) in the image, e.g. after an upstream bump.
+RUN find / -xdev \( -iname '*neuromorphometrics*' -o -name 'EULA*' -o -iname 'TSSS' -o -iname 'AAL3*' \
+        -o -iname '*glasser*' -o -iname 'HCPex*' -o -iname '*visfAtlas*' -o -iname '*wang_dseg*' \
+        -o -iname 'visual_topography*' -o -iname 'yeo_7networks' -o -iname 'readCTFds.m' \) \
+        -not -path '/proc/*' -print | tee /dev/stderr | grep -q . && exit 1; \
     chmod -R a+rwX /opt/spm/toolbox/MACS
+
+# NOTICE (credits, source offer) + the licence texts of what ships, copied from the sources themselves.
+COPY containers/dockerfile/licenses/ /usr/share/doc/spm-bids-runner/
+RUN d=/usr/share/doc/spm-bids-runner/licenses && mkdir -p $d && \
+    cp /opt/spm/LICENCE $d/SPM-GPL-2.0.txt && \
+    cp /home/neuro/bidspm/LICENSE $d/bidspm-GPL-3.0.txt && \
+    cp /home/neuro/bidspm/lib/bids-matlab/LICENSE $d/bids-matlab-MIT.txt && \
+    cp /home/neuro/bidspm/lib/CPP_ROI/LICENSE $d/CPP_ROI-GPL-3.0.txt && \
+    cp /home/neuro/bidspm/lib/MACS/LICENSE.md $d/MACS-GPL-3.0.txt && \
+    cp /home/neuro/bidspm/lib/octache/LICENSE $d/octache-MIT.txt && \
+    cp /home/neuro/bidspm/lib/octache/lib/JSONio/LICENSE $d/JSONio-MIT.txt && \
+    cp /home/neuro/bidspm/lib/brain_colours/LICENSE $d/brain_colours-ODC-By-1.0.txt && \
+    cp /home/neuro/bidspm/lib/panel-2.14/license.txt $d/panel-BSD.txt && \
+    cp /home/neuro/bidspm/lib/slice_display/LICENSE $d/slice_display-MIT.txt && \
+    cp /home/neuro/bidspm/lib/riksneurotools/LICENSE $d/riksneurotools-GPL-3.0.txt && \
+    cp /home/neuro/bidspm/lib/spm_2_bids/LICENSE $d/spm_2_bids-GPL-3.0.txt && \
+    cp /home/neuro/bidspm/src/reports/LICENSE $d/bidspm-reports-CC0-1.0.txt && \
+    cp /usr/share/doc/octave/copyright $d/octave-debian-copyright.txt && \
+    test -s /usr/share/doc/spm-bids-runner/NOTICE
 
 # Set up Octave paths with SPM and BIDSPM (simplified to avoid atlas issues)
 RUN octave --no-gui --eval "addpath('/opt/spm/'); savepath('/usr/share/octave/site/m/startup/octaverc');" && \

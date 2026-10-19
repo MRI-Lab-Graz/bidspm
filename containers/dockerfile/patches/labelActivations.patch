@@ -1,0 +1,26 @@
+--- a/src/stats/utils/labelActivations.m
++++ b/src/stats/utils/labelActivations.m
+@@ -42,9 +42,22 @@
+   csvFile = args.Results.csvFile;
+   atlas = args.Results.atlas;
+ 
++  % spm-bids-runner ships no atlas (licences): a missing one leaves the table unlabelled
++  try
++    if strcmpi(atlas, 'neuromorphometrics')
++      returnAtlasDir(atlas);
++    else
++      copyAtlasToSpmDir(atlas, 'verbose', false);
++    end
++  catch err
++    logger('WARNING', [err.message, newline, 'The results table is left without region labels.'], ...
++           'filename', mfilename(), ...
++           'id', 'atlasMissing');
++    return
++  end
++
+   atlasName = defaultAtlas;
+   if ~strcmpi(atlas, 'neuromorphometrics')
+-    copyAtlasToSpmDir(atlas, 'verbose', false);
+     switch lower(atlas)
+       case 'aal'
+         atlasName = 'AAL3v1_1mm';

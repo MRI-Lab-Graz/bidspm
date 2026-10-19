@@ -367,7 +367,7 @@
                         <!-- Docker Option -->
                         <div class="{% if project and project.config.container_type != 'docker' %}d-none{% endif %}" id="docker-options">
                             <label class="form-label x-small fw-bold text-muted text-uppercase mb-0">Docker Image Name</label>
-                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'bidspm/bidspm:latest' }}">
+                            <input type="text" class="form-control form-control-sm container-input" data-key="docker_image" id="input-docker_image" value="{{ project.config.docker_image if project else 'ghcr.io/mri-lab-graz/spm-bids-runner:latest' }}">
                         </div>
                         <!-- Apptainer Option -->
                         <div class="{% if not project or project.config.container_type != 'apptainer' %}d-none{% endif %}" id="apptainer-options">

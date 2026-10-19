@@ -103,7 +103,7 @@ def test_signature_ignores_irrelevant_keys_and_tracks_relevant_ones():
     junk = {**base, "FWHM": 6, "WD": "/w", "NODE_NAME": "n", "VERBOSITY": 3, "docker_image": "i", "unifiedStudyConfig": {"a": 1}}
     assert sig(base) == sig(junk)
     for key, value in (("BIDS_DIR", "/c"), ("FMRIPREP_DIR", "/f"), ("TASKS", ["y"]), ("SPACE", "T1w"),
-                       ("container_type", "docker")):
+                       ("container_type", "docker"), ("ROI", True)):
         assert sig(base) != sig({**base, key: value}), key
 
 

@@ -63,7 +63,7 @@ def _expect(value, kind, what):
 def second_level_nodes(contrasts, source="run_level"):
     """Default Subject and Dataset nodes plus Edges for the run-level t contrasts; returns (nodes, edges).
 
-    Verified in a real bidspm 4.0.0 run (bidspm:spm26-atlas, study 141 crom, 2 subjects, dataset df = N-1); why this shape
+    Verified in a real bidspm 4.0.0 run (the SPM 26 Octave image, study 141 crom, 2 subjects, dataset df = N-1); why this shape
     (paths under /home/neuro/bidspm/src, our overrides in bidspm_overrides/src):
     - Subject: X [1] plus the Run node's contrasts copied verbatim (Run ConditionList and Weights).
       specifySubLvlContrasts.m (override) takes the averageAtSubjectLevel branch only for a numeric X == 1 and builds

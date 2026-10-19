@@ -20,6 +20,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from dataclasses import MISSING, dataclass, field, asdict
 
+from lib.config import DEFAULT_DOCKER_IMAGE
+
 # Default data directory
 DATA_DIR = Path.home() / ".bidspm"
 PROJECTS_DIR = DATA_DIR / "projects"
@@ -93,7 +95,7 @@ class ProjectConfig:
     
     # Container settings
     container_type: str = "docker"  # docker, apptainer
-    docker_image: str = "bidspm/bidspm:latest"
+    docker_image: str = DEFAULT_DOCKER_IMAGE
     apptainer_image: str = ""
     spm_standalone_image: str = ""
     

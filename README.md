@@ -19,7 +19,7 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
 - 🗂️ **Tmp Management**: Automatic creation and cleanup of run-specific temporary directories
 - 🌍 **SPACE Validation**: Validates spatial reference spaces exist in fMRIPrep data
 - 🔄 **Error Recovery**: Non-fatal error handling allows processing to continue
-- 🎯 **ROI Analysis**: Extract signals from regions of interest using multiple atlases (Wang, Neuromorphometrics, etc.)
+- 🧾 **Licence-clean image**: the `spm-bids-runner` image ships only free/open-source components (no atlases; see Atlases)
 
 ## Repository layout
 
@@ -40,8 +40,15 @@ BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by l
   match SPM's own MATLAB-Runtime standalone to 1e-8). bidspm's lab patches live in `bidspm_overrides/`.
 - **Rebuild the image after every `git pull`** that touches `bidspm_overrides/` or `containers/dockerfile/`:
   the patches are baked in at build time, so an old image silently lacks newer fixes
-  (`docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .`, about 10 minutes, ~4.6 GB).
-- The published `ghcr.io/mri-lab-graz/bidspm:latest` predates this SPM 26 image and is not compatible with this code; the defaults point at the image you build locally (`bidspm/bidspm:latest`).
+  (`docker build -f containers/dockerfile/dockerfile -t ghcr.io/mri-lab-graz/spm-bids-runner:latest .`).
+- **The image is called `spm-bids-runner`** (`ghcr.io/mri-lab-graz/spm-bids-runner:latest`), not bidspm: it packages other people's software
+  (bidspm, SPM, GNU Octave; credits and licences in `/usr/share/doc/spm-bids-runner/NOTICE` inside the image and in
+  `docs/third-party-licenses.md`). Until it is published on GHCR, build it locally (Installation). The older
+  SPM12-era image named `bidspm` in the same GHCR organisation does not match this code; do not use it. Projects saved
+  with an old image name keep it (nothing is rewritten); the readiness check reports `image_missing` when that image
+  is not on the machine.
+- **No atlases in the image** (licence reasons): results tables are not labelled with brain regions, and bidspm's ROI
+  features need an atlas you add yourself (see Atlases).
 - "Slice timing information was missing" in a stats log is expected for fMRIPrep input: fMRIPrep drops `SliceTiming`
   after correcting and records `StartTime`, which is used for SPM's `fmri_t0`.
 
@@ -80,7 +87,7 @@ Which one a run uses: a `--container` file wins; otherwise the `container_type` 
 ```json
 {
   "container_type": "docker",
-  "docker_image": "bidspm/bidspm:latest",
+  "docker_image": "ghcr.io/mri-lab-graz/spm-bids-runner:latest",
   "apptainer_image": ""
 }
 ```
@@ -98,7 +105,7 @@ Which one a run uses: a `--container` file wins; otherwise the `container_type` 
 
 - No Python needed: `scripts/setup.sh` makes uv download its own Python 3.12 (internet access is needed for the first setup)
 - Docker (your user in the `docker` group) or Apptainer
-- Disk: about 5 GB for the image plus 0.7 GB for the Python environment
+- Disk: about 3.5 GB for the image plus 0.7 GB for the Python environment
 - BIDS-compliant dataset
 - Preprocessed fMRI data (e.g., from fMRIPrep)
 
@@ -112,16 +119,19 @@ container where the actual SPM/Octave analysis runs -- you need both parts. Foll
 ```bash
 git clone https://github.com/MRI-Lab-Graz/bidspm.git
 cd bidspm
-# build the image from this checkout (about 10 minutes; SPM 26.10.01 is compiled for Octave during the build,
-# the SPM version is a build argument: --build-arg SPM_TAG=26.10.01)
-docker build -f containers/dockerfile/dockerfile -t bidspm/bidspm:latest .
+# get the image, EITHER pull it from GHCR (once it is published there):
+#   docker pull ghcr.io/mri-lab-graz/spm-bids-runner:latest
+# OR build it from this checkout (SPM 26.10.01 is compiled for Octave during the build;
+# versions are build arguments: --build-arg SPM_TAG=26.10.01 --build-arg BIDSPM_TAG=v4.0.0):
+docker build -f containers/dockerfile/dockerfile -t ghcr.io/mri-lab-graz/spm-bids-runner:latest .
 ./scripts/setup.sh        # uv builds .bidspm: its own Python 3.12 (.python-version) + the packages in uv.lock
 ./scripts/start_gui.sh    # or: .bidspm/bin/python bidspm.py --help
 ```
 
 (`containers/dockerfile/build_mri_lab_container.sh` wraps the same docker build.) The default
-`containers/container.json` already points at `bidspm/bidspm:latest`, so nothing needs editing.
-Do not pull the published `ghcr.io/mri-lab-graz/bidspm:latest`; build the image yourself (see Known Issues).
+`containers/container.json` already points at `ghcr.io/mri-lab-graz/spm-bids-runner:latest` (the one image-name setting is
+`DEFAULT_DOCKER_IMAGE` in `lib/config.py`), so nothing needs editing. A cold build (no cache) took about
+5 minutes on the lab server (image 3.4 GB) and needs internet access (Debian, GitHub, PyPI, npm).
 
 `scripts/setup.sh` downloads uv into `./build/uv` with curl (curl and internet access are required; an uv already
 installed on the system is not used).
@@ -338,12 +348,12 @@ Create a `config.json` file with your specific settings:
 
 #### For Docker
 
-Use the image you built (see Installation above):
+Use the image you pulled or built (see Installation above):
 
 ```json
 {
   "container_type": "docker",
-  "docker_image": "bidspm/bidspm:latest",
+  "docker_image": "ghcr.io/mri-lab-graz/spm-bids-runner:latest",
   "apptainer_image": ""
 }
 ```
@@ -358,8 +368,9 @@ Use the image you built (see Installation above):
 }
 ```
 
-Build a `.sif` from the Docker image above, e.g.
-`apptainer build bidspm.sif docker-daemon://bidspm/bidspm:latest`.
+Build a `.sif` from the local Docker image, e.g.
+`apptainer build spm-bids-runner.sif docker-daemon://ghcr.io/mri-lab-graz/spm-bids-runner:latest`, or, once the image is published on GHCR,
+`apptainer pull spm-bids-runner.sif docker://ghcr.io/mri-lab-graz/spm-bids-runner:latest`.
 
 #### Optional: `spm_standalone_image`
 
@@ -367,7 +378,7 @@ Only needed for `--estimation-engine standalone` (next section). A Docker image 
 or, for Apptainer, the path of a `.sif`:
 
 ```json
-{ "container_type": "docker", "docker_image": "bidspm/bidspm:latest",
+{ "container_type": "docker", "docker_image": "ghcr.io/mri-lab-graz/spm-bids-runner:latest",
   "spm_standalone_image": "sha256:<image id of your SPM standalone build>" }
 ```
 
@@ -413,7 +424,7 @@ Measured on a 32-core machine (study 132, 3 subjects in parallel, stats only): 8
   on short runs. The `report` action needs it and turns it on automatically.
 - **Readiness check.** A 100-subject study checks in about 3 s without the dataset validator and about 17 s with it; the
   validator dominates the time.
-- The BIDS dataset is validated by the first container only, and the atlases are unpacked at build time (no warm-up subject).
+- The BIDS dataset is validated by the first container only; the image ships no atlases, so nothing is unpacked per run.
 
 ## Checking a run log
 
@@ -696,89 +707,34 @@ working_directory/
 - Check the log file `run_bidspm.log`
 - Test container commands manually
 
-## ROI Analysis
+## Atlases
 
-BIDSPM supports region of interest (ROI) analysis for extracting signals from specific brain regions. The ROI analysis uses various atlases to define regions and extract time series data.
+The `spm-bids-runner` image contains **no atlas**: none of the atlases bidspm knows has a clearly free licence
+(Neuromorphometrics is CC BY-NC; AAL3, visfAtlas, Wang and Yeo have no licence; Glasser/HCPex carry the HCP data use
+terms; details in `docs/third-party-licenses.md`). What this means:
 
-### ROI Configuration
+- Statistics, contrasts, BMS and the results export work as before. Results tables (`--results`, report action) are
+  written **without region labels**; the log shows a `labelActivations` WARNING "Atlas ... is not included in this
+  image". The readiness check warns about this up front (`atlas_missing`).
+- This runner does not run ROI extraction; the `ROI` / `ROI_CONFIG` settings are not used (the readiness check says
+  so when they are set). bidspm's own ROI commands (`bidspm create_roi`) stop with the same clear message.
 
-To enable ROI analysis, add the following to your `config.json`:
+To use an atlas whose terms you accept, build a derived image that adds your own copy and point `docker_image`
+(or your `.sif`) at it:
 
-```json
-{
-  "ROI": true,
-  "ROI_CONFIG": {
-    "roi_atlas": "wang",
-    "roi_name": ["V1v", "V1d"],
-    "space": ["MNI152NLin6Asym"]
-  }
-}
+```dockerfile
+FROM ghcr.io/mri-lab-graz/spm-bids-runner:latest
+USER root
+# Neuromorphometrics, from your own SPM12 download (labels for results tables):
+COPY labels_Neuromorphometrics.nii labels_Neuromorphometrics.xml /opt/spm/tpm/
+# CPP_ROI atlases (aal, wang, visfatlas, hcpex, glasser), from github.com/cpp-lln-lab/CPP_ROI (v0.4.0) atlas/:
+COPY atlas/ /home/neuro/bidspm/lib/CPP_ROI/atlas/
+RUN octave-cli --eval "cd('/home/neuro/bidspm'); bidspm('init'); copyAtlasToSpmDir('wang')" && chmod -R a+rX /opt/spm
+USER neuro
 ```
 
-### ROI Parameters
-
-- **`ROI`**: Boolean flag to enable/disable ROI analysis
-- **`roi_atlas`**: Atlas name to use for ROI extraction (e.g., "wang", "neuromorphometrics")
-- **`roi_name`**: Array of specific ROI names to extract from the atlas
-- **`space`**: Array of spatial reference spaces to use (must match available fMRIPrep outputs)
-
-### Available Atlases and ROIs
-
-#### Wang Atlas
-The Wang atlas provides retinotopic visual cortex parcellations:
-- **V1v**: Ventral V1
-- **V1d**: Dorsal V1
-- **V2v**: Ventral V2
-- **V2d**: Dorsal V2
-- **V3v**: Ventral V3
-- **V3d**: Dorsal V3
-
-### ROI Analysis Workflow
-
-1. **Prerequisites Check**: Verifies Docker/Apptainer availability
-2. **ROI Extraction**: Extracts time series from specified ROIs using the selected atlas
-3. **Statistics**: Computes ROI-based statistics in the specified spatial reference space
-4. **Output**: Results are saved to `/derivatives/bidspm-roi/`
-
-### Example ROI Configuration
-
-```json
-{
-  "BIDSPM_PATH": "/path/to/bidspm-container.sif",
-  "BIDS_DIR": "/path/to/bids",
-  "OUTPUT_DIR": "/path/to/output",
-  "DERIVATIVES_DIR": "/path/to/derivatives",
-  "PARTICIPANT_LABEL": ["01", "02"],
-  "TASK_LABEL": ["task1"],
-  "SPACE": ["MNI152NLin6Asym"],
-  "FWHM": [8],
-  "MODEL_FILE": "/path/to/model.json",
-  "PREPROC_DIR": "/path/to/fmriprep",
-  "STATS": true,
-  "PREPROC": false,
-  "QC": false,
-  "ROI": true,
-  "ROI_CONFIG": {
-    "roi_atlas": "wang",
-    "roi_name": ["V1v", "V1d"],
-    "space": ["MNI152NLin6Asym"]
-  }
-}
-```
-
-### ROI Output Structure
-
-The ROI analysis creates the following output structure:
-
-```
-derivatives/bidspm-roi/
-├── dataset_description.json
-└── sub-*/
-    └── roi/
-        ├── *_roi-V1v_timeseries.tsv
-        ├── *_roi-V1d_timeseries.tsv
-        └── *_roi-stats.json
-```
+(`copyAtlasToSpmDir` once per atlas you added, at build time: the container later runs as your host uid and cannot
+write to `/opt/spm`.)
 
 ## Contributing
 
@@ -792,6 +748,10 @@ derivatives/bidspm-roi/
 
 This project is licensed under the [MIT License](LICENSE).
 
+The container image is a separate work: it is distributed under GPL-3.0 (bidspm is GPL-3.0, SPM GPL-2.0-or-later,
+GNU Octave GPL-3.0-or-later); see `/usr/share/doc/spm-bids-runner/NOTICE` in the image and
+`docs/third-party-licenses.md`.
+
 ## Support
 
 For questions or issues:
@@ -802,6 +762,8 @@ For questions or issues:
 
 ## Acknowledgments
 
-- [BIDSPM](https://github.com/cpp-lln-lab/bidspm) for the original framework
+- [bidspm](https://github.com/cpp-lln-lab/bidspm) by the CPP Lab (Remi Gau et al.) for the original framework
+- [SPM](https://github.com/spm/spm) by the Wellcome Centre for Human Neuroimaging
+- [GNU Octave](https://octave.org) for running SPM without MATLAB
 - [BIDS-StatsModel](https://bids-standard.github.io/stats-models/) for standardization
 - [fMRIPrep](https://fmriprep.org/) for the preprocessing pipeline

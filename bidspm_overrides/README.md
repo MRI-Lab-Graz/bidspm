@@ -70,8 +70,12 @@ correct behavior.
   path actually has it.
   Also: path resolution is now separate from unzipping/merging (the Wang atlas merge
   `spm_write_vol`s into the CPP_ROI tree), which only runs when the atlas is not already in
-  SPM's atlas dir. The image bakes all atlases in at build time, so a container run as an
-  arbitrary host uid never needs to write there.
+  SPM's atlas dir. The image ships no atlas (licences, see `docs/third-party-licenses.md`); `aal` is now
+  looked up through `returnAtlasDir` like the others, so a missing atlas raises the clear error below.
+- **returnAtlasDir.m**: every CPP_ROI atlas lookup goes through it; a named atlas whose files are not in the
+  image raises `returnAtlasDir:atlasMissing` ("not included in this image ... for licence reasons", with the path
+  where a derived image must add it) instead of failing later on a missing file. Knows `aal` by name.
+- **renameStructField.m** (lib/utils): own rewrite; upstream bundles a MathWorks helper without a licence.
 - **cliStats.m**: also honours env `BIDSPM_SKIP_RESULTS` (set by `bidspm.py` unless `--results` or the report action is requested) to skip the
   SPM Results export that `stats`/`contrasts` run last; and `--name_by_confounds` (see above). Also fixes
   `--design_only`: v4.0.0's model loop starts with `rmfield(opt, 'model')`, which drops
@@ -109,6 +113,8 @@ whole-file overrides above are copied in (the diff shows exactly what changed; a
   `bms`, `bms-posterior`, `bms-bms`. (`allowed_actions.json` used to be a whole-file override under a `data/` folder that
   `.gitignore` excluded, so fresh clones silently built images without it; as a patch it is tracked.)
 - **inputParserForStats.m**: adds the `name_by_confounds` parameter (used by `cliStats.m`).
+- **labelActivations.m**: a results table whose atlas is not in the image (none ships; default
+  Neuromorphometrics is CC BY-NC) is left unlabelled with a WARNING instead of failing the results step.
 
 To change a patched file: edit a copy of the upstream file and regenerate the diff
 (`diff -u -L a/<path> -L b/<path> upstream/<path> edited/<path> > containers/dockerfile/patches/<name>.patch`).

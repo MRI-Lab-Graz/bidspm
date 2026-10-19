@@ -519,6 +519,43 @@ def check_container(container_type):
     return []
 
 
+def docker_image_present(image):
+    """True/False from `docker image inspect`; None when docker cannot tell (not running, hung)."""
+    try:
+        return subprocess.run(["docker", "image", "inspect", image], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+_image_present = docker_image_present  # tests/conftest.py stubs this so no test depends on the host's images
+
+
+def check_image(container_type, image):
+    """A docker run cannot start without its image. Without docker the 'container' warning already covers it."""
+    if container_type != "docker" or not image or not shutil.which("docker") or _image_present(image) is not False:
+        return []
+    return [_item("image_missing", ERROR, f"Docker image {image} is not on this machine",
+                  f"Build it: docker build -f containers/dockerfile/dockerfile -t {image} .  or pull it: docker pull {image}")]
+
+
+def check_atlases(cfg, actions):
+    """The image ships no atlas (licences, docs/third-party-licenses.md): say so before a run, not in its log."""
+    out = []
+    if any(str(a).lower() == "report" for a in actions or []):
+        out.append(_item("atlas_missing", WARN,
+                         "The report's results tables will have no brain-region labels: the spm-bids-runner image "
+                         "includes no atlas (licence reasons).",
+                         "Expected. For labels, use a derived image with your own atlas (README, 'Atlases')."))
+    if cfg.get("ROI") or cfg.get("ROI_CONFIG"):
+        atlas = (cfg.get("ROI_CONFIG") or {}).get("roi_atlas", "") if isinstance(cfg.get("ROI_CONFIG"), dict) else ""
+        out.append(_item("atlas_missing", WARN,
+                         f"ROI / ROI_CONFIG{f' (atlas {atlas})' if atlas else ''} are set but not used: this runner does "
+                         "not run ROI extraction, and the image includes no atlas (licence reasons).",
+                         "Remove ROI / ROI_CONFIG, or run bidspm's ROI tools in a derived image with your own atlas "
+                         "(README, 'Atlases')."))
+    return out
+
+
 MAX_VALIDATOR_ERRORS = 20  # groups, not raw errors
 
 
@@ -737,13 +774,13 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
 
 
 def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, validator, container_type,
-                   skip_model_validation, actions, prog, derivatives_dir="", fwhm=None):
+                   skip_model_validation, actions, prog, derivatives_dir="", fwhm=None, extra_checks=()):
     full = not actions or any(str(a).lower() in ("stats", "dataset") for a in actions)
     prog.emit("folders", "start", "checking the folders")
-    checks = check_dirs(bids_dir, fmriprep_dir)
+    checks = check_dirs(bids_dir, fmriprep_dir) + list(extra_checks)
     prog.add(checks)
     prog.emit("folders", "done", "folders checked")
-    if checks:
+    if any(c["id"] in ("bids_dir", "fmriprep_dir") for c in checks):
         return {"verdict": _verdict(checks), "checks": checks}
     if prog.stop():
         return {"verdict": "cancelled", "checks": []}
@@ -772,7 +809,7 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
 
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="auto", container_type="", skip_model_validation=False, actions=None,
-                  progress=None, cancelled=None, derivatives_dir="", fwhm=None):
+                  progress=None, cancelled=None, derivatives_dir="", fwhm=None, extra_checks=()):
     """actions=None checks everything (but not earlier outputs: smoothed images for stats without Smooth, subject results
     for dataset only; those need derivatives_dir and fwhm); without 'stats'/'dataset' only folders, subjects, preproc and validator are checked.
 
@@ -781,7 +818,7 @@ def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", sub
     otherwise); exceptions they raise are swallowed. A cancelled run returns {"verdict": "cancelled", "checks": [found so far]}."""
     prog = _Progress(progress, cancelled)
     report = _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, validator, container_type,
-                            skip_model_validation, actions, prog, derivatives_dir, fwhm)
+                            skip_model_validation, actions, prog, derivatives_dir, fwhm, extra_checks)
     prog.emit("done", "done", report["verdict"], verdict=report["verdict"])
     return report
 
@@ -809,26 +846,28 @@ def _derivatives_dir(cfg):
     return str(_path(cfg.get("DERIVATIVES_DIR") or "") or _path(cfg.get("WD") or "") or "")
 
 
-def _container_type(cfg):
-    """Same resolution as the run (lib.config.resolve_container_config); "" when none applies."""
+def _container(cfg):
+    """(type, docker image) by the same resolution as the run (lib.config.resolve_container_config); ("", "") when none."""
     from .config import resolve_container_config
     try:
         with contextlib.redirect_stdout(io.StringIO()):  # the auto-detect prints its choice
             found = resolve_container_config(None, cfg)
     except (Exception, SystemExit):  # a broken container file is the run's problem to report, not the check's
-        return ""
-    return found.container_type if found else ""
+        return "", ""
+    return (found.container_type, found.docker_image) if found else ("", "")
 
 
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,
                               progress=None, cancelled=None):
+    container_type, image = _container(cfg)
     return run_preflight(
         bids_dir=_path(cfg.get("BIDS_DIR", "")), fmriprep_dir=_path(cfg.get("FMRIPREP_DIR", "")),
         model_file=model_path_from_config(cfg, model), tasks=_as_list(cfg.get("TASKS")),
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
-        validator=validator, container_type=_container_type(cfg),
+        validator=validator, container_type=container_type,
         skip_model_validation=skip_model_validation, actions=actions,
-        progress=progress, cancelled=cancelled, derivatives_dir=_derivatives_dir(cfg), fwhm=cfg.get("FWHM"))
+        progress=progress, cancelled=cancelled, derivatives_dir=_derivatives_dir(cfg), fwhm=cfg.get("FWHM"),
+        extra_checks=check_image(container_type, image) + check_atlases(cfg, actions))
 
 
 # --- recent passing results, reused by the /run gate ---
@@ -854,7 +893,7 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         _as_list(cfg.get("TASKS")), str(cfg.get("SPACE") or ""),
         sorted(s[4:] if s.startswith("sub-") else s for s in _as_list(cfg.get("SUBJECTS"))),
         str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),
-        bool(skip_model_validation),
+        bool(skip_model_validation), bool(cfg.get("ROI") or cfg.get("ROI_CONFIG")),
     ]
     if _reads_outputs(actions):  # only then are the derivatives folder and FWHM read
         payload += [_derivatives_dir(cfg), str(cfg.get("FWHM"))]
@@ -862,6 +901,8 @@ def signature(cfg, model, validator, actions, skip_model_validation):
 
 
 def remember(sig, report):
+    # ponytail: the image is not in the signature (resolving it probes docker); an image switched to a missing one
+    # within the TTL is caught by docker at run start instead of by image_missing
     # ponytail: dataset edits made within the TTL (10 min) are not noticed; fine for a local single-user tool
     if report.get("verdict") not in ("ready", "warnings"):
         return

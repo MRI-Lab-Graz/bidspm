@@ -6,6 +6,7 @@ from typing import Callable
 
 from flask import Flask, Response, jsonify, request
 
+from lib.config import DEFAULT_DOCKER_IMAGE
 from lib.safe_paths import UnsafePath, safe_target
 
 
@@ -29,7 +30,7 @@ def _default_config_payload() -> dict:
         'TASKS': [],
         'VERBOSITY': 3,
         'container_type': 'docker',
-        'docker_image': 'bidspm/bidspm:latest',
+        'docker_image': DEFAULT_DOCKER_IMAGE,
         'apptainer_image': '',
     }
 
@@ -37,7 +38,7 @@ def _default_config_payload() -> dict:
 def _default_container_payload() -> dict:
     return {
         'container_type': 'docker',
-        'docker_image': 'bidspm/bidspm:latest',
+        'docker_image': DEFAULT_DOCKER_IMAGE,
         'apptainer_image': '',
     }
 

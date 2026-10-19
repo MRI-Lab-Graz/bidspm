@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Must match containers/container.json's "docker_image", or bidspm.py won't
 # find the image it just built.
-IMAGE_TAG="bidspm/bidspm:latest"
+IMAGE_TAG="ghcr.io/mri-lab-graz/spm-bids-runner:latest"
 
 echo "🚀 Building BIDSPM Container for MRI Lab Graz"
 echo "   Author: Karl Koschutnig"
