@@ -201,6 +201,17 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 - the model is valid (`model`), and the chosen container tool is installed (`container`, warning)
 - the dataset validator (`validator`)
 
+**Multiple runs.** All runs (and sessions) of a subject/task go into ONE subject-level SPM.mat, one SPM session per run
+(own constant, motion regressors and conditions). Subject-level contrasts AVERAGE a condition over the runs that contain it
+(weights `1/n` per run, SPM's replicate-and-scale; upstream bidspm summed them, so a 3-run subject's contrast was 3x a 1-run
+subject's), so subjects with different run counts are comparable at the group level. The readiness check pairs events,
+preprocessed BOLD and confounds per run by their BIDS entities (`ses`, `task`, `acq`, `run`, ...) and checks every run;
+messages name the run, e.g. `sub-01 ses-1 run-2 (task-x) has preprocessed BOLD but no events file` (`run_unpaired`), or
+`... has events but no preprocessed BOLD` (`preproc_missing`), `... has no confounds file` (`confounds_missing`). A run with
+Stats but without Smooth needs every run smoothed at the project's FWHM (`smoothed_missing`, also tells you which FWHMs do
+exist), and a Dataset-only run needs each subject's SPM.mat and the contrasts the dataset node uses
+(`subject_results_missing`); the run itself also stops a subject whose run lacks its smoothed image instead of modelling fewer runs.
+
 The GUI writes the settings file for you. For command-line use, start from the shipped template once
 (`config/config.json` is your own copy and is not part of the repository):
 
