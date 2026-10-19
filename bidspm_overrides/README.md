@@ -28,6 +28,14 @@ correct behavior.
   node relying on inherited (un-named) DummyContrasts resolved to an empty
   contrast list and the group-level GLM batch was silently skipped with no
   error.
+- **specifySubLvlContrasts.m / specifyDummyContrasts.m**: subject-level t contrasts
+  (explicit with `X: [1]`, and DummyContrasts) gave every run's regressor the full
+  weight, i.e. SUMMED a condition over runs: on study 132 a 3-run subject's
+  `calculation` contrast was `1,1,1` and a 1-run subject's `1`, so con images scaled
+  with the number of runs and group models mixed scales. Weights are now divided by
+  the number of runs that contain the condition (SPM's replicate-and-scale):
+  `1/3,1/3,1/3`. specifySubLvlContrasts.m also adds the Factor-derived cross-run
+  contrasts (`run_<n>_contrast_<name>`).
 - **getRegressorIdx.m**: adds support for a 'condition:pmodName^order' syntax
   in Contrasts/ConditionList so explicit contrasts can target a parametric
   modulation term (e.g. valid_item.item:ai_rating_mod^1), not just a

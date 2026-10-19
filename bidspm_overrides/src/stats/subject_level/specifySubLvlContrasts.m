@@ -131,7 +131,9 @@ function [contrasts, count] = averageAtSubjectLevel(model, contrasts, count, thi
 
     % give them the value specified in the model
     if strcmp(thisContrast.Test, 't')
-      C.C(end, regIdx) = thisContrast.Weights(iCdt);
+      % average over the runs that have this condition (SPM's replicate-and-scale),
+      % so the con image does not scale with the number of runs (upstream sums)
+      C.C(end, regIdx) = thisContrast.Weights(iCdt) / numel(regIdx);
 
     elseif strcmp(thisContrast.Test, 'F')
 
