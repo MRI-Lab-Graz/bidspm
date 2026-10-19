@@ -403,6 +403,72 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
     return out, seen, events
 
 
+def _dataset_contrasts(model_file):
+    """Subject-level contrast names the Dataset node uses (DummyContrasts.Contrasts, Contrasts' ConditionList)."""
+    try:
+        nodes = json.loads(Path(model_file).read_text()).get("Nodes") or []
+        names = set()
+        for node in nodes:
+            if node.get("Level") == "Dataset":
+                names |= set((node.get("DummyContrasts") or {}).get("Contrasts") or [])
+                for con in node.get("Contrasts") or []:
+                    names |= set(con.get("ConditionList") or [])
+        return {n for n in names if isinstance(n, str)}
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
+        return set()
+
+
+def _con_names(stats_dir):
+    """Contrast names from the con_*.nii headers (descrip 'Contrast <n>: <name>', 80 bytes at offset 148): no SPM.mat parse."""
+    names = set()
+    for con in stats_dir.glob("con_*.nii"):
+        try:
+            with open(con, "rb") as fh:
+                fh.seek(148)
+                descrip = fh.read(80).split(b"\0", 1)[0].decode("latin-1")
+        except OSError:
+            continue
+        names.add(descrip.split(": ", 1)[1] if ": " in descrip else descrip)
+    return names
+
+
+def _reads_outputs(actions):
+    """Stats without Smooth (smoothed images) or Dataset without Stats (subject results) need earlier outputs."""
+    a = {str(x).lower() for x in actions or ()}
+    return ("stats" in a and "smooth" not in a) or ("dataset" in a and "stats" not in a)
+
+
+def _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, fmriprep_listing, actions, needed):
+    """Outputs an earlier run must have left: smoothed images for stats without Smooth, subject results for dataset only."""
+    from lib.fast_smooth import missing_smoothed  # lazy: keeps module import light (scipy)
+    if not derivatives_dir or fwhm in (None, ""):
+        return []
+    actions = {str(a).lower() for a in actions or ()}
+    out = []
+    if "stats" in actions and "smooth" not in actions:
+        preproc = _match(fmriprep_listing, f"*task-{task}_*space-{space or '*'}_*desc-preproc_bold.nii*")
+        for src, others in missing_smoothed(fmriprep_dir, Path(derivatives_dir) / "bidspm-preproc", sub, task, space, fwhm, preproc):
+            elsewhere = f"; smoothed images exist for FWHM {', '.join(others)}" if others else ""
+            out.append(_item("smoothed_missing", ERROR,
+                             f"sub-{sub} {_run_label(src)} (task-{task}) has no smoothed image at FWHM {fwhm}{elsewhere}",
+                             f"add Smooth to the actions or run smoothing first (FWHM {fwhm})", sub))
+    if "dataset" in actions and "stats" not in actions:
+        dirs = [d for d in (Path(derivatives_dir) / "bidspm-stats" / f"sub-{sub}").glob(f"task-{task}_space-{space}_FWHM-{fwhm}*")
+                if (d / "SPM.mat").is_file()]
+        fix = "add Stats to the actions, or run the subject-level stats first"
+        if not dirs:
+            out.append(_item("subject_results_missing", ERROR,
+                             f"sub-{sub} (task-{task}) has no subject-level results (SPM.mat) at FWHM {fwhm}", fix, sub))
+        else:
+            lacking = min((sorted(n for n in needed if not any(h == n or (len(h) >= 60 and n.startswith(h)) for h in _con_names(d)))
+                           for d in dirs), key=len)
+            if lacking:
+                out.append(_item("subject_results_missing", ERROR,
+                                 f"sub-{sub} (task-{task}) subject-level results lack the contrast(s) the dataset node needs: "
+                                 + ", ".join(f"'{n}'" for n in lacking), fix, sub))
+    return out
+
+
 def check_model(model_file):
     if not model_file:
         return []
@@ -572,7 +638,8 @@ class _Progress:
             self.emit("validator", "done", "dataset validator finished")
 
 
-def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full, prog):
+def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, container_type, skip_model_validation, full, prog,
+                    derivatives_dir="", fwhm=None, actions=None):
     checks = []
     tasks = resolve_tasks(tasks, model_file, bids_dir)
     if not tasks:
@@ -595,6 +662,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     needs = _model_needs(model_file)
     conditions, _, transformed, _ = needs
     filters = _model_filters(model_file) if full else []
+    needed = _dataset_contrasts(model_file) if model_file else set()
     listings = {}  # one directory walk per subject and root, shared by all tasks
     # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
     index, quote_reported = 0, False
@@ -607,6 +675,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                 if sub not in listings:
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
                 items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub], filters)
+                items += _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, listings[sub][1], actions, needed)
                 if quote_reported:  # ONE quote warning per run, not one per subject
                     items = [i for i in items if i["id"] != "tsv_quotes"]
                 quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
@@ -635,7 +704,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
 
 
 def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, validator, container_type,
-                   skip_model_validation, actions, prog):
+                   skip_model_validation, actions, prog, derivatives_dir="", fwhm=None):
     full = not actions or any(str(a).lower() in ("stats", "dataset") for a in actions)
     prog.emit("folders", "start", "checking the folders")
     checks = check_dirs(bids_dir, fmriprep_dir)
@@ -654,7 +723,7 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
         prog.emit("validator", "start", "running the dataset validator")
     try:
         checks += _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects,
-                                  container_type, skip_model_validation, full, prog)
+                                  container_type, skip_model_validation, full, prog, derivatives_dir, fwhm, actions)
         while pool and not prog.future.done() and not prog.stop():  # cancel stays responsive while waiting
             concurrent.futures.wait([prog.future], timeout=0.2)
     finally:
@@ -670,15 +739,16 @@ def _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, v
 
 def run_preflight(bids_dir, fmriprep_dir, model_file="", tasks=(), space="", subjects=(),
                   validator="auto", container_type="", skip_model_validation=False, actions=None,
-                  progress=None, cancelled=None):
-    """actions=None checks everything; without 'stats'/'dataset' only folders, subjects, preproc and validator are checked.
+                  progress=None, cancelled=None, derivatives_dir="", fwhm=None):
+    """actions=None checks everything (but not earlier outputs: smoothed images for stats without Smooth, subject results
+    for dataset only; those need derivatives_dir and fwhm); without 'stats'/'dataset' only folders, subjects, preproc and validator are checked.
 
     progress(event) gets {"phase", "state", "message", "index", "total", "subject", "elapsed", "items"} per step and a
     final {"phase": "done", "verdict"}; cancelled() is polled between subjects. Both must be callables (TypeError
     otherwise); exceptions they raise are swallowed. A cancelled run returns {"verdict": "cancelled", "checks": [found so far]}."""
     prog = _Progress(progress, cancelled)
     report = _run_preflight(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, validator, container_type,
-                            skip_model_validation, actions, prog)
+                            skip_model_validation, actions, prog, derivatives_dir, fwhm)
     prog.emit("done", "done", report["verdict"], verdict=report["verdict"])
     return report
 
@@ -701,6 +771,11 @@ def model_path_from_config(cfg, model=""):
     return str(resolve_model_file(value, base, cwd_first=bool(model)))
 
 
+def _derivatives_dir(cfg):
+    """DERIVATIVES_DIR, empty -> WD (as load_config); "" when neither is set."""
+    return str(_path(cfg.get("DERIVATIVES_DIR") or "") or _path(cfg.get("WD") or "") or "")
+
+
 def _container_type(cfg):
     """Same resolution as the run (lib.config.resolve_container_config); "" when none applies."""
     from .config import resolve_container_config
@@ -720,7 +795,7 @@ def run_preflight_from_config(cfg, model="", validator="auto", skip_model_valida
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
         validator=validator, container_type=_container_type(cfg),
         skip_model_validation=skip_model_validation, actions=actions,
-        progress=progress, cancelled=cancelled)
+        progress=progress, cancelled=cancelled, derivatives_dir=_derivatives_dir(cfg), fwhm=cfg.get("FWHM"))
 
 
 # --- recent passing results, reused by the /run gate ---
@@ -748,6 +823,8 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),
         bool(skip_model_validation),
     ]
+    if _reads_outputs(actions):  # only then are the derivatives folder and FWHM read
+        payload += [_derivatives_dir(cfg), str(cfg.get("FWHM"))]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 

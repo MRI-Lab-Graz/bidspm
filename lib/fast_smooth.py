@@ -129,6 +129,28 @@ def _fmriprep_to_preproc_path(fmriprep_path: Path, fmriprep_root: Path, preproc_
     return target
 
 
+def missing_smoothed(fmriprep_dir, preproc_root, subject, task, space, fwhm, preproc=None):
+    """[(fMRIPrep preproc run, FWHMs it IS smoothed at)] for every run of sub/task without a desc-smth{fwhm} image.
+
+    The runs come from fMRIPrep (``preproc``: that subject's desc-preproc files, else globbed); stats models every one."""
+    fmriprep_dir, preproc_root = Path(fmriprep_dir), Path(preproc_root)
+    if preproc is None:
+        sub_dir = fmriprep_dir / f"sub-{subject}"
+        preproc = sorted(sub_dir.rglob(f"*task-{task}_*space-{space}_*desc-preproc_bold.nii*")) if sub_dir.is_dir() else []
+    sub_dir = preproc_root / f"sub-{subject}"
+    have = {p.name for p in sub_dir.rglob("*desc-smth*")} if sub_dir.is_dir() else set()  # by name: one walk
+    out = []
+    for src in preproc:
+        name = _smth_path(src, fwhm).name.removesuffix(".gz")
+        if name in have or name + ".gz" in have:
+            continue
+        before, after = name.split(f"desc-smth{fwhm}_", 1)
+        others = sorted({n[len(before) + len("desc-smth"):].split("_", 1)[0] for n in have
+                         if n.startswith(before + "desc-smth") and n.endswith(("_" + after, "_" + after + ".gz"))})
+        out.append((src, others))
+    return out
+
+
 def _gzip_uncompressed_size(gz_path: Path) -> Optional[int]:
     """Read the ISIZE trailer of a gzip file (uncompressed size mod 2**32).
 

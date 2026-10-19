@@ -30,7 +30,7 @@ from .spm_standalone import (
 )
 from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
-from .fast_smooth import smooth_subjects_parallel
+from .fast_smooth import missing_smoothed, smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
@@ -623,7 +623,11 @@ def check_subject_processed(
         if not preproc_dir.exists():
             return False
         pattern = f"*task-{task}*space-{config.SPACE}*desc-smth{config.FWHM}_bold.nii*"
-        return len(list(preproc_dir.rglob(pattern))) > 0
+        if not list(preproc_dir.rglob(pattern)):
+            return False
+        fmriprep_dir = getattr(config, "FMRIPREP_DIR", None)  # every run, not just one (multi-run subjects)
+        return not (fmriprep_dir and missing_smoothed(fmriprep_dir, preproc_dir.parent, subject_label, task,
+                                                      config.SPACE, config.FWHM))
 
     elif action == "stats":
         stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / f"sub-{subject_label}"
@@ -1436,6 +1440,15 @@ class Pipeline:
                 self._log(f">>> Smoothing: subject {subject}, task {task}")
                 if not self._run_container_action("smooth", subject, task):
                     success = False
+
+        if 'stats' in self.options.actions and not self.options.dry_run:
+            missing = missing_smoothed(self.config.FMRIPREP_DIR, self.config.DERIVATIVES_DIR / "bidspm-preproc",
+                                       subject, task, self.config.SPACE, self.config.FWHM)
+            if missing:  # bidspm would silently model only the smoothed runs
+                self._log_error(f"Stats for subject {subject}, task {task}: no smoothed image (FWHM {self.config.FWHM}) for "
+                                + ", ".join(src.name for src, _ in missing)
+                                + "; add Smooth to the actions or run smoothing first")
+                return False
 
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")

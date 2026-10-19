@@ -284,7 +284,7 @@ def test_run_gate_remembers_warnings_too(tmp_path):
 MODEL = {"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"]}, "Nodes": []}
 
 
-RUN_ACTIONS = ["stats", "dataset", "report"]  # ticked on the analysis page
+RUN_ACTIONS = ["smooth", "stats", "dataset", "report"]  # ticked on the analysis page
 
 
 def _form_job(client, tmp_path, model_body, **cfg_over):
