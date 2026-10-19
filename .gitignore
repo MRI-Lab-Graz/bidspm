@@ -181,3 +181,7 @@ spm12_standalone/
 octave_packages/
 debug_stats_141K599V_crom.m
 bidspm_local_smooth_141T271A_crom.m
+
+# Apptainer scratch dirs created by scripts/setup.sh
+.apptainer_tmp/
+.apptainer_cache/
