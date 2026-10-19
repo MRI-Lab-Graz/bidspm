@@ -592,8 +592,11 @@ def model_path_from_config(cfg, model=""):
 def _container_type(cfg):
     """Same resolution as the run (lib.config.resolve_container_config); "" when none applies."""
     from .config import resolve_container_config
-    with contextlib.redirect_stdout(io.StringIO()):  # the auto-detect prints its choice
-        found = resolve_container_config(None, cfg)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # the auto-detect prints its choice
+            found = resolve_container_config(None, cfg)
+    except (Exception, SystemExit):  # a broken container file is the run's problem to report, not the check's
+        return ""
     return found.container_type if found else ""
 
 

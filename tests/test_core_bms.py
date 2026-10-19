@@ -135,7 +135,8 @@ class TestRunBms(unittest.TestCase):
             model["Nodes"][0]["Name"] = "ModelB"
             (d / "b.json").write_text(_json.dumps(model), encoding="utf-8")
 
-            with patch("lib.config.auto_select_container_config", return_value=None):
+            with patch("lib.config.auto_select_container_config", return_value=None), \
+                    patch("lib.core.load_config", return_value=_make_config(d)):
                 result = core.run_bms(
                     config_file="ignored.json",
                     container_config_file=None,
