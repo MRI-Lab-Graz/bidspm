@@ -257,7 +257,7 @@ same actions and flag as Run, so a passing check is reused by the next Run when 
 Validator modes: `auto` (default: PRISM if the BIDS root has a `project.json`, otherwise plain BIDS), `prism` (PRISM + BIDS, forced), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
 is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.
 
-The version (2.0.1) comes from `pyproject.toml` and is shown in the GUI footer.
+The version (2.1.0) comes from `pyproject.toml` and is shown in the GUI footer.
 
 ## Analysis page stages
 
@@ -746,7 +746,7 @@ write to `/opt/spm`.)
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU GPL v3.0 only](LICENSE) (GPL-3.0-only): it ships overrides derived from bidspm, which is GPL-3.0 without an "or later" grant. SPM and Octave are credited in the image NOTICE.
 
 The container image is a separate work: it is distributed under GPL-3.0 (bidspm is GPL-3.0, SPM GPL-2.0-or-later,
 GNU Octave GPL-3.0-or-later); see `/usr/share/doc/spm-bids-runner/NOTICE` in the image and
