@@ -188,12 +188,18 @@ def check_docker_availability():
         log_error(f"Failed to check Docker status: {e}")
 
 
+# Octave startup chatter that only hides bidspm's own lines; never matches WARNING/ERROR.
+_NOISE = re.compile(r"^\s*$|^warning: function .* shadows a built-in function")
+
+
 def run_command(cmd_list, capture_output=False, failure_markers=()):
     """Run a command; ``failure_markers`` are output strings that make an exit-0 run a failure
     (bidspm's launcher is try/catch + exit, so a caught error still exits 0)."""
     seen = []
 
     def watch(line: str) -> None:
+        if not _NOISE.search(line):
+            print(line)
         if not seen:
             seen.extend(m for m in failure_markers if m in line)
 
@@ -202,6 +208,8 @@ def run_command(cmd_list, capture_output=False, failure_markers=()):
 
     if result.success and seen:
         log_error_non_fatal(f"Command exited 0 but printed '{seen[0]}': {' '.join(cmd_list)}")
+        tail = [l for l in result.output.splitlines() if not _NOISE.search(l)][-30:]
+        log("Output before the error:\n" + "\n".join(tail))
         return False
 
     if result.success:
