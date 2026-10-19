@@ -158,7 +158,7 @@ def _model_filters(model_file):
                     seen.add(column)
                     column = source[column]
                 out.append((column, op, value))
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
         return []
     return out
 
