@@ -551,21 +551,22 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
             'Contrasts': contrasts,
         })
 
-    all_contrast_names = []
+    run_contrasts = {}
     for node in nodes:
         for contrast in node.get('Contrasts', []):
-            if contrast['Name'] not in all_contrast_names:
-                all_contrast_names.append(contrast['Name'])
+            run_contrasts.setdefault(contrast['Name'], contrast)
 
-    nodes.extend(second_level_nodes(all_contrast_names))
-
-    return {
+    second, edges = second_level_nodes(list(run_contrasts.values()), source=nodes[0]['Name'])
+    model = {
         'Name': 'default-model',
         'BIDSModelVersion': '1.0.0',
         'Description': 'Default BIDS stats model – generated from dataset events files.',
         'Input': {'task': tasks},
-        'Nodes': nodes,
+        'Nodes': nodes + second,
     }
+    if len(nodes) == 1:  # ponytail: several Run nodes (one per task) cannot share one Subject node via Edges; left as before
+        model['Edges'] = edges
+    return model
 
 
 def _extract_task_name(path: str) -> str:
