@@ -1508,7 +1508,7 @@ class Pipeline:
         mask, which inflates voxel count (and ReML/estimation runtime) for every GLM.
         """
         config = self.config
-        pattern = f"sub-{subject}_*task-{task}_space-{config.SPACE}_desc-brain_mask.nii*"
+        pattern = f"sub-{subject}_*task-{task}_*space-{config.SPACE}_desc-brain_mask.nii*"  # run-/acq- may sit between
         for mask_src in sorted(config.FMRIPREP_DIR.rglob(pattern)):
             rel = mask_src.relative_to(config.FMRIPREP_DIR)
             is_gz = mask_src.name.endswith(".nii.gz")
