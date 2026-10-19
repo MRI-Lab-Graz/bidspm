@@ -420,7 +420,7 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
     root = Path(bids_dir)
     pattern = f"*task-{task}_*events.tsv"
     files = sorted({p for p in func_files(root) if fnmatch.fnmatchcase(p.name, pattern)} | set(root.glob(f"task-{task}_events.tsv")))
-    values, numeric_bad, truncated, used, warnings = {}, set(), set(), 0, []
+    values, numeric_bad, truncated, used, warnings, all_na = {}, set(), set(), 0, [], {}
     for path in files[:max_files]:
         try:
             cols, rows = read_tsv(path)
@@ -430,6 +430,9 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
         if QUOTE_WARNING not in warnings and (quoted(cols) or quoted(rows[0].values() if rows else [])):
             warnings.append(QUOTE_WARNING)
         warnings += [w for c in duplicates(cols) if (w := f"duplicate column {c} (e.g. {path.name})") and not any(x.startswith(f"duplicate column {c} ") for x in warnings)]
+        for col in cols:  # bids-matlab reads such a column as numeric: a Filter on it crashes that subject
+            if col not in ("onset", "duration", "trial_type") and rows and all((r.get(col) or "").strip() in NA for r in rows):
+                all_na.setdefault(col, []).append(path.name)
         for row in rows:
             for col, val in row.items():
                 if not col or col in ("onset", "duration") or val is None:
@@ -447,7 +450,10 @@ def scan_events(bids_dir, task, max_files=300, max_values=200):
                     truncated.add(col)
                 else:
                     seen.add(val)
-    return {"files_truncated": len(files) > max_files,
+    warnings += [f"column {c} is n/a in every row of {len(f)} events file(s) (e.g. {f[0]}); a Filter on it (recipes 'Only valid/correct trials', "
+                 f"'Split a condition by a column') crashes those subjects in bidspm: exclude them or fix the events"
+                 for c, f in sorted(all_na.items()) if values.get(c)]  # columns without any value are not offered
+    return {"files_truncated": len(files) > max_files, "all_na_files": {c: len(f) for c, f in sorted(all_na.items())},
             "columns": {c: sorted(v) for c, v in values.items()},
             "numeric": sorted(c for c, v in values.items() if v and c not in numeric_bad),
             "files": used, "truncated": sorted(truncated), "warnings": warnings}
