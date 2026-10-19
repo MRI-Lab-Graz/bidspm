@@ -4,10 +4,12 @@ Pure functions, no Flask. Every check returns a list of items
 {"id", "severity": "error"|"warn", "subject", "message", "fix"}; run_preflight() returns {"verdict", "checks"}.
 """
 import concurrent.futures
+import contextlib
 import copy
 import csv
 import fnmatch
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -587,13 +589,24 @@ def model_path_from_config(cfg, model=""):
     return str(resolve_model_file(value, base, cwd_first=bool(model)))
 
 
+def _container_type(cfg):
+    """Same resolution as the run (lib.config.resolve_container_config); "" when none applies."""
+    from .config import resolve_container_config
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # the auto-detect prints its choice
+            found = resolve_container_config(None, cfg)
+    except (Exception, SystemExit):  # a broken container file is the run's problem to report, not the check's
+        return ""
+    return found.container_type if found else ""
+
+
 def run_preflight_from_config(cfg, model="", validator="auto", skip_model_validation=False, actions=None,
                               progress=None, cancelled=None):
     return run_preflight(
         bids_dir=_path(cfg.get("BIDS_DIR", "")), fmriprep_dir=_path(cfg.get("FMRIPREP_DIR", "")),
         model_file=model_path_from_config(cfg, model), tasks=_as_list(cfg.get("TASKS")),
         space=cfg.get("SPACE", ""), subjects=_as_list(cfg.get("SUBJECTS")),
-        validator=validator, container_type=cfg.get("container_type", ""),
+        validator=validator, container_type=_container_type(cfg),
         skip_model_validation=skip_model_validation, actions=actions,
         progress=progress, cancelled=cancelled)
 

@@ -34,7 +34,8 @@ def test_exported_project_settings_with_empty_derivatives_load(tmp_path):
 def test_run_with_empty_folders_is_a_json_400_preflight_report(tmp_path):
     settings = tmp_path / "s.json"
     settings.write_text(json.dumps(EMPTY))
-    with patch("webapp.web_execution_api.subprocess.Popen") as popen:
+    with patch("webapp.web_execution_api.subprocess.Popen") as popen, \
+            patch("lib.config.auto_select_container_config", return_value=None):  # its docker probe is a Popen too
         res = app.test_client().post("/run", json={"actions": ["smooth"], "settings": str(settings), "validator": "skip"})
     assert res.status_code == 400 and res.is_json
     assert res.get_json()["preflight"]["verdict"] == "blocked"

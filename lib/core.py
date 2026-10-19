@@ -28,7 +28,7 @@ from .spm_standalone import (
     is_estimated,
     write_estimation_job,
 )
-from .config import Config, ContainerConfig, load_config, load_container_config
+from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
@@ -491,18 +491,12 @@ def run_bms(
             errors.extend(collision_errors)
             return {"success": False, "errors": errors, "dry_run_commands": []}
 
-        container_file = container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
+        config = load_config(config_file)
+        container_config = resolve_container_config(container_config_file, config.CONTAINER_SETTINGS)
 
-        if not container_file or not Path(container_file).exists():
+        if container_config is None:
             errors.append("No container configuration found (BMS requires container execution).")
             return {"success": False, "errors": errors, "dry_run_commands": []}
-
-        config = load_config(config_file)
-
-        container_config = load_container_config(container_file)
 
         if container_config.container_type == "docker":
             check_docker_availability()
@@ -1125,14 +1119,9 @@ class Pipeline:
         self.config = load_config(self.options.config_file)
 
         # Load container config
-        container_file = self.options.container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
-
-        if container_file and Path(container_file).exists():
-            self.container_config = load_container_config(container_file)
-        else:
+        self.container_config = resolve_container_config(
+            self.options.container_config_file, self.config.CONTAINER_SETTINGS)
+        if self.container_config is None:
             self._log_error("No container configuration found")
             return False
 
@@ -1418,9 +1407,15 @@ class Pipeline:
         success = True
 
         if 'smooth' in self.options.actions:
-            self._log(f">>> Smoothing: subject {subject}, task {task}")
-            if not self._run_container_action("smooth", subject, task):
-                success = False
+            # The fast backend already smoothed (or skipped, or reported) this subject up front;
+            # smoothing again in the container is slow and overwrites its output.
+            if self.options.smooth_backend == 'fast' and check_subject_processed(
+                    self.config, subject, task, "smooth"):
+                self._log(f">>> Smoothing: subject {subject}, task {task} already done by the fast backend")
+            else:
+                self._log(f">>> Smoothing: subject {subject}, task {task}")
+                if not self._run_container_action("smooth", subject, task):
+                    success = False
 
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
@@ -1547,6 +1542,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(max(0, self.config.VERBOSITY - 1))
             ]
+            validation_args = []  # bidspm's smooth CLI has no --skip_validation (exit 2)
         elif action == "stats":
             args = [
                 "/raw", "/derivatives", "subject", cli_action or "stats",
@@ -1557,6 +1553,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(self.config.VERBOSITY)
             ]
+            validation_args = self._validation_args()
             args += list(extra_args)
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
@@ -1569,7 +1566,7 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
+            self.container_config, self.config, args + validation_args, self.model_file_path,
             extra_env=self._container_env(),
         )
 

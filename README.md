@@ -74,6 +74,8 @@ The tool supports multiple container configurations:
 - `containers/container.json` - Docker for macOS/development
 - `containers/container_apptainer.json` - Apptainer for Linux/HPC
 
+Which one a run uses: a `--container` file wins; otherwise the `container_type` / `docker_image` / `apptainer_image` / `spm_standalone_image` keys of the run settings (the GUI project's container settings); otherwise the platform auto-detect picks one of these files.
+
 **Example Docker config (macOS):**
 ```json
 {
