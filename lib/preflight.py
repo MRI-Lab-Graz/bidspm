@@ -704,8 +704,8 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
                 items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub], filters,
                                                          inputs)
-                selected = [p for p in listings[sub][1] if run_selected(p, inputs)]
-                items += _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, selected, actions, needed)
+                in_model = [p for p in listings[sub][1] if run_selected(p, inputs)]
+                items += _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, in_model, actions, needed)
                 if quote_reported:  # ONE quote warning per run, not one per subject
                     items = [i for i in items if i["id"] != "tsv_quotes"]
                 quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
