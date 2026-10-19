@@ -97,6 +97,43 @@ class TestStartGuiScript(unittest.TestCase):
         self.assertEqual(self.proc.returncode, 0)
         self.assertIn("--host", out)
 
+    def _listener(self, *marker):
+        """A python process listening on self.port; extra argv entries let it pose as another command line."""
+        code = ("import http.server,sys;"
+                f"http.server.HTTPServer(('127.0.0.1',{self.port}),http.server.BaseHTTPRequestHandler).serve_forever()")
+        proc = subprocess.Popen([sys.executable, "-c", code, *marker], start_new_session=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: proc.poll() is None and os.killpg(proc.pid, signal.SIGKILL))
+        self.assertTrue(self.wait_listening(10), "fake listener did not start")
+        return proc
+
+    def test_a_foreign_process_on_the_port_is_not_killed(self):
+        foreign = self._listener()
+        self.start("--no-browser")
+        out, _ = self.proc.communicate(timeout=30)
+        self.assertNotEqual(self.proc.returncode, 0)
+        self.assertIsNone(foreign.poll(), "the foreign listener was killed")
+        self.assertIn(str(foreign.pid), out)
+        self.assertIn("--port", out)
+
+    def test_an_old_gui_instance_on_the_port_is_replaced(self):
+        old = self._listener("bidspm_gui.py")
+        self.start("--no-browser")
+        old.wait(timeout=15)  # SIGTERM'd by the new instance
+        self.assertTrue(self.wait_listening(30), "new GUI never came up")
+
+    def test_the_startup_self_check_reaches_a_redirected_log(self):
+        log = self.dir / "gui.log"
+        full = {**os.environ, "BIDSPM_VENV": str(self.dir / "venv"), "BIDSPM_PORT": str(self.port),
+                "HOME": str(self.dir / "home")}
+        with open(log, "w") as fh:
+            self.proc = subprocess.Popen(["bash", str(SCRIPT), "--no-browser"], env=full, cwd=str(self.dir),
+                                         start_new_session=True, stdout=fh, stderr=subprocess.STDOUT)
+            end = time.time() + 30
+            while time.time() < end and "Pre-flight check" not in log.read_text():
+                time.sleep(0.2)
+        self.assertIn("Pre-flight check", log.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

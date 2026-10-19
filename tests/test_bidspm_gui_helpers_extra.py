@@ -118,6 +118,7 @@ class TestKillExistingOnPort(unittest.TestCase):
             return [1234] if calls["count"] == 1 else []
 
         with patch("bidspm_gui._pids_listening_on_port", side_effect=fake_pids), \
+             patch("bidspm_gui._command_of", return_value="python bidspm_gui.py"), \
              patch("bidspm_gui.os.kill") as mock_kill:
             result = kill_existing_on_port(5100)
 
@@ -126,6 +127,7 @@ class TestKillExistingOnPort(unittest.TestCase):
 
     def test_force_kills_lingering_process_after_grace_period(self):
         with patch("bidspm_gui._pids_listening_on_port", return_value=[1234]), \
+             patch("bidspm_gui._command_of", return_value="python bidspm_gui.py"), \
              patch("bidspm_gui.os.kill"), \
              patch("bidspm_gui.time.time", side_effect=[0, 100, 100]), \
              patch("bidspm_gui.time.sleep"):
@@ -135,6 +137,7 @@ class TestKillExistingOnPort(unittest.TestCase):
 
     def test_ignores_processes_that_already_exited(self):
         with patch("bidspm_gui._pids_listening_on_port", return_value=[1234]), \
+             patch("bidspm_gui._command_of", return_value="python bidspm_gui.py"), \
              patch("bidspm_gui.os.kill", side_effect=ProcessLookupError):
             result = kill_existing_on_port(5100)
         self.assertFalse(result)
