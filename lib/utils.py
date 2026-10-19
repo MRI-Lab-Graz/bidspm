@@ -188,12 +188,18 @@ def check_docker_availability():
         log_error(f"Failed to check Docker status: {e}")
 
 
+# Octave startup chatter that only hides bidspm's own lines; never matches WARNING/ERROR.
+_NOISE = re.compile(r"^\s*$|^warning: function .* shadows a built-in function")
+
+
 def run_command(cmd_list, capture_output=False, failure_markers=()):
     """Run a command; ``failure_markers`` are output strings that make an exit-0 run a failure
     (bidspm's launcher is try/catch + exit, so a caught error still exits 0)."""
     seen = []
 
     def watch(line: str) -> None:
+        if not _NOISE.search(line):
+            print(line)
         if not seen:
             seen.extend(m for m in failure_markers if m in line)
 
@@ -202,6 +208,8 @@ def run_command(cmd_list, capture_output=False, failure_markers=()):
 
     if result.success and seen:
         log_error_non_fatal(f"Command exited 0 but printed '{seen[0]}': {' '.join(cmd_list)}")
+        tail = [l for l in result.output.splitlines() if not _NOISE.search(l)][-30:]
+        log("Output before the error:\n" + "\n".join(tail))
         return False
 
     if result.success:
@@ -319,6 +327,28 @@ def validate_events_availability(config, subjects_to_process: list, task: str) -
         return False
 
     return True
+
+
+def ensure_preproc_dataset_description(preproc_dir: Path):
+    """Write <derivatives>/bidspm-preproc/dataset_description.json if the folder exists and the file does not.
+
+    bidspm's stats step requires it (getData.m: validationInputFile); only the container smooth wrote it, so data from the
+    fast smoothing backend (or from before this fix) made every stats run fail. Same content as bidspm's own file."""
+    path = Path(preproc_dir) / "dataset_description.json"
+    if not Path(preproc_dir).is_dir() or path.exists():
+        return
+    description = {
+        "Name": "", "BIDSVersion": "1.6.0", "DatasetType": "derivative", "License": "CC0",
+        "GeneratedBy": [{"Name": "bidspm-preproc", "Version": "v4.0.0", "Description": "",
+                         "CodeURL": "https://github.com/cpp-lln-lab/bidspm", "Container": {"Type": "", "Tag": ""}}],
+        "SourceDatasets": [{"DOI": "", "URL": "", "Version": ""}],
+    }
+    tmp = path.with_name(f".dataset_description.{os.getpid()}.tmp")  # atomic: parallel workers may race here
+    try:
+        tmp.write_text(json.dumps(description, indent=2))
+        os.replace(tmp, path)
+    except OSError as e:
+        log_debug(f"Could not write {path}: {e}")
 
 
 def ensure_derivatives_dataset_description(derivatives_dir: Path):

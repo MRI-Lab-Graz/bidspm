@@ -49,7 +49,7 @@ def test_auto_contrasts_one_per_regressor_and_second_level_mirrors_them():
     run = run_node(result)
     assert run["Contrasts"][0] == {"Name": "a", "ConditionList": ["trial_type.a"], "Weights": [1], "Test": "t"}
     subject, dataset = result["model"]["Nodes"][1:]
-    assert subject["Model"]["X"] == names and [c["Name"] for c in dataset["Contrasts"]] == names
+    assert subject["Contrasts"] == run["Contrasts"] and dataset["DummyContrasts"]["Contrasts"] == names
 
 
 def test_pair_contrast_weights_are_balanced():
@@ -97,10 +97,31 @@ def test_missing_trial_type_column_raises():
         build_model(choices(), {**SCAN, "columns": {"rt": ["1"]}})
 
 
-def test_second_level_nodes_shape():
-    subject, dataset = second_level_nodes(["a"])
-    assert subject["GroupBy"] == ["subject", "contrast"] and dataset["Model"]["X"] == [1]
-    assert second_level_nodes([])[0]["Model"]["X"] == ["contrast"]
+RUN_CONTRASTS = [{"Name": "a", "ConditionList": ["trial_type.a"], "Weights": [1], "Test": "t"},
+                 {"Name": "a_gt_b", "ConditionList": ["trial_type.a", "trial_type.b"], "Weights": [1, -1], "Test": "t"}]
+
+
+def test_second_level_structure_is_the_one_verified_in_bidspm():
+    # Golden: this exact structure ran to a dataset-level SPM.mat per contrast in bidspm 4.0.0 (track W report, attempt C).
+    nodes, edges = second_level_nodes(RUN_CONTRASTS)
+    assert nodes == [
+        {"Level": "Subject", "Name": "subject_level", "GroupBy": ["subject", "contrast"],
+         "Model": {"Type": "glm", "X": [1]}, "Contrasts": RUN_CONTRASTS},
+        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"], "Model": {"Type": "glm", "X": [1]},
+         "DummyContrasts": {"Test": "t", "Contrasts": ["a", "a_gt_b"]}},
+    ]
+    assert edges == [{"Source": "run_level", "Destination": "subject_level"},
+                     {"Source": "subject_level", "Destination": "dataset", "Filter": {"contrast": ["a", "a_gt_b"]}}]
+    assert "DummyContrasts" not in nodes[0]  # Subject DummyContrasts add condition-named duplicates in bidspm
+    assert nodes[0]["Contrasts"] is not RUN_CONTRASTS  # a copy, not shared with the Run node
+
+
+def test_build_model_emits_the_verified_second_level_and_edges():
+    model = build_model(choices(), SCAN)["model"]
+    run, subject, dataset = model["Nodes"]
+    assert "DummyContrasts" not in run and "DummyContrasts" not in subject
+    assert subject["Contrasts"] == run["Contrasts"]
+    assert model["Edges"] == second_level_nodes(run["Contrasts"])[1]
 
 
 @pytest.mark.parametrize("bad", [
@@ -375,8 +396,16 @@ def test_parametric_modulator_matches_the_141_format_and_adds_contrasts():
     assert node["Model"]["Software"]["SPM"]["ParametricModulations"] == [
         {"Name": "ai_rating_mod", "Conditions": ["valid_item.item"], "Values": ["ai_rating"], "PolynomialExpansion": 2}]
     by_name = {c["Name"]: c for c in node["Contrasts"]}
-    assert by_name["valid_item_item_ai_rating_mod_1"]["ConditionList"] == ["valid_item.item:ai_rating_mod^1"]
-    assert by_name["valid_item_item_ai_rating_mod_2"]["ConditionList"] == ["valid_item.item:ai_rating_mod^2"]
+    assert by_name["valid_item_item_ai_rating_mod_lin"]["ConditionList"] == ["valid_item.item:ai_rating_mod^1"]
+    assert by_name["valid_item_item_ai_rating_mod_quad"]["ConditionList"] == ["valid_item.item:ai_rating_mod^2"]
+
+
+def test_pmod_contrast_names_do_not_end_in_a_digit():
+    # bidspm (BidsModel.validateConditionNames) warns that names ending in _<digit> may break results
+    result = build_model(choices(recipes=[pmod(polynomial=3), pmod(polynomial=1)]), SCAN)
+    names = result["preview"]["contrasts"]
+    assert "item_ai_rating_mod_cub" in names and "item_ai_rating_mod2_lin" in names
+    assert not [n for n in names if n[-1].isdigit()] and len(set(names)) == len(names)
 
 
 def test_polynomial_one_omits_the_expansion_key():
@@ -524,7 +553,7 @@ def test_wizard_reproduces_the_141_run_node():
 
 def test_dataset_node_is_named_dataset():
     # bidspm looks the Dataset node up by exact name; preflight warns otherwise
-    assert second_level_nodes(["a"])[1]["Name"] == "dataset"
+    assert second_level_nodes(RUN_CONTRASTS)[0][1]["Name"] == "dataset"
 
 
 def spm_names(node):

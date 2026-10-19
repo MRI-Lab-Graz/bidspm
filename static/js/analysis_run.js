@@ -81,10 +81,12 @@ function processRunLogLine(line) {
 function parseFailedSubjects() {
     const logText = document.getElementById('terminal')?.textContent || '';
     const failedSubjects = [];
-    const failRe = /(?:FAILED|Failed|❌)\s*(sub-[A-Za-z0-9]+)/g;
+    // 'FAILED sub-X' (older messages) or '❌ ... for subject X, task T' (current pipeline messages, no sub- prefix)
+    const failRe = /(?:FAILED|Failed|❌)\s*(sub-[A-Za-z0-9]+)|❌[^\n]*?\bsubject\s+([A-Za-z0-9_-]+)/g;
     let m;
     while ((m = failRe.exec(logText)) !== null) {
-        if (!failedSubjects.includes(m[1])) failedSubjects.push(m[1]);
+        const id = m[1] || m[2];
+        if (!failedSubjects.includes(id)) failedSubjects.push(id);
     }
     const summaryEl = document.getElementById('run-failure-summary');
     const listEl = document.getElementById('run-failure-list');

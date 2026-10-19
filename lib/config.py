@@ -5,7 +5,7 @@ import platform
 import subprocess
 import os
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 
@@ -29,6 +29,7 @@ class Config:
     SMOOTH_TIMEOUT_SECONDS: int = 900
     STATS_TIMEOUT_SECONDS: int = 300
     DATASET_TIMEOUT_SECONDS: int = 300
+    CONTAINER_SETTINGS: dict = field(default_factory=dict)  # the container_type / *_image keys of the run settings
 
 
 @dataclass
@@ -37,6 +38,9 @@ class ContainerConfig:
     docker_image: str = ""
     apptainer_image: str = ""
     spm_standalone_image: str = ""  # optional SPM standalone image (Docker) or SIF path (Apptainer)
+
+
+_CONTAINER_KEYS = ('container_type', 'docker_image', 'apptainer_image', 'spm_standalone_image')
 
 
 def clean_path(value):
@@ -105,6 +109,7 @@ def load_config(config_file: str) -> Config:
         SMOOTH_TIMEOUT_SECONDS=max(1, smooth_timeout),
         STATS_TIMEOUT_SECONDS=max(1, stats_timeout),
         DATASET_TIMEOUT_SECONDS=max(1, dataset_timeout),
+        CONTAINER_SETTINGS={k: v for k, v in data.items() if k in _CONTAINER_KEYS},
     )
 
 
@@ -127,6 +132,22 @@ def load_container_config(config_file: str) -> ContainerConfig:
         apptainer_image=data.get("apptainer_image", ""),
         spm_standalone_image=data.get("spm_standalone_image", ""),
     )
+
+
+def resolve_container_config(container_file, settings=None):
+    """The container for a run, used by the run and the readiness check alike:
+    an explicit ``--container`` file, else the container keys of the run settings
+    (container_type + that type's image), else the platform auto-detect files. None if nothing applies."""
+    if not container_file:
+        data = settings or {}
+        kind = str(data.get("container_type") or "").lower()
+        image = data.get(f"{kind}_image") if kind in ("docker", "apptainer") else None
+        if image:
+            return ContainerConfig(container_type=kind, docker_image=data.get("docker_image") or "",
+                                   apptainer_image=data.get("apptainer_image") or "",
+                                   spm_standalone_image=data.get("spm_standalone_image") or "")
+        container_file = auto_select_container_config()
+    return load_container_config(container_file) if container_file and Path(container_file).exists() else None
 
 
 def detect_platform_and_suggest_container():

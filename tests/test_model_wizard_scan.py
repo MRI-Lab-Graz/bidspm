@@ -51,3 +51,15 @@ def test_bids_tasks_matches_discover_tasks_without_walking_imaging_folders(tmp_p
     write(tmp_path, "sub-02/anat/sub-02_T1w.nii.gz", "")
     write(tmp_path, "sub-02/anat/sub-02_task-nope_T1w.nii.gz", "")
     assert bids_tasks(tmp_path) == discover_tasks(tmp_path) == ["x", "y"]
+
+
+def test_all_na_column_is_counted_per_file_and_warned(tmp_path):
+    header = "onset\tduration\ttrial_type\tresponse_validity\tnever"
+    write(tmp_path, "sub-01/func/sub-01_task-x_events.tsv", ev((1, 1, "item", "valid", "n/a"), (2, 1, "item", "n/a", "n/a"), header=header))
+    write(tmp_path, "sub-02/func/sub-02_task-x_events.tsv", ev((1, 1, "item", "n/a", "n/a"), (2, 1, "item", "", "n/a"), header=header))
+    r = scan_events(tmp_path, "x")
+    assert r["all_na_files"] == {"response_validity": 1, "never": 2}
+    assert not [w for w in r["warnings"] if "never" in w]  # no values anywhere: the wizard does not offer it
+    assert r["columns"]["response_validity"] == ["valid"]  # still offered: the other subjects use it
+    (w,) = [w for w in r["warnings"] if "response_validity" in w]
+    assert "1 events file" in w and "sub-02_task-x_events.tsv" in w and "Filter" in w

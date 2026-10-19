@@ -134,6 +134,26 @@ class TestAnalysisPageInBrowser(unittest.TestCase):
         self.assertEqual(got, ["dataset", "dataset", "dataset_2"])
         self.assertEqual(self.errors, [])
 
+    def test_failed_subject_summary_understands_the_pipeline_messages(self):
+        """The pipeline prints '❌ ... for subject <id>, task <t>' (ids without the sub- prefix); the old pattern needed 'sub-'."""
+        page = self.open_page()
+        go_to_stage(page, "run")
+        shown = page.evaluate("""() => {
+            document.getElementById('terminal').textContent = [
+                '>>> Processing task: crom',
+                '\u274c Design step wrote no SPM.mat for subject 141F1171Z, task crom',
+                '\u274c Stats for subject 01, task motor: the container exited 0 but wrote no SPM.mat',
+                'FAILED sub-OLD1 something',
+                '\u274c Design step wrote no SPM.mat for subject 141F1171Z, task crom',
+                'Subjects failed: 3'].join('\\n');
+            document.getElementById('run-failure-summary').classList.add('d-none');
+            parseFailedSubjects();
+            const el = document.getElementById('run-failure-summary');
+            return {visible: !el.classList.contains('d-none'), list: document.getElementById('run-failure-list').textContent};
+        }""")
+        self.assertTrue(shown["visible"])
+        self.assertEqual(shown["list"], "141F1171Z, 01, sub-OLD1")
+
     def test_transformer_launch_node_inference(self):
         page = self.open_page()
         page.evaluate("openModelEditor({scrollIntoView: false, showStatus: false})")

@@ -28,14 +28,14 @@ from .spm_standalone import (
     is_estimated,
     write_estimation_job,
 )
-from .config import Config, ContainerConfig, load_config, load_container_config
+from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
     run_command, validate_space_availability, validate_events_availability,
-    ensure_derivatives_dataset_description, cleanup_tmp_directories
+    ensure_derivatives_dataset_description, ensure_preproc_dataset_description, cleanup_tmp_directories
 )
 
 
@@ -491,18 +491,12 @@ def run_bms(
             errors.extend(collision_errors)
             return {"success": False, "errors": errors, "dry_run_commands": []}
 
-        container_file = container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
+        config = load_config(config_file)
+        container_config = resolve_container_config(container_config_file, config.CONTAINER_SETTINGS)
 
-        if not container_file or not Path(container_file).exists():
+        if container_config is None:
             errors.append("No container configuration found (BMS requires container execution).")
             return {"success": False, "errors": errors, "dry_run_commands": []}
-
-        config = load_config(config_file)
-
-        container_config = load_container_config(container_file)
 
         if container_config.container_type == "docker":
             check_docker_availability()
@@ -1125,14 +1119,9 @@ class Pipeline:
         self.config = load_config(self.options.config_file)
 
         # Load container config
-        container_file = self.options.container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
-
-        if container_file and Path(container_file).exists():
-            self.container_config = load_container_config(container_file)
-        else:
+        self.container_config = resolve_container_config(
+            self.options.container_config_file, self.config.CONTAINER_SETTINGS)
+        if self.container_config is None:
             self._log_error("No container configuration found")
             return False
 
@@ -1275,8 +1264,10 @@ class Pipeline:
                     log_file=self.log_file, errors=self.errors, warnings=self.warnings)
             if not _as_list(self.config.TASKS):
                 self._log(f">>> No TASKS in the config, using: {', '.join(tasks)}")
+            dataset_failed = False
             for task in tasks:
                 self._log(f">>> Processing task: {task}")
+                task_failed_from = len(subjects_failed)
 
                 if 'smooth' in self.options.actions and self.options.smooth_backend == 'fast':
                     self._log(f">>> Fast-smoothing {len(subjects)} subject(s) in parallel (task {task})")
@@ -1342,7 +1333,7 @@ class Pipeline:
                         success = self._process_subject(subject, task)
                         if success:
                             subjects_processed.append(subject)
-                            actions_completed.update(self.options.actions)
+                            actions_completed.update(set(self.options.actions) - {'dataset'})
                         else:
                             subjects_failed.append(subject)
                 else:
@@ -1367,18 +1358,35 @@ class Pipeline:
                                 success = False
                             if success:
                                 subjects_processed.append(subject)
-                                actions_completed.update(self.options.actions)
+                                actions_completed.update(set(self.options.actions) - {'dataset'})
                             else:
                                 subjects_failed.append(subject)
 
                 # Dataset-level stats
                 if 'dataset' in self.options.actions:
-                    self._log(f">>> Dataset stats: task {task}")
-                    self._run_container_dataset_action(task)
-                    actions_completed.add('dataset')
+                    failed = sorted(set(subjects_failed[task_failed_from:]))
+                    good = [s for s in subjects if s not in failed]
+                    # ponytail: reason = last error naming the subject (substring match); per-subject error records if it misleads
+                    why = "; ".join(f"{s}: {next((e for e in reversed(self.errors) if s in e), 'see the log above')}"
+                                    for s in failed)
+                    if len(good) < 2:
+                        self._log_error(f"Dataset stats for task {task} skipped: {len(good)} subject(s) with usable "
+                                        f"subject-level results, a group analysis needs at least 2. Failed: {why or 'none'}")
+                        dataset_failed = True
+                    else:
+                        if failed:
+                            msg = f"Dataset stats for task {task}: failed subject(s) left out: {why}"
+                            self.warnings.append(msg)
+                            self._log(f"⚠️  {msg}")
+                        self._log(f">>> Dataset stats: task {task} ({len(good)} subjects)")
+                        if self._run_container_dataset_action(task, good):
+                            actions_completed.add('dataset')
+                        else:
+                            self._log_error(f"Dataset stats for task {task} failed; see the container log above")
+                            dataset_failed = True
 
             return PipelineResult(
-                success=len(subjects_failed) == 0,
+                success=len(subjects_failed) == 0 and not dataset_failed,
                 subjects_processed=list(set(subjects_processed)),
                 subjects_failed=list(set(subjects_failed)),
                 actions_completed=list(actions_completed),
@@ -1416,11 +1424,18 @@ class Pipeline:
     def _process_subject(self, subject: str, task: str) -> bool:
         """Process a single subject for the given task."""
         success = True
+        ensure_preproc_dataset_description(self.config.DERIVATIVES_DIR / "bidspm-preproc")  # needed by stats; fast smoothing never wrote it
 
         if 'smooth' in self.options.actions:
-            self._log(f">>> Smoothing: subject {subject}, task {task}")
-            if not self._run_container_action("smooth", subject, task):
-                success = False
+            # The fast backend already smoothed (or skipped, or reported) this subject up front;
+            # smoothing again in the container is slow and overwrites its output.
+            if self.options.smooth_backend == 'fast' and check_subject_processed(
+                    self.config, subject, task, "smooth"):
+                self._log(f">>> Smoothing: subject {subject}, task {task} already done by the fast backend")
+            else:
+                self._log(f">>> Smoothing: subject {subject}, task {task}")
+                if not self._run_container_action("smooth", subject, task):
+                    success = False
 
         if 'stats' in self.options.actions:
             self._log(f">>> Stats: subject {subject}, task {task}")
@@ -1547,6 +1562,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(max(0, self.config.VERBOSITY - 1))
             ]
+            validation_args = []  # bidspm's smooth CLI has no --skip_validation (exit 2)
         elif action == "stats":
             args = [
                 "/raw", "/derivatives", "subject", cli_action or "stats",
@@ -1557,6 +1573,7 @@ class Pipeline:
                 "--fwhm", str(self.config.FWHM),
                 "--verbosity", str(self.config.VERBOSITY)
             ]
+            validation_args = self._validation_args()
             args += list(extra_args)
             if self.options.node_name:
                 args.extend(["--node_name", self.options.node_name])
@@ -1569,7 +1586,7 @@ class Pipeline:
             return False
 
         cmd, _ = build_container_command(
-            self.container_config, self.config, args + self._validation_args(), self.model_file_path,
+            self.container_config, self.config, args + validation_args, self.model_file_path,
             extra_env=self._container_env(),
         )
 
@@ -1580,8 +1597,8 @@ class Pipeline:
 
         return run_command(cmd, failure_markers=_BIDSPM_FAILURE_MARKERS)
     
-    def _run_container_dataset_action(self, task: str) -> bool:
-        """Run dataset-level stats via container."""
+    def _run_container_dataset_action(self, task: str, subjects=None) -> bool:
+        """Run dataset-level stats via container for `subjects` (default: the config's SUBJECTS, else all)."""
         args = [
             "/raw", "/derivatives", "dataset", "stats",
             "--preproc_dir", "/derivatives/bidspm-preproc",
@@ -1590,8 +1607,9 @@ class Pipeline:
             "--fwhm", str(self.config.FWHM),
             "--verbosity", str(self.config.VERBOSITY)
         ]
-        if self.config.SUBJECTS:
-            args.extend(["--participant_label"] + list(self.config.SUBJECTS))
+        subjects = subjects or self.config.SUBJECTS
+        if subjects:
+            args.extend(["--participant_label"] + list(subjects))
         if self.options.node_name:
             args.extend(["--node_name", self.options.node_name])
         if self.options.name_by_confounds:

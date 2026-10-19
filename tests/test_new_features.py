@@ -238,6 +238,7 @@ class TestNewFeatures(unittest.TestCase):
             bids_dir.mkdir()
             derivatives_dir.mkdir()
             (fmriprep_dir / "sub-01").mkdir(parents=True)
+            (fmriprep_dir / "sub-02").mkdir(parents=True)  # a group analysis needs >= 2 subjects
             apptainer_image.write_text("fake", encoding="utf-8")
 
             container_cfg.write_text(
