@@ -199,7 +199,11 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 - the model is valid (`model`), and the chosen container tool is installed (`container`, warning)
 - the dataset validator (`validator`)
 
+The GUI writes the settings file for you. For command-line use, start from the shipped template once
+(`config/config.json` is your own copy and is not part of the repository):
+
 ```bash
+cp config/config.example.json config/config.json   # then edit the paths
 python bidspm.py --preflight -s config/config.json [--validator auto|prism|bids|skip | --skip-validator]
 ```
 
