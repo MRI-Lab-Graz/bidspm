@@ -127,6 +127,73 @@ def _model_needs(model_file):
     return conditions, nuisance, transformed, produced
 
 
+QUERY_OPS = (">=", "<=", "==", "~=", ">", "<")  # bids-matlab get_query: the first of these found in the query wins
+NA_VALUES = {"n/a", "N/A", "nan", "NaN", ""}
+
+
+def _model_filters(model_file):
+    """(column, op, value) per Filter of the Run nodes, the column traced back through single Input -> Output steps."""
+    out = []
+    try:
+        model = json.loads(Path(model_file).read_text()) if model_file else {}
+        for node in model.get("Nodes") or []:
+            if node.get("Level") != "Run":
+                continue
+            instructions = (node.get("Transformations") or {}).get("Instructions") or []
+            source = {}
+            for ins in instructions:
+                i, o = ins.get("Input"), ins.get("Output")
+                i, o = (i[0] if isinstance(i, list) and len(i) == 1 else i), (o[0] if isinstance(o, list) and len(o) == 1 else o)
+                if isinstance(i, str) and isinstance(o, str) and i != o:
+                    source.setdefault(o, i)
+            for ins in instructions:
+                query = ins.get("Query")
+                query = query[0] if isinstance(query, list) and query else query
+                if str(ins.get("Name", "")).lower() != "filter" or not isinstance(query, str):
+                    continue
+                op = next((op for op in QUERY_OPS if op in query), None)
+                if op is None:
+                    continue
+                column, value = (t.strip() for t in query.split(op, 1))
+                seen = set()
+                while column in source and column not in seen:
+                    seen.add(column)
+                    column = source[column]
+                out.append((column, op, value))
+    except (OSError, ValueError, AttributeError, TypeError, RecursionError):
+        return []
+    return out
+
+
+def _filter_problems(sub, name, cols, rows, filters, produced):
+    """bids-matlab reads an all-n/a column as numeric and a numeric column compared with text crashes identify_rows.m."""
+    out = []
+    for column, op, value in filters:
+        if column in produced and column not in cols:  # made by a step we cannot trace (e.g. several outputs)
+            continue
+        if column not in cols:
+            problem = f"has no {column} column"
+        else:
+            usable = [r[column] for r in rows if (r.get(column) or "").strip() not in NA_VALUES]
+            if not usable:
+                problem = f"has n/a (or nothing) in every row of {column}"
+            elif _numeric(value) or not all(_numeric(v) for v in usable):
+                continue
+            else:
+                problem = f"has only numeric values in {column}, but the Filter compares it with {value!r} (bids-matlab crashes)"
+        out.append(_item("filter_column", ERROR, f"sub-{sub}: {name} {problem}; the model filters on {column}{op}{value}",
+                         f"This subject has no usable values in {column}: exclude the subject or fix the events.", sub))
+    return out
+
+
+def _numeric(v):
+    try:
+        float(v)
+        return True
+    except ValueError:
+        return False
+
+
 def _model_tasks(model_file):
     """The model's Input.task as a list of strings; [] when absent or malformed."""
     try:
@@ -218,7 +285,7 @@ def _events_files(bids_dir, bids_listing, task):
     return _match(bids_listing, f"*task-{task}_*events.tsv") or sorted(Path(bids_dir).glob(f"task-{task}_events.tsv"))
 
 
-def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True, listings=None):
+def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=True, listings=None, filters=()):
     """Returns (items, trial_type values seen in this subject's events files, events files).
 
     listings: optional (bids, fmriprep) _func_listing results, so callers walk each subject tree once."""
@@ -254,7 +321,7 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
                              "Rename or remove the repeated column; each column name may appear once.", sub))
             events_ok = False
         problems = _events_problems(sub, path.name, cols, rows)
-        out += problems
+        out += problems + _filter_problems(sub, path.name, cols, rows, filters, produced)
         events_ok = events_ok and all(p["severity"] != ERROR for p in problems)
         if conditions and not transformed:
             if "trial_type" not in cols:
@@ -483,6 +550,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
     prog.emit("subjects", "start", f"checking {total} subject/task pairs", index=0, total=total)
     needs = _model_needs(model_file)
     conditions, _, transformed, _ = needs
+    filters = _model_filters(model_file) if full else []
     listings = {}  # one directory walk per subject and root, shared by all tasks
     # ponytail: all subjects' func listings are held for the run; fine up to a few thousand subjects
     index, quote_reported = 0, False
@@ -494,7 +562,7 @@ def _subject_checks(bids_dir, fmriprep_dir, model_file, tasks, space, subjects, 
                     return checks
                 if sub not in listings:
                     listings[sub] = (_func_listing(bids_dir, sub), _func_listing(fmriprep_dir, sub))
-                items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub])
+                items, seen, events = check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full, listings[sub], filters)
                 if quote_reported:  # ONE quote warning per run, not one per subject
                     items = [i for i in items if i["id"] != "tsv_quotes"]
                 quote_reported = quote_reported or any(i["id"] == "tsv_quotes" for i in items)
