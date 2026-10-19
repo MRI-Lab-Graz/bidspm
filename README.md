@@ -205,7 +205,11 @@ Before a run, bidspm can check whether the BIDS dataset, the fMRIPrep output and
 (own constant, motion regressors and conditions). Subject-level t contrasts AVERAGE each condition over the runs that contain it
 (weights `1/n` per run, SPM's replicate-and-scale; upstream bidspm summed them, so a 3-run subject's contrast was 3x a 1-run
 subject's); session-level and cross-session contrasts average the runs within each session, so `ses-1 > ses-2` sums to zero.
-Single-run subjects and F contrasts are unchanged. The readiness check pairs events,
+Single-run subjects and F contrasts are unchanged. **Results from earlier versions:** multi-run subject con images were
+n× larger (n = runs with the condition; betas themselves are unchanged); subject-level T/F maps are identical, but group
+results change unless every subject had the same number of runs, so re-run stats and dataset for multi-run data. The first
+line of every stats log says which overrides the image has (`bidspm runner overrides: ... runs-averaged ...`; `unknown`
+means an older image that still sums runs: rebuild it). The readiness check pairs events,
 preprocessed BOLD and confounds per run by their BIDS entities (`ses`, `task`, `acq`, `run`, ...) and checks every run;
 messages name the run, e.g. `sub-01 ses-1 run-2 (task-x) has preprocessed BOLD but no events file` (`run_unpaired`), or
 `... has events but no preprocessed BOLD` (`preproc_missing`), `... has no confounds file` (`confounds_missing`). A run with

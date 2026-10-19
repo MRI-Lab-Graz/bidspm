@@ -33,7 +33,7 @@ def _sess(names):
 SES = {}  # run number -> session label (tests that need sessions set their own via _contrasts(ses=...))
 
 
-def _contrasts(subject_node, run=RUN, names=NAMES, ses=None, node="subject_level"):
+def _contrasts(subject_node, run=RUN, names=NAMES, ses=None, node="subject_level", image=None, mount=True):
     global SES
     SES = ses or {}
     model = {"Name": "m", "BIDSModelVersion": "1.0.0", "Input": {"task": ["x"]}, "Nodes": [run, subject_node],
@@ -48,10 +48,10 @@ def _contrasts(subject_node, run=RUN, names=NAMES, ses=None, node="subject_level
                   f"con = specifyContrasts(bm, SPM, '{node}'); "
                   "for i = 1:numel(con), printf('CON %s %s\\n', con(i).name, sprintf('%.10g ', con(i).C)); end")
         mounts = []
-        for f in OVR.glob("*.m"):
+        for f in OVR.glob("*.m") if mount else ():
             mounts += ["-v", f"{f}:{IN_IMAGE}/{f.name}:ro"]
         out = subprocess.run(["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
-                              "-v", f"{tmp}:/t", *mounts, "--entrypoint", "octave-cli", IMAGE, "--eval", script],
+                              "-v", f"{tmp}:/t", *mounts, "--entrypoint", "octave-cli", image or IMAGE, "--eval", script],
                              capture_output=True, text=True, timeout=300)
     found = {}
     for line in out.stdout.splitlines():

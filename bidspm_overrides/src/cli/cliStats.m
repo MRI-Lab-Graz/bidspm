@@ -1,4 +1,12 @@
 function cliStats(varargin)
+
+  % local override marker: tells from the log which runner overrides the image has (OVERRIDES_VERSION at the bidspm root)
+  versionFile = fullfile(fileparts(fileparts(fileparts(mfilename('fullpath')))), 'OVERRIDES_VERSION');
+  overridesVersion = 'unknown (no OVERRIDES_VERSION: image predates the run-averaging fix)';
+  if exist(versionFile, 'file')
+    overridesVersion = strtrim(fileread(versionFile));
+  end
+  fprintf(1, 'bidspm runner overrides: %s\n', overridesVersion);
   % Run stats on bids datasets.
   %
   % Type ``bidspm help`` for more info.
