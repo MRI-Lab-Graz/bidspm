@@ -556,7 +556,7 @@ def _build_default_model(tasks: list, trial_types_by_task: dict) -> dict:
         for contrast in node.get('Contrasts', []):
             run_contrasts.setdefault(contrast['Name'], contrast)
 
-    second, edges = second_level_nodes(list(run_contrasts.values()), source=nodes[0]['Name'])
+    second, edges = second_level_nodes(list(run_contrasts.values()), source=nodes[0]['Name'] if nodes else 'run_level')
     model = {
         'Name': 'default-model',
         'BIDSModelVersion': '1.0.0',

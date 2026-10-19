@@ -187,3 +187,8 @@ def test_default_model_uses_the_verified_second_level_structure():
     assert dataset["DummyContrasts"]["Contrasts"] == ["left", "right"]
     assert model["Edges"] == [{"Source": "run_level", "Destination": "subject_level"},
                               {"Source": "subject_level", "Destination": "dataset", "Filter": {"contrast": ["left", "right"]}}]
+
+
+def test_default_model_without_tasks_still_builds():
+    model = _build_default_model([], {})
+    assert [n["Name"] for n in model["Nodes"]] == ["subject_level", "dataset"] and "Edges" not in model
