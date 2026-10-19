@@ -84,7 +84,7 @@ class TestRunBms(unittest.TestCase):
             container_file.write_text("{}", encoding="utf-8")
 
             with patch("lib.core.load_config", return_value=config), \
-                 patch("lib.core.load_container_config", return_value=container_config), \
+                 patch("lib.config.load_container_config", return_value=container_config), \
                  patch("lib.core.check_command"), \
                  patch("lib.core.build_container_command", return_value=(["apptainer", "run"], "/mnt/models")), \
                  patch("lib.core.run_command") as mock_run_command:
@@ -108,7 +108,7 @@ class TestRunBms(unittest.TestCase):
             container_file.write_text("{}", encoding="utf-8")
 
             with patch("lib.core.load_config", return_value=config), \
-                 patch("lib.core.load_container_config", return_value=container_config), \
+                 patch("lib.config.load_container_config", return_value=container_config), \
                  patch("lib.core.check_docker_availability"), \
                  patch("lib.core.build_container_command", return_value=(["docker", "run"], "/mnt/models")), \
                  patch("lib.core.run_command", return_value=False) as mock_run_command:

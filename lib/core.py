@@ -28,7 +28,7 @@ from .spm_standalone import (
     is_estimated,
     write_estimation_job,
 )
-from .config import Config, ContainerConfig, load_config, load_container_config
+from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
 from .fast_smooth import smooth_subjects_parallel
 from .utils import (
@@ -491,18 +491,12 @@ def run_bms(
             errors.extend(collision_errors)
             return {"success": False, "errors": errors, "dry_run_commands": []}
 
-        container_file = container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
+        config = load_config(config_file)
+        container_config = resolve_container_config(container_config_file, config.CONTAINER_SETTINGS)
 
-        if not container_file or not Path(container_file).exists():
+        if container_config is None:
             errors.append("No container configuration found (BMS requires container execution).")
             return {"success": False, "errors": errors, "dry_run_commands": []}
-
-        config = load_config(config_file)
-
-        container_config = load_container_config(container_file)
 
         if container_config.container_type == "docker":
             check_docker_availability()
@@ -1125,14 +1119,9 @@ class Pipeline:
         self.config = load_config(self.options.config_file)
 
         # Load container config
-        container_file = self.options.container_config_file
-        if not container_file:
-            from .config import auto_select_container_config
-            container_file = auto_select_container_config()
-
-        if container_file and Path(container_file).exists():
-            self.container_config = load_container_config(container_file)
-        else:
+        self.container_config = resolve_container_config(
+            self.options.container_config_file, self.config.CONTAINER_SETTINGS)
+        if self.container_config is None:
             self._log_error("No container configuration found")
             return False
 
