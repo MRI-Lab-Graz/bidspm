@@ -56,6 +56,42 @@ class TestSmoothOnce(unittest.TestCase):
         self.assertIn("smooth", calls)
 
 
+class TestPreprocDatasetDescription(unittest.TestCase):
+    """bidspm's stats step reads <derivatives>/bidspm-preproc/dataset_description.json (getData.m: validationInputFile); the fast
+    smoothing never wrote it (only the container smooth did), so every stats run on a fresh project failed."""
+
+    def _run(self, p):
+        with patch.object(p, "_run_container_action", return_value=True), \
+                patch.object(p, "_copy_brain_mask"), patch.object(p, "_run_stats_standalone", return_value=True):
+            return p._process_subject("01", "motor")
+
+    def test_stats_after_fast_smoothing_finds_a_dataset_description(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = _pipeline(tmp)
+            _fake_smoothed(p)
+            self._run(p)
+            import json
+            desc = json.loads((p.config.DERIVATIVES_DIR / "bidspm-preproc" / "dataset_description.json").read_text())
+        self.assertEqual(desc["DatasetType"], "derivative")
+        self.assertTrue(desc["BIDSVersion"])
+        self.assertEqual(desc["GeneratedBy"][0]["Name"], "bidspm-preproc")
+
+    def test_an_existing_description_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = _pipeline(tmp)
+            _fake_smoothed(p)
+            path = p.config.DERIVATIVES_DIR / "bidspm-preproc" / "dataset_description.json"
+            path.write_text('{"Name": "mine"}')
+            self._run(p)
+            self.assertEqual(path.read_text(), '{"Name": "mine"}')
+
+    def test_nothing_is_created_when_there_is_no_smoothed_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = _pipeline(tmp)
+            self._run(p)
+            self.assertFalse((p.config.DERIVATIVES_DIR / "bidspm-preproc").exists())
+
+
 class TestFlagsPerAction(unittest.TestCase):
     def _args(self, action, n_before=0):
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,6 +15,7 @@ Could not find specified file for mask/montage.
 Warning: OpenGL Startup options have been removed.
 warning: No voxels survive height threshold at u=3.1
    Subjects failed: 0
+[08:24:48] bidspm - WARNING\t\t\t\toverwriteDir
 """
 
 

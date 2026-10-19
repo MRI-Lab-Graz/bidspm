@@ -35,7 +35,7 @@ from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
     run_command, validate_space_availability, validate_events_availability,
-    ensure_derivatives_dataset_description, cleanup_tmp_directories
+    ensure_derivatives_dataset_description, ensure_preproc_dataset_description, cleanup_tmp_directories
 )
 
 
@@ -1424,6 +1424,7 @@ class Pipeline:
     def _process_subject(self, subject: str, task: str) -> bool:
         """Process a single subject for the given task."""
         success = True
+        ensure_preproc_dataset_description(self.config.DERIVATIVES_DIR / "bidspm-preproc")  # needed by stats; fast smoothing never wrote it
 
         if 'smooth' in self.options.actions:
             # The fast backend already smoothed (or skipped, or reported) this subject up front;
