@@ -740,13 +740,15 @@ def signature(cfg, model, validator, actions, skip_model_validation):
         str(_path(cfg.get("BIDS_DIR") or "")), str(_path(cfg.get("FMRIPREP_DIR") or "")), content,
         _as_list(cfg.get("TASKS")), str(cfg.get("SPACE") or ""),
         sorted(s[4:] if s.startswith("sub-") else s for s in _as_list(cfg.get("SUBJECTS"))),
-        str(cfg.get("container_type") or ""), _container(cfg)[1], validator, sorted(str(a) for a in actions or []),
+        str(cfg.get("container_type") or ""), validator, sorted(str(a) for a in actions or []),
         bool(skip_model_validation), bool(cfg.get("ROI") or cfg.get("ROI_CONFIG")),
     ]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
 
 def remember(sig, report):
+    # ponytail: the image is not in the signature (resolving it probes docker); an image switched to a missing one
+    # within the TTL is caught by docker at run start instead of by image_missing
     # ponytail: dataset edits made within the TTL (10 min) are not noticed; fine for a local single-user tool
     if report.get("verdict") not in ("ready", "warnings"):
         return

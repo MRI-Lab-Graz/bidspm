@@ -105,7 +105,7 @@ Which one a run uses: a `--container` file wins; otherwise the `container_type` 
 
 - No Python needed: `scripts/setup.sh` makes uv download its own Python 3.12 (internet access is needed for the first setup)
 - Docker (your user in the `docker` group) or Apptainer
-- Disk: about 5 GB for the image plus 0.7 GB for the Python environment
+- Disk: about 3.5 GB for the image plus 0.7 GB for the Python environment
 - BIDS-compliant dataset
 - Preprocessed fMRI data (e.g., from fMRIPrep)
 
@@ -131,7 +131,7 @@ docker build -f containers/dockerfile/dockerfile -t ghcr.io/mri-lab-graz/spm-bid
 (`containers/dockerfile/build_mri_lab_container.sh` wraps the same docker build.) The default
 `containers/container.json` already points at `ghcr.io/mri-lab-graz/spm-bids-runner:latest` (the one image-name setting is
 `DEFAULT_DOCKER_IMAGE` in `lib/config.py`), so nothing needs editing. A cold build (no cache) took about
-TIMING_PLACEHOLDER on the lab server and needs internet access (Debian, GitHub, PyPI, npm).
+5 minutes on the lab server (image 3.4 GB) and needs internet access (Debian, GitHub, PyPI, npm).
 
 `scripts/setup.sh` downloads uv into `./build/uv` with curl (curl and internet access are required; an uv already
 installed on the system is not used).

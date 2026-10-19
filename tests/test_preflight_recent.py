@@ -100,13 +100,11 @@ def test_signature_normalises_tasks_and_subjects():
 
 def test_signature_ignores_irrelevant_keys_and_tracks_relevant_ones():
     base = {"BIDS_DIR": "/b", "TASKS": ["x"]}
-    junk = {**base, "FWHM": 6, "WD": "/w", "NODE_NAME": "n", "VERBOSITY": 3, "unifiedStudyConfig": {"a": 1}}
+    junk = {**base, "FWHM": 6, "WD": "/w", "NODE_NAME": "n", "VERBOSITY": 3, "docker_image": "i", "unifiedStudyConfig": {"a": 1}}
     assert sig(base) == sig(junk)
     for key, value in (("BIDS_DIR", "/c"), ("FMRIPREP_DIR", "/f"), ("TASKS", ["y"]), ("SPACE", "T1w"),
                        ("container_type", "docker"), ("ROI", True)):
         assert sig(base) != sig({**base, key: value}), key
-    docker = {**base, "container_type": "docker"}
-    assert sig({**docker, "docker_image": "i"}) != sig({**docker, "docker_image": "j"})  # the image the check inspects
 
 
 def test_remember_then_recent_returns_report():

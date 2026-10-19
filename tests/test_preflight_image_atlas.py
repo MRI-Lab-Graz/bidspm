@@ -3,7 +3,6 @@ import subprocess
 from unittest.mock import patch
 
 from lib import preflight
-from lib.config import DEFAULT_DOCKER_IMAGE
 from lib.preflight import check_atlases, check_image, docker_image_present, run_preflight_from_config, signature
 from tests.preflight_support import make_trees
 
@@ -81,7 +80,7 @@ def test_wired_into_the_readiness_check(tmp_path):
     assert {"image_missing", "atlas_missing"} <= set(_ids(report["checks"]))
 
 
-def test_signature_changes_with_the_image():
-    base = {"BIDS_DIR": "/b", "container_type": "docker"}
-    assert signature({**base, "docker_image": "a"}, "", "skip", [], False) != \
-        signature({**base, "docker_image": DEFAULT_DOCKER_IMAGE}, "", "skip", [], False)
+def test_signature_tracks_roi_settings_but_never_probes_docker():
+    with patch("lib.preflight.subprocess.run", side_effect=AssertionError("no docker call")):
+        assert signature({"BIDS_DIR": "/b", "ROI": True}, "", "skip", [], False) != \
+            signature({"BIDS_DIR": "/b"}, "", "skip", [], False)
