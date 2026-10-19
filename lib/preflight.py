@@ -220,7 +220,7 @@ def resolve_tasks(tasks, model_file, bids_dir):
     return _as_list(tasks) or (_model_tasks(model_file) if model_file else []) or discover_tasks(Path(bids_dir))
 
 
-def _scan_length_warning(sub, preproc, events_rows):
+def _scan_length_warning(sub, preproc, events_rows, events_name):
     import nibabel as nib
     sidecar = preproc.with_name(preproc.name.replace(".nii.gz", ".json"))
     try:
@@ -230,7 +230,7 @@ def _scan_length_warning(sub, preproc, events_rows):
     except Exception:  # advisory only: corrupt images, null TR, odd events must never block or crash
         return []
     if end > scan + tr:
-        return [_item("scan_length", WARN, f"sub-{sub}: events run to {end:.0f}s but the scan is only {scan:.0f}s long",
+        return [_item("scan_length", WARN, f"sub-{sub} {_run_label(preproc)}: {events_name} runs to {end:.0f}s but the scan is only {scan:.0f}s long",
                       "Check that the events file belongs to this run.", sub)]
     return []
 
@@ -242,10 +242,33 @@ def _column_indices(cols, name):
     return [i for i, c in enumerate(cols) if fnmatch.fnmatch(c, name)]
 
 
+# entities fMRIPrep adds to its outputs; the rest (sub, ses, task, acq, run, echo, ...) identifies the run
+_DERIVED_ENTITIES = {"space", "res", "den", "desc", "cohort"}
+
+
+def _run_key(path):
+    """The run's identifying entities as a frozenset of (key, value): pairs events, preproc and confounds files."""
+    parts = path.name.split(".")[0].split("_")[:-1]  # drop the suffix (bold, events, timeseries)
+    return frozenset(tuple(p.split("-", 1)) for p in parts if "-" in p and p.split("-", 1)[0] not in _DERIVED_ENTITIES)
+
+
+def _run_label(path):
+    """'ses-1 run-2'-style name of the run for messages ('task-x' when nothing else tells runs apart)."""
+    pairs = dict(_run_key(path))
+    shown = [f"{k}-{pairs[k]}" for k in ("ses", "acq", "run", "echo") if k in pairs]
+    return " ".join(shown) or f"task-{pairs.get('task', '?')}"
+
+
+def _events_for(preproc, events):
+    """The most specific events file that applies to this BOLD run (BIDS inheritance: its entities are a subset)."""
+    key = _run_key(preproc)
+    found = [e for e in events if _run_key(e) <= key]
+    return max(found, key=lambda e: len(_run_key(e))) if found else None
+
+
 def _volumes(preproc, confounds):
     """Number of volumes of the preproc image this confounds file belongs to; None when unknown (never blocks)."""
-    prefix = confounds.name.split("_desc-confounds")[0] + "_"
-    mine = [p for p in preproc if p.name.startswith(prefix)]
+    mine = [p for p in preproc if _run_key(p) == _run_key(confounds)]
     if len(mine) != 1:
         return None
     try:
@@ -303,15 +326,15 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
     if not events:
         out.append(_item("events_missing", ERROR, f"sub-{sub} has no events file for task-{task}",
                          "Add sub-*/func/*_task-*_events.tsv to the BIDS dataset.", sub))
-    events_ok = True
+    rows_by_file = {}  # events files that read cleanly -> rows, for the per-run scan-length check
     for path in events:
         try:
             cols, rows = _read_tsv(path)
         except (OSError, UnicodeDecodeError, csv.Error) as e:
             out.append(_item("events_columns", ERROR, f"{path.name} cannot be read as UTF-8 text ({e})",
                              "Save the events file as a tab-separated UTF-8 text file.", sub))
-            events_ok = False
             continue
+        events_ok = True
         event_cols |= set(cols)
         if has_quotes(path):
             out.append(_item("tsv_quotes", WARN, QUOTE_WARNING, f"Re-export {path.name} without quoting the fields.", sub))
@@ -331,8 +354,23 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
                 events_ok = False
             else:
                 seen |= {r["trial_type"] for r in rows}
-    if len(preproc) == 1 and len(events) == 1 and events_ok:
-        out += _scan_length_warning(sub, preproc[0], rows)
+        if events_ok:
+            rows_by_file[path] = rows
+    if events and preproc:  # pair every run: BOLD <-> events (per-run scan length), events without BOLD
+        for p in preproc:
+            e = _events_for(p, events)
+            if e is None:
+                out.append(_item("run_unpaired", ERROR,
+                                 f"sub-{sub} {_run_label(p)} (task-{task}) has preprocessed BOLD but no events file",
+                                 "Add the events file for this run; bidspm would model the run without any conditions.", sub))
+            elif e in rows_by_file:
+                out += _scan_length_warning(sub, p, rows_by_file[e], e.name)
+        keys = [_run_key(p) for p in preproc]
+        for e in events:
+            if not any(_run_key(e) <= k for k in keys):
+                out.append(_item("preproc_missing", ERROR,
+                                 f"sub-{sub} {_run_label(e)} (task-{task}) has events but no preprocessed BOLD in space {space or '(any)'}",
+                                 f"Re-run fMRIPrep for this run, or remove {e.name} if the run was dropped.", sub))
     nuisance = [n for n in nuisance if n not in event_cols and n not in produced]
     if nuisance:
         files = _match(fmriprep_listing, f"*task-{task}_*desc-confounds_timeseries.tsv")
@@ -340,6 +378,12 @@ def check_subject_task(bids_dir, fmriprep_dir, sub, task, space, needs, full=Tru
             out.append(_item("confounds_missing", ERROR,
                              f"sub-{sub} has no confounds file for task-{task}",
                              f"Re-run fMRIPrep; confounds are needed for {', '.join(nuisance)}.", sub))
+        have = {_run_key(f) for f in files}
+        for p in preproc if files else ():
+            if _run_key(p) not in have:
+                out.append(_item("confounds_missing", ERROR,
+                                 f"sub-{sub} {_run_label(p)} (task-{task}) has no confounds file",
+                                 f"Re-run fMRIPrep; confounds are needed for {', '.join(nuisance)}.", sub))
         for f in files:
             try:
                 cols, first = read_head(f)
