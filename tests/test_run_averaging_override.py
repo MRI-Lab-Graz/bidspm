@@ -4,7 +4,7 @@ Upstream bidspm gives every run's regressor the full weight, so a 3-run subject'
 3x that of a 1-run subject (verified on study 132: c = 1,1,1). Group models then mix scales.
 Opt-in like test_image_smoke (needs the built image; the override files are mounted over the image's copies):
 
-    BIDSPM_TEST_IMAGE=bidspm:spm26-atlas python -m pytest tests/test_run_averaging_override.py
+    BIDSPM_TEST_IMAGE=<your-built-image> python -m pytest tests/test_run_averaging_override.py
 """
 import json
 import os
