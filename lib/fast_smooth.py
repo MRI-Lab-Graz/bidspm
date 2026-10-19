@@ -36,9 +36,18 @@ from .config import Config
 FWHM_TO_SIGMA = 1.0 / (2.0 * (2.0 * np.log(2.0)) ** 0.5)  # ~0.42466
 
 
+def fwhm_label(value):
+    """FWHM as bidspm writes it on disk (num2str): 6.0 -> 6, 6.5 stays; non-numbers unchanged."""
+    try:
+        as_float = float(value)
+    except (TypeError, ValueError):
+        return value
+    return int(as_float) if as_float.is_integer() else as_float
+
+
 def _smth_path(preproc_path: Path, fwhm) -> Path:
     return preproc_path.with_name(
-        preproc_path.name.replace("desc-preproc", f"desc-smth{fwhm}")
+        preproc_path.name.replace("desc-preproc", f"desc-smth{fwhm_label(fwhm)}")
     )
 
 
@@ -145,7 +154,7 @@ def missing_smoothed(fmriprep_dir, preproc_root, subject, task, space, fwhm, pre
         name = _smth_path(src, fwhm).name.removesuffix(".gz")
         if name in have or name + ".gz" in have:
             continue
-        before, after = name.split(f"desc-smth{fwhm}_", 1)
+        before, after = name.split(f"desc-smth{fwhm_label(fwhm)}_", 1)
         others = sorted({n[len(before) + len("desc-smth"):].split("_", 1)[0] for n in have
                          if n.startswith(before + "desc-smth") and n.endswith(("_" + after, "_" + after + ".gz"))})
         out.append((src, others))

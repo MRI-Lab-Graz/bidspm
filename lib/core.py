@@ -30,7 +30,7 @@ from .spm_standalone import (
 )
 from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
-from .fast_smooth import missing_smoothed, smooth_subjects_parallel
+from .fast_smooth import fwhm_label, missing_smoothed, smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
@@ -622,7 +622,7 @@ def check_subject_processed(
         preproc_dir = config.DERIVATIVES_DIR / "bidspm-preproc" / f"sub-{subject_label}"
         if not preproc_dir.exists():
             return False
-        pattern = f"*task-{task}*space-{config.SPACE}*desc-smth{config.FWHM}_bold.nii*"
+        pattern = f"*task-{task}*space-{config.SPACE}*desc-smth{fwhm_label(config.FWHM)}_bold.nii*"
         if not list(preproc_dir.rglob(pattern)):
             return False
         fmriprep_dir = getattr(config, "FMRIPREP_DIR", None)  # every run, not just one (multi-run subjects)
@@ -634,8 +634,10 @@ def check_subject_processed(
         if not stats_dir.exists():
             return False
         expected = _normalize_node_label(node_name) if node_name else None
-        pattern = f"task-{task}_space-{config.SPACE}_FWHM-{config.FWHM}*"
-        for stats_subdir in stats_dir.glob(pattern):
+        prefix = f"task-{task}_space-{config.SPACE}_FWHM-{fwhm_label(config.FWHM)}"
+        for stats_subdir in stats_dir.glob(prefix + "*"):
+            if stats_subdir.name != prefix and not stats_subdir.name.startswith(prefix + "_"):
+                continue  # FWHM-6 is not FWHM-60
             if not list(stats_subdir.glob("beta_*.nii*")):
                 continue
             match = re.search(r'_node-([^_]+)$', stats_subdir.name)
@@ -1524,7 +1526,7 @@ class Pipeline:
         mask, which inflates voxel count (and ReML/estimation runtime) for every GLM.
         """
         config = self.config
-        pattern = f"sub-{subject}_*task-{task}_*space-{config.SPACE}_desc-brain_mask.nii*"  # run-/acq- may sit between
+        pattern = f"sub-{subject}_*task-{task}_*space-{config.SPACE}_*desc-brain_mask.nii*"  # run-/acq-, res- may sit between
         for mask_src in sorted(config.FMRIPREP_DIR.rglob(pattern)):
             rel = mask_src.relative_to(config.FMRIPREP_DIR)
             is_gz = mask_src.name.endswith(".nii.gz")

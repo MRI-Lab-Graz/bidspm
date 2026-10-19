@@ -255,7 +255,7 @@ def _run_key(path):
 def _run_label(path):
     """'ses-1 run-2'-style name of the run for messages ('task-x' when nothing else tells runs apart)."""
     pairs = dict(_run_key(path))
-    shown = [f"{k}-{pairs[k]}" for k in ("ses", "acq", "run", "echo") if k in pairs]
+    shown = [f"{k}-{pairs[k]}" for k in ("ses", "acq", "ce", "rec", "dir", "run", "echo", "part") if k in pairs]
     return " ".join(shown) or f"task-{pairs.get('task', '?')}"
 
 
@@ -467,9 +467,10 @@ def _reads_outputs(actions):
 
 def _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, fmriprep_listing, actions, needed):
     """Outputs an earlier run must have left: smoothed images for stats without Smooth, subject results for dataset only."""
-    from lib.fast_smooth import missing_smoothed  # lazy: keeps module import light (scipy)
+    from lib.fast_smooth import fwhm_label, missing_smoothed  # lazy: keeps module import light (scipy)
     if not derivatives_dir or fwhm in (None, ""):
         return []
+    fwhm = fwhm_label(fwhm)
     actions = {str(a).lower() for a in actions or ()}
     out = []
     if "stats" in actions and "smooth" not in actions:
@@ -480,8 +481,10 @@ def _output_problems(fmriprep_dir, derivatives_dir, sub, task, space, fwhm, fmri
                              f"sub-{sub} {_run_label(src)} (task-{task}) has no smoothed image at FWHM {fwhm}{elsewhere}",
                              f"add Smooth to the actions or run smoothing first (FWHM {fwhm})", sub))
     if "dataset" in actions and "stats" not in actions:
-        dirs = [d for d in (Path(derivatives_dir) / "bidspm-stats" / f"sub-{sub}").glob(f"task-{task}_space-{space}_FWHM-{fwhm}*")
-                if (d / "SPM.mat").is_file()]
+        prefix = f"task-{task}_space-{space}_FWHM-{fwhm}"
+        dirs = [d for d in (Path(derivatives_dir) / "bidspm-stats" / f"sub-{sub}").glob(prefix + "*")
+                if d.name in (prefix, ) or d.name.startswith(prefix + "_")]  # FWHM-6 is not FWHM-60
+        dirs = [d for d in dirs if (d / "SPM.mat").is_file()]
         fix = "add Stats to the actions, or run the subject-level stats first"
         if not dirs:
             out.append(_item("subject_results_missing", ERROR,

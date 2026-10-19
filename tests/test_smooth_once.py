@@ -21,7 +21,7 @@ def _pipeline(tmp, **opts):
 def _fake_smoothed(p, subject="01"):
     d = p.config.DERIVATIVES_DIR / "bidspm-preproc" / f"sub-{subject}" / "func"
     d.mkdir(parents=True)
-    (d / f"sub-{subject}_task-motor_space-{p.config.SPACE}_desc-smth6.0_bold.nii").write_text("x")
+    (d / f"sub-{subject}_task-motor_space-{p.config.SPACE}_desc-smth6_bold.nii").write_text("x")
 
 
 class TestSmoothOnce(unittest.TestCase):

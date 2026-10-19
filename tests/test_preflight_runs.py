@@ -98,3 +98,10 @@ def test_runs_the_model_input_excludes_are_not_checked(tmp_path):
     unfiltered = run_preflight(**args, model_file=_model_with_input(tmp_path))
     errors = {c["id"] for c in unfiltered["checks"] if c["severity"] == "error"}
     assert {"run_unpaired", "preproc_missing", "confounds_missing", "smoothed_missing"} <= errors
+
+
+def test_run_label_names_dir_rec_part_and_ce():
+    from pathlib import Path
+    from lib.preflight import _run_label
+    name = "sub-01_ses-1_task-x_acq-mb_ce-gd_rec-n_dir-AP_run-2_echo-1_part-mag_bold.nii.gz"
+    assert _run_label(Path(name)) == "ses-1 acq-mb ce-gd rec-n dir-AP run-2 echo-1 part-mag"

@@ -25,7 +25,7 @@ def test_brain_mask_with_session_and_run_entities_is_copied(tmp_path):
     assert (p.config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "ses-1" / "func" / name).is_file()
 
 
-def _two_runs(p, smoothed=("1", "2"), fwhm=6.0):
+def _two_runs(p, smoothed=("1", "2"), fwhm=6):
     """fMRIPrep preproc for run-1 and run-2; bidspm-preproc smoothed images for the runs in `smoothed`."""
     import gzip
     space = p.config.SPACE
@@ -81,3 +81,23 @@ def test_stats_ignores_runs_the_model_input_excludes(tmp_path):
     with patch.object(p, "_run_container_action", return_value=True), patch.object(p, "_copy_brain_mask"), \
             patch("lib.core.find_new_spm_mats", return_value=[Path("SPM.mat")]):
         assert p._process_subject("01", "motor") is True, p.errors
+
+
+def test_stats_output_at_fwhm_60_is_not_fwhm_6(tmp_path):
+    from lib.core import check_subject_processed
+    p = _pipeline(tmp_path)
+    p.config.FWHM = 6
+    d = p.config.DERIVATIVES_DIR / "bidspm-stats" / "sub-01" / f"task-motor_space-{p.config.SPACE}_FWHM-60"
+    d.mkdir(parents=True)
+    (d / "beta_0001.nii").write_text("x")
+    assert check_subject_processed(p.config, "01", "motor", "stats") is False
+
+
+def test_brain_mask_with_a_res_entity_is_copied(tmp_path):
+    p = _pipeline(tmp_path)
+    func = p.config.FMRIPREP_DIR / "sub-01" / "func"
+    func.mkdir(parents=True)
+    name = "sub-01_task-motor_run-1_space-MNI152NLin2009cAsym_res-2_desc-brain_mask.nii"
+    (func / name).write_text("mask")
+    p._copy_brain_mask("01", "motor")
+    assert (p.config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "func" / name).is_file()

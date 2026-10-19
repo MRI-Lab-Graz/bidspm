@@ -94,3 +94,24 @@ def test_signature_tracks_fwhm_and_derivatives_only_when_earlier_outputs_are_rea
     a, b = {"FWHM": 6, "DERIVATIVES_DIR": "/d"}, {"FWHM": 8, "DERIVATIVES_DIR": "/d"}
     assert signature(a, "", "skip", ["stats"], True) != signature(b, "", "skip", ["stats"], True)
     assert signature(a, "", "skip", ["smooth", "stats"], True) == signature(b, "", "skip", ["smooth", "stats"], True)
+
+
+def test_float_fwhm_matches_bidspms_whole_number_naming(tmp_path):
+    """bidspm writes desc-smth6 / FWHM-6 for 6.0 (num2str); a float from the settings must not miss them."""
+    bids, fmri, args = _check(tmp_path, ["stats"], fwhm=6.0)
+    for run in ("1", "2"):
+        _smooth(fmri, tmp_path / "deriv", run, 6)
+    assert _items(run_preflight(**args), "smoothed_missing") == []
+
+
+def test_results_at_fwhm_60_do_not_count_for_fwhm_6(tmp_path):
+    bids, fmri, args = _check(tmp_path, ["dataset"], model=_dataset_model(tmp_path))
+    _results(tmp_path / "deriv", ["a"], fwhm=60)
+    assert len(_items(run_preflight(**args), "subject_results_missing")) == 1
+
+
+def test_smoothed_file_name_uses_the_whole_number_fwhm():
+    from pathlib import Path
+    from lib.fast_smooth import _smth_path
+    assert _smth_path(Path("sub-01_task-x_space-MNI_desc-preproc_bold.nii"), 6.0).name == \
+        "sub-01_task-x_space-MNI_desc-smth6_bold.nii"

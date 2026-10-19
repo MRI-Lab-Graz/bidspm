@@ -124,11 +124,11 @@ class TestCoreHelpers(unittest.TestCase):
             (bids_func / "sub-01_task-motor_events.tsv").write_text("onset\tduration\n", encoding="utf-8")
             (bids_func / "sub-01_task-rest_events.tsv").write_text("onset\tduration\n", encoding="utf-8")
 
-            smooth_file = config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-smth6.0_bold.nii.gz"
+            smooth_file = config.DERIVATIVES_DIR / "bidspm-preproc" / "sub-01" / "sub-01_task-motor_space-MNI152NLin2009cAsym_desc-smth6_bold.nii.gz"
             smooth_file.parent.mkdir(parents=True, exist_ok=True)
             smooth_file.write_text("", encoding="utf-8")
 
-            stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / "sub-01" / "task-motor_space-MNI152NLin2009cAsym_FWHM-6.0_node-subjectLevel"
+            stats_dir = config.DERIVATIVES_DIR / "bidspm-stats" / "sub-01" / "task-motor_space-MNI152NLin2009cAsym_FWHM-6_node-subjectLevel"
             stats_dir.mkdir(parents=True, exist_ok=True)
             (stats_dir / "beta_0001.nii").write_text("", encoding="utf-8")
 

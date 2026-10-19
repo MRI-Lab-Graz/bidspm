@@ -47,7 +47,7 @@ class TestSmthPath(unittest.TestCase):
         preproc = Path("/deriv/sub-01_task-motor_desc-preproc_bold.nii")
         self.assertEqual(
             fs._smth_path(preproc, 6.0).name,
-            "sub-01_task-motor_desc-smth6.0_bold.nii",
+            "sub-01_task-motor_desc-smth6_bold.nii",
         )
 
 
@@ -92,7 +92,7 @@ class TestSmoothOneFile(unittest.TestCase):
             out_path = fs.smooth_one_file(preproc_path, 6.0, derivatives_root)
 
             self.assertTrue(out_path.exists())
-            self.assertIn("desc-smth6.0", out_path.name)
+            self.assertIn("desc-smth6_", out_path.name)  # bidspm (num2str) writes 6 for 6.0
 
             out_img = nib.load(str(out_path))
             in_img = nib.load(str(preproc_path))
