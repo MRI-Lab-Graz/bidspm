@@ -516,3 +516,19 @@ class TestLegacySaveRefusals(FidelityCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRunOptionsPersist(FidelityCase):
+    def test_ticked_actions_survive_a_reload_without_save_and_run(self):
+        # walkthrough finding 9: Dataset was ticked, the page reloaded, the run went out without it
+        self.new_project(actions=["smooth", "stats"])
+        page = self.open_analysis("options")
+        page.check("#dataset")
+        for _ in range(50):  # the save is fire-and-forget after the tick
+            if "dataset" in self.project_config()["actions"]:
+                break
+            page.wait_for_timeout(100)
+        self.assertIn("dataset", self.project_config()["actions"])
+        page.reload(wait_until="load")
+        page.wait_for_function("document.body.dataset.ready === '1'")
+        self.assertTrue(page.is_checked("#dataset"))

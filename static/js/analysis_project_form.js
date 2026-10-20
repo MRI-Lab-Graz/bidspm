@@ -250,6 +250,11 @@ function setupStaticListeners() {
         };
     });
 
+    // Run options are saved with the project as soon as they change: ticking Dataset and reloading must not drop it
+    document.querySelectorAll('input[name="action"], #pilot').forEach(el => el.addEventListener('change', () => {
+        if (hasProject && currentProjectId) saveProjectConfig().catch((err) => console.error('Saving the run options failed:', err));
+    }));
+
     // BMS checkbox show/hide model file list
     const bmsCheckbox = document.getElementById('bms');
     if (bmsCheckbox) {
