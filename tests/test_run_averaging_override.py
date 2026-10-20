@@ -46,7 +46,7 @@ def _contrasts(subject_node, run=RUN, names=NAMES, ses=None, node="subject_level
         script = ("bidspm('init'); bm = BidsModel('file', '/t/model.json'); "
                   f"SPM.xX.name = {cells}; SPM.xX.X = zeros(4, {len(names)}); {sess}bm.SPM = SPM; "
                   f"con = specifyContrasts(bm, SPM, '{node}'); "
-                  "for i = 1:numel(con), printf('CON %s %s\\n', con(i).name, sprintf('%.10g ', con(i).C)); end")
+                  "for i = 1:numel(con), printf('CON %s %s\\n', con(i).name, sprintf('%.10g ', con(i).C')); end")
         mounts = []
         for f in OVR.glob("*.m") if mount else ():
             mounts += ["-v", f"{f}:{IN_IMAGE}/{f.name}:ro"]
@@ -143,3 +143,30 @@ class TestRunAveraging(unittest.TestCase):
                 "Model": {"Type": "glm", "X": [1]}, "DummyContrasts": {"Test": "t"}}
         con = _contrasts(node, run, names, ses={1: "1", 2: "1", 3: "2"}, node="session_level")
         self.assertEqual(con["ca_ses-1"], [0.5, 0.5, 0, 0])
+
+
+    def test_f_contrast_keeps_one_row_per_run_regressor_unaveraged(self):
+        # a in runs 1-3: three rows of 1 (printed row-major; C is 3x6), not averaged to 1/3
+        con = _contrasts({**SUBJECT, "Contrasts": [{"Name": "fa", "ConditionList": ["trial_type.a"],
+                                                    "Weights": [[1]], "Test": "F"}]})
+        self.assertEqual(con["fa"], [1, 0, 0, 0, 0, 0,  0, 0, 1, 0, 0, 0,  0, 0, 0, 0, 1, 0])
+
+    def test_f_contrast_over_two_conditions_has_row_per_run_regressor(self):
+        con = _contrasts({**SUBJECT, "Contrasts": [{"Name": "fab", "ConditionList": ["trial_type.a", "trial_type.b"],
+                                                    "Weights": [[1, 0], [0, 1]], "Test": "F"}]})
+        rows = [con["fab"][i:i + 6] for i in range(0, len(con["fab"]), 6)]
+        self.assertEqual(len(rows), 5)  # 3 a-regressors + 2 b-regressors
+        for r in rows:
+            self.assertEqual(sorted(r), [0, 0, 0, 0, 0, 1])
+        self.assertEqual([sum(col) for col in zip(*rows)], [1, 1, 1, 1, 1, 0])
+
+    def test_cross_session_contrast_unequal_runs_is_zero_sum_with_two_conditions(self):
+        # ses-1 has runs 1-2, ses-2 run 3; a and b both present: every sub-contrast sums to 0
+        names = ["Sn(1) a*bf(1)", "Sn(1) b*bf(1)", "Sn(2) a*bf(1)", "Sn(2) b*bf(1)", "Sn(3) a*bf(1)", "Sn(3) b*bf(1)", "Sn(1) constant"]
+        run = {**RUN, "Contrasts": [{"Name": "ab", "ConditionList": ["trial_type.a", "trial_type.b"],
+                                     "Weights": [1, -1], "Test": "t"}]}
+        con = _contrasts({**SUBJECT, "Model": {"Type": "glm", "X": ["session", 1]},
+                          "Contrasts": [{"Name": "s1_gt_s2", "ConditionList": ["1", "2"], "Weights": [1, -1], "Test": "t"}]},
+                         run, names, ses={1: "1", 2: "1", 3: "2"})
+        self.assertAlmostEqual(sum(con["s1_gt_s2-ab"]), 0, places=6)
+        self.assertEqual(con["s1_gt_s2-ab"], [0.5, -0.5, 0.5, -0.5, -1, 1, 0])
