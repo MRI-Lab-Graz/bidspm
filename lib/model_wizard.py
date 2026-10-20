@@ -79,10 +79,13 @@ def second_level_nodes(contrasts, source="run_level"):
       getDummyContrastsList(bm, 'dataset'), which without it filters the Run HRF variables and fails the same way.
     """
     names = [c["Name"] for c in contrasts]
+    # bidsResults (the SPM Results export) reads this per node; without it it only logs a warning and writes nothing
+    software = {"bidspm": {"Results": [{"name": list(names)}]}}
     nodes = [
         {"Level": "Subject", "Name": "subject_level", "GroupBy": ["subject", "contrast"],
-         "Model": {"Type": "glm", "X": [1]}, "Contrasts": copy.deepcopy(contrasts)},
-        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"], "Model": {"Type": "glm", "X": [1]},
+         "Model": {"Type": "glm", "X": [1], "Software": copy.deepcopy(software)}, "Contrasts": copy.deepcopy(contrasts)},
+        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"],
+         "Model": {"Type": "glm", "X": [1], "Software": copy.deepcopy(software)},
          "DummyContrasts": {"Test": "t", "Contrasts": names}},
     ]
     edges = [{"Source": source, "Destination": "subject_level"},

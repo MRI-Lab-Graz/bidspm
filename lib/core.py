@@ -1006,6 +1006,13 @@ def _blas_thread_env(workers: int, cpus: Optional[int]) -> Dict[str, str]:
     return {"OPENBLAS_NUM_THREADS": n, "OMP_NUM_THREADS": n, "MKL_NUM_THREADS": n}
 
 
+def _has_results_spec(model):
+    nodes = model.get("Nodes") if isinstance(model, dict) else None
+    return any(isinstance(n, dict) and isinstance(n.get("Model"), dict) and isinstance(n["Model"].get("Software"), dict)
+               and isinstance(n["Model"]["Software"].get("bidspm"), dict) and n["Model"]["Software"]["bidspm"].get("Results")
+               for n in nodes or [])
+
+
 @dataclass
 class PipelineOptions:
     """Options controlling pipeline execution."""
@@ -1187,6 +1194,13 @@ class Pipeline:
             self.model_file_path = temp_path
             self.warnings.append(f"Execution model sanitized: {'; '.join(execution_fixes)}")
         
+        if self.options.run_results and not _has_results_spec(model_content):
+            msg = (
+                "SPM Results export is on but the model has no Results spec (Model.Software.bidspm.Results on a "
+                "Subject/Dataset node): bidspm will write no csv/png. Rebuild the model with the wizard or add one.")
+            self.warnings.append(msg)
+            self._log(f"WARNING: {msg}")  # at the start, where the GUI terminal shows it; self.warnings print at the end
+
         # Validate model
         if not self.options.skip_validation:
             result = validate_bids_model(self.model_file_path)

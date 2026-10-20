@@ -101,13 +101,27 @@ RUN_CONTRASTS = [{"Name": "a", "ConditionList": ["trial_type.a"], "Weights": [1]
                  {"Name": "a_gt_b", "ConditionList": ["trial_type.a", "trial_type.b"], "Weights": [1, -1], "Test": "t"}]
 
 
+RESULTS_ALL = {"bidspm": {"Results": [{"name": ["a", "a_gt_b"]}]}}  # bidsResults reads Model.Software.bidspm.Results per node
+
+
+def test_subject_and_dataset_nodes_ask_for_results_of_every_contrast():
+    # without it the "SPM Results export" logs 'Specify node names and levels in "opt.results"' and writes nothing
+    model = build_model(choices(), SCAN)["model"]
+    run, subject, dataset = model["Nodes"]
+    names = [c["Name"] for c in run["Contrasts"]]
+    assert "bidspm" not in run["Model"]["Software"]
+    for node in (subject, dataset):
+        assert node["Model"]["Software"] == {"bidspm": {"Results": [{"name": names}]}}
+
+
 def test_second_level_structure_is_the_one_verified_in_bidspm():
     # Golden: this exact structure ran to a dataset-level SPM.mat per contrast in bidspm 4.0.0 (track W report, attempt C).
     nodes, edges = second_level_nodes(RUN_CONTRASTS)
     assert nodes == [
         {"Level": "Subject", "Name": "subject_level", "GroupBy": ["subject", "contrast"],
-         "Model": {"Type": "glm", "X": [1]}, "Contrasts": RUN_CONTRASTS},
-        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"], "Model": {"Type": "glm", "X": [1]},
+         "Model": {"Type": "glm", "X": [1], "Software": RESULTS_ALL}, "Contrasts": RUN_CONTRASTS},
+        {"Level": "Dataset", "Name": "dataset", "GroupBy": ["contrast"],
+         "Model": {"Type": "glm", "X": [1], "Software": RESULTS_ALL},
          "DummyContrasts": {"Test": "t", "Contrasts": ["a", "a_gt_b"]}},
     ]
     assert edges == [{"Source": "run_level", "Destination": "subject_level"},

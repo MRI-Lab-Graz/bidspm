@@ -284,6 +284,28 @@ class TestCoreHelpers(unittest.TestCase):
             self.assertIn("Execution model sanitized", pipeline.warnings[0])
             pipeline._cleanup_execution_model_file()
 
+    def _results_warnings(self, nodes, **opts):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            model_path = root / "m.json"
+            model_path.write_text(json.dumps({"Name": "m", "Nodes": nodes}), encoding="utf-8")
+            pipeline = core.Pipeline(core.PipelineOptions(actions=["stats"], model_file=str(model_path),
+                                                          skip_validation=True, **opts))
+            pipeline.config = _make_config(root)
+            self.assertTrue(pipeline._resolve_model_file())
+            pipeline._cleanup_execution_model_file()
+            return [w for w in pipeline.warnings if "Results" in w]
+
+    def test_results_export_warns_when_model_has_no_results_spec(self):
+        node = {"Level": "Subject", "Name": "s", "Model": {"Type": "glm", "X": [1]}}
+        self.assertIn("no Results", self._results_warnings([node], run_results=True)[0])
+        self.assertEqual(self._results_warnings([node]), [])  # not asked: silent
+
+    def test_results_export_silent_when_model_has_results_spec(self):
+        node = {"Level": "Subject", "Name": "s", "Model": {"Type": "glm", "X": [1],
+                "Software": {"bidspm": {"Results": [{"name": ["a"]}]}}}}
+        self.assertEqual(self._results_warnings([node], run_results=True), [])
+
     def test_pipeline_subject_selection_and_skip_logic(self):
         config = _make_config(Path(tempfile.mkdtemp()))
 
