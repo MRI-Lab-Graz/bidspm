@@ -78,8 +78,13 @@ const STEPS = ['task', 'recipes', 'nuisance', 'contrasts', 'review'];
             if (stepIndex(name) <= stepIndex(wiz.step)) goTo(name); else tryGoTo(name);
         }));
         $('wiz-back').addEventListener('click', () => goTo(STEPS[stepIndex(wiz.step) - 1]));
-        $('wiz-next').addEventListener('click', () => {
-            const why = blocker(wiz.step, true);
+        $('wiz-next').addEventListener('click', async () => {
+            let why = blocker(wiz.step, true);
+            if (why === UPDATING) {  // the edit's blur just started a rebuild: wait for it, then move on if it is fine
+                $('wiz-hint').textContent = why;
+                await whenBuilt();
+                why = blocker(wiz.step, true);
+            }
             if (!why) goTo(STEPS[stepIndex(wiz.step) + 1]); else $('wiz-hint').textContent = why;
         });
         renderStage();

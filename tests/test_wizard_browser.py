@@ -253,6 +253,18 @@ class TestWizardPage(unittest.TestCase):
         page.wait_for_function("document.getElementById('wiz-review').innerText.includes('a_vs_b')")
         self.assertEqual(self.errors, [])
 
+    def test_next_right_after_editing_a_comparison_row_still_moves_on(self):
+        # walkthrough finding 6: the first Next after an edit only said "Updating the preview" and stayed
+        page = self.open_wizard()
+        self.open_pairs(page)
+        page.click("#wiz-add-pair")
+        page.fill("#wiz-pair-table input", "a_vs_b")
+        page.locator("#wiz-pair-table select").nth(0).select_option("trial_type.a")
+        page.locator("#wiz-pair-table select").nth(1).select_option("trial_type.b")
+        page.click("#wiz-next")
+        page.wait_for_selector("[data-wiz-btn=review][aria-current=step]", timeout=5000)
+        self.assertEqual(self.errors, [])
+
     def test_event_values_in_options_are_text(self):
         page = self.browser.new_page()
 
@@ -620,8 +632,7 @@ class TestWizardPage(unittest.TestCase):
         self.assertEqual(self.visible_steps(page), ["task"])
         held.pop().continue_()
         page.wait_for_function("wiz.edit === wiz.built")
-        page.click("#wiz-next")
-        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")
+        page.wait_for_selector("[data-wiz-btn=recipes][aria-current=step]")  # the waiting Next click completes
 
     def test_back_then_incomplete_recipe_refuses_a_strip_jump(self):
         page = self.open_wizard()
@@ -733,18 +744,28 @@ class TestWizardPage(unittest.TestCase):
         self.assertIn("Build a valid preview first", page.inner_text("#wiz-check-hint"))
         self.assertTrue(page.is_visible("#wiz-check-hint"))
 
-    def test_check_is_disabled_while_the_preview_is_dirty_and_back_after(self):
-        page, *_ = self.readiness_page()
+    def test_check_right_after_editing_the_name_still_runs_on_the_new_preview(self):
+        # walkthrough finding 6: the blur-triggered rebuild disabled the button between mousedown and click
+        page, builds, starts, _ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
+        page.fill("#wiz-name", "renamed")
+        page.click("#wiz-check")
+        page.wait_for_function("document.querySelector('#wiz-readiness .preflight-verdict')")
+        self.assertEqual(starts[0]["model_json"]["Name"], "renamed")
+
+    def test_check_waits_for_a_dirty_preview_and_runs_once_it_is_built(self):
+        page, builds, starts, _ = self.readiness_page(sse(HEAD + [subject_step(1), done()]))
         self.assertTrue(page.is_enabled("#wiz-check"))
         held = []
         page.route("**/api/wizard/build", lambda r: held.append(r))
         with page.expect_request("**/api/wizard/build"):
             page.evaluate("document.querySelector('#wiz-conditions input[value=b]').click()")
-        self.assertTrue(page.is_disabled("#wiz-check"))
-        self.assertIn("Build a valid preview first", page.inner_text("#wiz-check-hint"))
+        page.click("#wiz-check")
+        self.assertEqual(starts, [])  # not started on the stale model
+        self.assertIn("Updating the preview", page.inner_text("#wiz-check-hint"))
         page.unroute("**/api/wizard/build")
         held.pop().continue_()
-        page.wait_for_function("!document.getElementById('wiz-check').disabled")
+        page.wait_for_function("document.querySelector('#wiz-readiness .preflight-verdict')")
+        self.assertEqual(len(starts), 1)
         self.assertEqual(page.inner_text("#wiz-check-hint"), "")
 
     def test_a_choice_change_after_a_finished_check_marks_it_out_of_date(self):

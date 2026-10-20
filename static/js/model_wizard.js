@@ -371,9 +371,11 @@ async function loadScan(task) {
 // ---- live readiness check (shared panel) ------------------------------------------------------------
 // The button needs a successful, current build: the job checks exactly the model shown in the summary.
 function updateCheck() {
-    const ok = !!(wiz.scan && wiz.model && !wiz.buildError && wiz.edit === wiz.built);
+    // Not disabled while the preview is only out of date: the blur of the edited field rebuilds between mousedown and
+    // click, which would drop that click. runCheck waits for the build instead.
+    const ok = !!(wiz.scan && wiz.model && !wiz.buildError);
     $('wiz-check').disabled = !ok;
-    $('wiz-check-hint').textContent = ok ? '' : 'Build a valid preview first';
+    $('wiz-check-hint').textContent = !ok ? 'Build a valid preview first' : wiz.edit !== wiz.built ? 'Updating the preview\u2026' : '';
     const target = $('wiz-readiness');
     const note = target.querySelector('.wiz-stale');
     const stale = wiz.checked !== null && wiz.checked !== wiz.edit;
@@ -384,7 +386,16 @@ function updateCheck() {
     } else if (!stale && note) note.remove();
 }
 
-function runCheck() {
+// Resolves once the preview matches the choices (build() sets wiz.built on success and on failure).
+async function whenBuilt() {
+    for (let i = 0; i < 600 && wiz.edit !== wiz.built; i++) await new Promise((r) => setTimeout(r, 50));
+}
+
+async function runCheck() {
+    if (wiz.edit !== wiz.built) {
+        await whenBuilt();
+        if ($('wiz-check').disabled || wiz.edit !== wiz.built) return;  // the build failed: the hint says so
+    }
     const run = ++wiz.runSeq;
     const edit = wiz.edit;
     wiz.checked = null;
