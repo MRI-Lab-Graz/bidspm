@@ -27,7 +27,7 @@ name = "bids-validator-deno"
 version = "3.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "deno" },
+    { name = "deno", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/51/a9/99478a37eac0b8a55f5608b193301adb5754bcba7b097a2404b7d411fb3d/bids_validator_deno-3.0.2.tar.gz", hash = "sha256:a1580cfa6f3320eff3551cb5af10916f4962a9365e76d39b9155a75470c8a45b", size = 142592, upload-time = "2026-09-18T16:26:33.88Z" }
 wheels = [
@@ -36,7 +36,7 @@ wheels = [
 
 [[package]]
 name = "bidspm-runner"
-version = "2.0.1"
+version = "2.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "flask" },
