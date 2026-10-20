@@ -159,6 +159,13 @@ function paramOptions(kind, recipe, current) {
     }
 }
 
+// SPM/bidspm names only take letters, digits, _ and -: start on a column/value that works (e.g. not "1.15"), else the first.
+const usableName = (v) => /^[A-Za-z0-9_-]+$/.test(v);
+function defaultChoice(kind, opts) {
+    const works = kind === 'column' ? (c) => (wiz.scan.columns[c] || []).some(usableName) : usableName;
+    return opts.find(works) ?? opts[0];
+}
+
 function paramField(recipe, spec) {
     const {name, kind} = spec;
     const id = `wiz-r${recipe.uid}-${name}`;
@@ -183,7 +190,7 @@ function paramField(recipe, spec) {
             for (const o of input.options) o.selected = (recipe.params[name] || []).includes(o.value);
             input.addEventListener('change', () => set([...input.selectedOptions].map((o) => o.value)));
         } else {
-            if (!opts.includes(recipe.params[name]) && opts.length && spec.required) recipe.params[name] = opts[0];
+            if (!opts.includes(recipe.params[name]) && opts.length && spec.required) recipe.params[name] = defaultChoice(kind, opts);
             input.value = recipe.params[name] ?? '';
             input.addEventListener('change', () => {
                 recipe.params[name] = input.value;

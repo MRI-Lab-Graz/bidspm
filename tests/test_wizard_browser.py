@@ -80,6 +80,24 @@ class TestWizardPage(unittest.TestCase):
         self.assertIn("invalid", page.inner_text("#wiz-review .wiz-warnings"))
         self.assertEqual(self.errors, [])
 
+    def test_valid_only_defaults_to_a_usable_column_and_value_without_an_error(self):
+        # walkthrough finding 7: the first column (ai_rating) and its first value (1.15) are unusable names: red at once
+        def decimals_first(route):
+            body = route.fetch().json()
+            body["columns"] = {"ai_rating": ["1.15", "2.5"], **body["columns"]}
+            route.fulfill(json=body)
+        page = self.browser.new_page()
+        page.route("**/api/wizard/scan", decimals_first)
+        page.goto(f"{self.base}/model-wizard/{self.project_id}", wait_until="networkidle")
+        page.wait_for_selector("#wiz-review .wiz-regressor")
+        add_recipe_card(page, "valid_only")
+        card = page.locator("#wiz-recipes .wiz-recipe")
+        card.locator("[data-param=condition]").select_option("item")
+        self.assertEqual(card.locator("[data-param=column]").input_value(), "response_validity")
+        self.assertIn(card.locator("[data-param=value]").input_value(), ("invalid", "valid"))
+        page.wait_for_function("wiz.edit === wiz.built")
+        self.assertEqual(page.inner_text("#wiz-error"), "")
+
     def test_unchecking_a_condition_excludes_it(self):
         page = self.open_wizard()
         page.uncheck("#wiz-conditions input[value=b]")
