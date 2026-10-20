@@ -1,4 +1,5 @@
 import tempfile
+from lib.config import DEFAULT_DOCKER_IMAGE
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -194,6 +195,7 @@ class TestNewFeatures(unittest.TestCase):
                 "Templates",
                 "Static assets",
                 "Config schema",
+                f"Docker image ({DEFAULT_DOCKER_IMAGE})",
                 "Waitress server",
                 "REST API",
                 "Workflow routes",
