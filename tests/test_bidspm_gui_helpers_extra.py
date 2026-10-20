@@ -40,6 +40,14 @@ class TestStartupPreflight(unittest.TestCase):
             self.assertFalse(by_label["Static assets"])
             self.assertFalse(by_label["Config schema"])
 
+    def test_startup_check_reports_a_missing_docker_image(self):
+        with patch("lib.preflight._image_present", lambda image: False), patch("shutil.which", lambda name: "/usr/bin/" + name):
+            by_label = {c["label"]: c["ready"] for c in collect_startup_preflight_checks()}
+        image = next(label for label in by_label if label.startswith("Docker image"))
+        self.assertFalse(by_label[image])
+        with patch("lib.preflight._image_present", lambda image: True), patch("shutil.which", lambda name: "/usr/bin/" + name):
+            self.assertTrue(next(c["ready"] for c in collect_startup_preflight_checks() if c["label"] == image))
+
     def test_print_startup_preflight_report_returns_overall_readiness(self):
         buf = io.StringIO()
         with redirect_stdout(buf):

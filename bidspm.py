@@ -322,6 +322,12 @@ def handle_check_environment():
     else:
         print("    Apptainer: ❌ Not found")
 
+    if docker:
+        from lib.config import DEFAULT_DOCKER_IMAGE
+        from lib.preflight import check_image
+        missing = check_image("docker", DEFAULT_DOCKER_IMAGE)
+        print(f"    Image {DEFAULT_DOCKER_IMAGE}: " + (f"❌ {missing[0]['message'].split(' is ')[1]}. {missing[0]['fix']}" if missing else "✅ Present"))
+
     if docker or apptainer:
         print("\n  All features available via container execution")
 

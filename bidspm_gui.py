@@ -47,6 +47,8 @@ from lib import (
     check_subject_processed,
     validate_bids_model,
 )
+from lib.config import DEFAULT_DOCKER_IMAGE
+from lib.preflight import check_image
 from lib.project_manager import project_manager, GLOBAL_LOG_DIR
 from lib.safe_paths import has_nul, in_bids_tree
 from webapp.web_config_fs_api import register_config_fs_routes
@@ -247,6 +249,11 @@ def collect_startup_preflight_checks(app_root: Path = APP_ROOT) -> List[Dict[str
         {
             'label': 'Config schema',
             'ready': (app_root / 'config' / 'config_schema.json').is_file(),
+        },
+        {
+            # a docker run cannot start without it; the readiness check reports the same (lib.preflight.check_image)
+            'label': f'Docker image ({DEFAULT_DOCKER_IMAGE})',
+            'ready': not check_image('docker', DEFAULT_DOCKER_IMAGE),
         },
         {
             'label': 'Waitress server',

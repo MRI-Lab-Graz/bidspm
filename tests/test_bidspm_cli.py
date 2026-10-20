@@ -71,3 +71,25 @@ class TestBidspmCli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckEnvironmentImage(unittest.TestCase):
+    def _output(self, present):
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with patch("lib.preflight._image_present", lambda image: present), \
+             patch("shutil.which", lambda name: "/usr/bin/" + name), \
+             patch("subprocess.run", return_value=type("R", (), {"returncode": 0})()), \
+             redirect_stdout(buf), self.assertRaises(SystemExit):
+            bidspm.handle_check_environment()
+        return buf.getvalue()
+
+    def test_reports_a_missing_image(self):
+        out = self._output(False)
+        self.assertIn("not on this machine", out)
+
+    def test_reports_a_present_image(self):
+        out = self._output(True)
+        self.assertIn("Image", out)
+        self.assertNotIn("not on this machine", out)
