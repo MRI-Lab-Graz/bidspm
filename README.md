@@ -437,7 +437,7 @@ allow-list of data-dependent notices (contrasts without significant voxels, miss
 
 1. **Prepare configuration files**: Ensure that `config.json` and `container.json` are correctly configured.
 
-2. **Create BIDS-StatsModel**: Create a BIDS-StatsModel JSON file in `{WD}/derivatives/models/`
+2. **Create BIDS-StatsModel**: Create a BIDS-StatsModel JSON file in the `models/` folder of your Derivatives folder (the model wizard saves there; if you left Derivatives empty it is the working directory, so `{WD}/models/`)
 
 3. **Run pipeline**:
 

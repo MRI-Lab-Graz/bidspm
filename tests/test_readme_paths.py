@@ -28,3 +28,8 @@ def test_readme_paths_exist():
             if not (ROOT / rel).exists():
                 missing.append(rel)
     assert not missing, f"README mentions missing paths: {sorted(missing)}"
+
+
+def test_readme_models_folder_matches_the_wizard_default():
+    # webapp/web_pages.wizard_models_dir: <derivatives or working folder>/models, never <WD>/derivatives/models
+    assert "derivatives/models" not in (ROOT / "README.md").read_text()
