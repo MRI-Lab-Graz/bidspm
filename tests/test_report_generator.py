@@ -255,3 +255,48 @@ class TestGenerateReports(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Balance(__import__("html.parser", fromlist=["HTMLParser"]).HTMLParser):
+    VOID = {"meta", "link", "br", "hr", "img", "input"}
+
+    def __init__(self):
+        super().__init__()
+        self.stack, self.errors = [], []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "main" and "nav" in self.stack:
+            self.errors.append("<main> inside <nav>")
+        if tag not in self.VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if not self.stack or self.stack[-1] != tag:
+            self.errors.append(f"</{tag}> closes <{self.stack[-1] if self.stack else None}>")
+            if tag in self.stack:
+                while self.stack.pop() != tag:
+                    pass
+        else:
+            self.stack.pop()
+
+
+class TestSubjectTemplate(unittest.TestCase):
+    def _render(self, boilerplate):
+        with TemporaryDirectory() as tmp:
+            derivatives = Path(tmp) / "derivatives"
+            (derivatives / "bidspm-stats" / "sub-01").mkdir(parents=True)
+            (derivatives / "reports").mkdir()
+            (derivatives / "reports" / "m.md").write_text(boilerplate, encoding="utf-8")
+            rg.generate_reports(derivatives, tasks=["motor"])
+            return (derivatives / "reports" / "sub-01_report.html").read_text(encoding="utf-8")
+
+    def test_subject_page_tags_are_balanced_and_main_is_not_in_the_sidebar(self):
+        parser = _Balance()
+        parser.feed(self._render("x"))
+        self.assertEqual(parser.errors, [])
+        self.assertEqual(parser.stack, [])
+
+    def test_unrendered_mustache_placeholders_in_the_methods_text_are_filled(self):
+        html = self._render("on a x86_64 computer ({{version}}) in a {{designType}} design with {{other}}.")
+        self.assertNotIn("{{", html)
+        self.assertIn("on a x86_64 computer in a event-related design", html)

@@ -267,9 +267,17 @@ def _collect_subject(sub_label: str, derivatives: Path, tasks: List[str], model_
             if md in seen_boilerplate:
                 continue
             seen_boilerplate.add(md)
-            subject.boilerplate += _read_text_safe(md) + "\n\n"
+            subject.boilerplate += _fill_placeholders(_read_text_safe(md)) + "\n\n"
 
     return subject
+
+
+def _fill_placeholders(text: str) -> str:
+    """bidspm's boilerplate leaves {{version}} / {{designType}} unrendered when its options lack them (seen on the
+    Octave image): fill the design type with bidspm's default ('event' -> event-related), drop the rest."""
+    text = text.replace("{{designType}}", "event-related")
+    text = re.sub(r" ?\(\{\{[^{}]*\}\}\)", "", text)
+    return re.sub(r" ?\{\{[^{}]*\}\}", "", text)
 
 
 # ---------------------------------------------------------------------------
