@@ -138,6 +138,12 @@ def _fmriprep_to_preproc_path(fmriprep_path: Path, fmriprep_root: Path, preproc_
     return target
 
 
+def fwhm_stats_dirs(stats_dir, task, space, fwhm):
+    """bidspm-stats subfolders of this task/space/FWHM (FWHM-6 is not FWHM-60)."""
+    prefix = f"task-{task}_space-{space}_FWHM-{fwhm_label(fwhm)}"
+    return [d for d in Path(stats_dir).glob(prefix + "*") if d.name == prefix or d.name.startswith(prefix + "_")]
+
+
 def missing_smoothed(fmriprep_dir, preproc_root, subject, task, space, fwhm, preproc=None, keep=None):
     """[(fMRIPrep preproc run, FWHMs it IS smoothed at)] for every run of sub/task without a desc-smth{fwhm} image.
 

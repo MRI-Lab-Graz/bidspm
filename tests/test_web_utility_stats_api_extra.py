@@ -5,25 +5,25 @@ from unittest.mock import patch
 
 import bidspm_gui
 from bidspm_gui import app as flask_app
+from lib.fast_smooth import fwhm_label
 from lib.project_manager import ProjectManager
 from webapp.web_utility_stats_api import (
     _build_participants_status_report,
-    _normalize_fwhm,
 )
 from bidspm_gui import _normalize_token_list
 
 
 class TestNormalizeFwhm(unittest.TestCase):
     def test_whole_number_float_becomes_int(self):
-        self.assertEqual(_normalize_fwhm(6.0), 6)
-        self.assertIsInstance(_normalize_fwhm(6.0), int)
+        self.assertEqual(fwhm_label(6.0), 6)
+        self.assertIsInstance(fwhm_label(6.0), int)
 
     def test_fractional_value_stays_float(self):
-        self.assertEqual(_normalize_fwhm(6.5), 6.5)
+        self.assertEqual(fwhm_label(6.5), 6.5)
 
     def test_non_numeric_value_passed_through_unchanged(self):
-        self.assertEqual(_normalize_fwhm("not-a-number"), "not-a-number")
-        self.assertIsNone(_normalize_fwhm(None))
+        self.assertEqual(fwhm_label("not-a-number"), "not-a-number")
+        self.assertIsNone(fwhm_label(None))
 
 
 class TestBuildParticipantsStatusReport(unittest.TestCase):

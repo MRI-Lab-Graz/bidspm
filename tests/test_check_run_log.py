@@ -16,6 +16,8 @@ Warning: OpenGL Startup options have been removed.
 warning: No voxels survive height threshold at u=3.1
    Subjects failed: 0
 [08:24:48] bidspm - WARNING\t\t\t\toverwriteDir
+[08:25:01] bidspm - WARNING\t\t\t\tgetInclusiveMask
+ More than 1 mask image found in: /x/sub-1/func
 """
 
 

@@ -30,7 +30,7 @@ from .spm_standalone import (
 )
 from .config import Config, ContainerConfig, load_config, load_container_config, resolve_container_config
 from .model_path import resolve_model_file
-from .fast_smooth import fwhm_label, missing_smoothed, smooth_subjects_parallel
+from .fast_smooth import fwhm_label, fwhm_stats_dirs, missing_smoothed, smooth_subjects_parallel
 from .utils import (
     log, log_debug, log_error, log_error_non_fatal,
     generate_log_filename, check_command, check_docker_availability,
@@ -634,10 +634,7 @@ def check_subject_processed(
         if not stats_dir.exists():
             return False
         expected = _normalize_node_label(node_name) if node_name else None
-        prefix = f"task-{task}_space-{config.SPACE}_FWHM-{fwhm_label(config.FWHM)}"
-        for stats_subdir in stats_dir.glob(prefix + "*"):
-            if stats_subdir.name != prefix and not stats_subdir.name.startswith(prefix + "_"):
-                continue  # FWHM-6 is not FWHM-60
+        for stats_subdir in fwhm_stats_dirs(stats_dir, task, config.SPACE, config.FWHM):
             if not list(stats_subdir.glob("beta_*.nii*")):
                 continue
             match = re.search(r'_node-([^_]+)$', stats_subdir.name)

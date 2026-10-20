@@ -11,7 +11,8 @@ SUSPECT = re.compile(r"error|warning|traceback|exception|fail|not found|denied|c
 ALLOWED = [re.compile(p) for p in (
     r"^warning: ?$",  # bare header printed before a bidspm WARNING block
     r"bidspm - WARNING\s+(labelActivations|setBatchSubjectLevelGLMSpec|setBatchGoodnessOfFit"
-    r"|setBatchInformationCriteria|checkMaskOrUnderlay|overwriteDir)\b",  # overwriteDir: re-run over an existing output folder
+    r"|setBatchInformationCriteria|checkMaskOrUnderlay|overwriteDir|getInclusiveMask)\b",  # overwriteDir: re-run over an existing folder; getInclusiveMask: several runs, run-1 mask used
+    r"More than 1 mask image found",
     r"No voxels survive (height|extent) threshold",
     r"Could not find specified file for mask/montage",  # checkMaskOrUnderlay falls back to the SPM mask
     r"OpenGL Startup options have been removed",  # MATLAB Runtime R2026a start-up notice (SPM standalone)

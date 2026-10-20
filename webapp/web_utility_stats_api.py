@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List
 
 from flask import Flask, jsonify, request
 
+from lib.fast_smooth import fwhm_label
+
 
 PathResolver = Callable[[str], str]
 TokenNormalizer = Callable[[Any], List[str]]
@@ -14,20 +16,6 @@ SubjectNormalizer = Callable[[Any], List[str]]
 ProjectManagerGetter = Callable[[], Any]
 SubjectProcessedChecker = Callable[[Any, str, str, str], bool]
 
-
-def _normalize_fwhm(value: Any) -> Any:
-    """Coerce FWHM to an int when it's a whole number.
-
-    bidspm writes ``desc-smthN`` / ``FWHM-N`` on disk using whatever numeric
-    literal was in the settings JSON -- a whole-number FWHM (the common case)
-    is written without a decimal point (``smth9``, not ``smth9.0``). Embedding
-    a Python float here would silently never match those paths.
-    """
-    try:
-        as_float = float(value)
-    except (TypeError, ValueError):
-        return value
-    return int(as_float) if as_float.is_integer() else as_float
 
 
 def _sort_subject_ids(values: List[str]) -> List[str]:
@@ -441,7 +429,7 @@ def register_utility_stats_routes(
             space = str(data.get('space') or '').strip() or (config.space if config else '') or 'MNI152NLin2009cAsym'
 
             raw_fwhm = data.get('fwhm') if data.get('fwhm') not in (None, '') else (config.fwhm if config else 6)
-            fwhm = _normalize_fwhm(raw_fwhm)
+            fwhm = fwhm_label(raw_fwhm)
 
             report = _build_participants_status_report(
                 bids_dir=bids_dir,
