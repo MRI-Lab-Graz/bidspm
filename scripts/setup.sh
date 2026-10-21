@@ -360,13 +360,13 @@ main() {
     echo "🚀 To activate the environment:"
     echo "  source ./scripts/activate_bidspm.sh"
     echo ""
-    echo "🧪 To test the installation:"
-    echo "  python3 bidspm.py --pilot"
+    echo "🧪 To start the GUI:"
+    echo "  ./scripts/start_gui.sh"
     echo ""
-    echo "🎯 Usage examples:"
-    echo "  - Development/Piloting: python bidspm.py --pilot"
+    echo "🎯 Command line (after activating the environment):"
+    echo "  - Piloting: python bidspm.py --pilot"
     echo "  - Production: python bidspm.py -s your_config.json"
-    echo "  - Auto-detection: Script will automatically select the right container"
+    echo "  - Auto-detection: the script selects the container itself"
     echo ""
 }
 
