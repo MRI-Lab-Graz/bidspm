@@ -149,8 +149,9 @@ Things to know while it runs:
 
 ## 8. Optional: SPM Results export
 
-The "SPM Results export" switch (slower, optional) makes the stats step also run SPM's Results step: thresholded results
-tables (csv), images (png) and montages per contrast. It is off by default because it costs about a third of the per-subject
+The "SPM Results export" switch (slower, optional) makes the stats step also run SPM's Results step: a thresholded results
+table (csv) per contrast, at subject and dataset level (FWE p < 0.05 by default). No png images or montages are written in
+this container (SPM cannot draw headless here, and the NIDM export needs Java, which the image does not contain). It is off by default because it costs about a third of the per-subject
 time on short runs. The Report action needs it and turns it on by itself.
 
 Tick it when you want SPM's own thresholded tables and pictures per contrast, or the HTML report. Leave it off when you
@@ -162,10 +163,8 @@ brain-region names, and the readiness check says so: "The report's results table
 spm-bids-runner image includes no atlas (licence reasons)". That is expected. If you need labels, build a derived image
 with an atlas you are allowed to use (README, "Atlases").
 
-What we saw with this wizard-built model: with the switch on (and Report ticked), the run log showed, for each subject and
-for the dataset level, `WARNING bidsResults: Specify node names and levels in "opt.results"` and no results tables or
-pictures appeared anywhere in the output. The report was still generated (below). So with a wizard model the export currently
-does not produce files; we have not found out why beyond that log line. The screenshots of this second run:
+Checked on three study 141 subjects: the export adds roughly 25-40 s per subject and about 1-1.5 min for the dataset level, and
+writes the csv tables under `bidspm-stats` (subject) and `bidspm-stats/derivatives/bidspm-groupStats` (dataset). The screenshots of this second run:
 
 ![Options with Results export, Report and Force Rerun ticked](walkthrough/16_options_results.png)
 

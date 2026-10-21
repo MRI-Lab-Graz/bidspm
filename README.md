@@ -6,6 +6,8 @@ A Python-based tool for running BIDS-StatsModel pipelines via containers (Docker
 
 BIDSPM Runner enables neuroimaging data analysis using the bidspm framework by leveraging containerized environments. The tool supports both Docker and Apptainer and can automatically perform smoothing and statistical analyses on BIDS-compliant datasets.
 
+**New here? Follow the [student walkthrough](docs/walkthrough.md)** (install, wizard, readiness check, run, results, with screenshots).
+
 ## Features
 
 - 🐳 **Container Support**: Works with Docker and Apptainer with enhanced security
@@ -422,6 +424,7 @@ Measured on a 32-core machine (study 132, 3 subjects in parallel, stats only): 8
   subjects at once. The GUI's **Suggest** button proposes a value from your CPU count and free memory (about 4 GB per worker).
 - **SPM Results export is opt-in** (`--results`, or the checkbox in the GUI): it costs about a third of the per-subject time
   on short runs. The `report` action needs it and turns it on automatically.
+  It writes csv result tables per contrast (subject and dataset level); no png or montage in this container (no Java, headless SPM).
 - **Readiness check.** A 100-subject study checks in about 3 s without the dataset validator and about 17 s with it; the
   validator dominates the time.
 - The BIDS dataset is validated by the first container only; the image ships no atlases, so nothing is unpacked per run.

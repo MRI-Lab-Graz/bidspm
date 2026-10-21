@@ -101,7 +101,7 @@ RUN_CONTRASTS = [{"Name": "a", "ConditionList": ["trial_type.a"], "Weights": [1]
                  {"Name": "a_gt_b", "ConditionList": ["trial_type.a", "trial_type.b"], "Weights": [1, -1], "Test": "t"}]
 
 
-RESULTS_ALL = {"bidspm": {"Results": [{"name": ["a", "a_gt_b"]}]}}  # bidsResults reads Model.Software.bidspm.Results per node
+RESULTS_ALL = {"bidspm": {"Results": [{"name": ["a", "a_gt_b"], "nidm": False, "png": False}]}}  # bidsResults reads Model.Software.bidspm.Results per node
 
 
 def test_subject_and_dataset_nodes_ask_for_results_of_every_contrast():
@@ -111,7 +111,7 @@ def test_subject_and_dataset_nodes_ask_for_results_of_every_contrast():
     names = [c["Name"] for c in run["Contrasts"]]
     assert "bidspm" not in run["Model"]["Software"]
     for node in (subject, dataset):
-        assert node["Model"]["Software"] == {"bidspm": {"Results": [{"name": names}]}}
+        assert node["Model"]["Software"] == {"bidspm": {"Results": [{"name": names, "nidm": False, "png": False}]}}
 
 
 def test_second_level_structure_is_the_one_verified_in_bidspm():

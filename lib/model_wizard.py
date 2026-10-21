@@ -80,7 +80,8 @@ def second_level_nodes(contrasts, source="run_level"):
     """
     names = [c["Name"] for c in contrasts]
     # bidsResults (the SPM Results export) reads this per node; without it it only logs a warning and writes nothing
-    software = {"bidspm": {"Results": [{"name": list(names)}]}}
+    # nidm/png off: the image has no Java (SPM's NIDM export crashes the run) and cannot draw png headless; csv tables are written
+    software = {"bidspm": {"Results": [{"name": list(names), "nidm": False, "png": False}]}}
     nodes = [
         {"Level": "Subject", "Name": "subject_level", "GroupBy": ["subject", "contrast"],
          "Model": {"Type": "glm", "X": [1], "Software": copy.deepcopy(software)}, "Contrasts": copy.deepcopy(contrasts)},
