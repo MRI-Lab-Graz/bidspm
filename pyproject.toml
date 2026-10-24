@@ -1,6 +1,6 @@
 [project]
 name = "bidspm-runner"
-version = "2.1.0"
+version = "2.1.1"
 description = "Run bidspm (SPM/Octave in containers) on BIDS datasets from a CLI or a local web GUI"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
     "scipy>=1.10.0",
     "matplotlib>=3.7.0",
     "flask>=2.3.0",
-    "waitress>=2.1.0",
+    "waitress>=2.1.1",
     "prism-validator>=1.20.0",
 ]
 

@@ -259,7 +259,7 @@ same actions and flag as Run, so a passing check is reused by the next Run when 
 Validator modes: `auto` (default: PRISM if the BIDS root has a `project.json`, otherwise plain BIDS), `prism` (PRISM + BIDS, forced), `bids` (plain BIDS), `skip`. `skip` disables only the dataset validator and
 is shown as a warning; all other checks still run. `prism-validator` is installed by `uv sync`.
 
-The version (2.1.0) comes from `pyproject.toml` and is shown in the GUI footer.
+The version (2.1.1) comes from `pyproject.toml` and is shown in the GUI footer.
 
 ## Analysis page stages
 
